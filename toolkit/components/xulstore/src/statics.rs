@@ -6,7 +6,7 @@ use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObser
 use nsstring::nsString;
 use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     ffi::CString,
     fs::{create_dir_all, remove_file, File},
     ops::DerefMut,
@@ -16,7 +16,7 @@ use std::{
 };
 use xpcom::{interfaces::nsIFile, XpCom};
 
-type XULStoreData = HashMap<String, HashMap<String, HashMap<String, String>>>;
+type XULStoreData = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
 lazy_static! {
     pub(crate) static ref PROFILE_DIR: RwLock<Option<PathBuf>> = {
@@ -119,7 +119,7 @@ fn maybe_migrate_data(store: SingleStore) {
         }
 
         let file = File::open(old_datastore.clone())?;
-        let json: HashMap<String, HashMap<String, HashMap<String, String>>> =
+        let json: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>> =
             serde_json::from_reader(file)?;
 
         let rkv_guard = RKV.read()?;
@@ -229,7 +229,7 @@ fn get_data() -> XULStoreResult<XULStoreData> {
         .ok_or(XULStoreError::Unavailable)?
         .read()?;
     let reader = rkv.read()?;
-    let mut all = HashMap::new();
+    let mut all = BTreeMap::new();
     let iterator = store.iter_start(&reader)?;
 
     for result in iterator {
@@ -252,8 +252,8 @@ fn get_data() -> XULStoreResult<XULStoreData> {
         }
         let (doc, id, attr) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
 
-        all.entry(doc).or_insert(HashMap::new())
-           .entry(id).or_insert(HashMap::new())
+        all.entry(doc).or_insert(BTreeMap::new())
+           .entry(id).or_insert(BTreeMap::new())
            .entry(attr).or_insert(value);
     }
 

@@ -27,12 +27,12 @@ function checkValueExists(uri, id, attr, exists) {
   Assert.equal(xulStore.hasValue(uri, id, attr), exists);
 }
 
-async function getIDs(uri) {
-  return Array.from(await XULStore.getIDs(uri)).sort();
+function getIDs(uri) {
+  return Array.from(XULStore.getIDs(uri)).sort();
 }
 
-async function getAttributes(uri, id) {
-  return Array.from(await XULStore.getAttributes(uri, id)).sort();
+function getAttributes(uri, id) {
+  return Array.from(XULStore.getAttributes(uri, id)).sort();
 }
 
 function checkArrays(a, b) {
@@ -49,14 +49,14 @@ add_task(async function setup() {
 add_task(async function testTruncation() {
   let dos = Array(8192).join("~");
   // Long id names should trigger an exception
-  await Assert.rejects(XULStore.setValue(browserURI, dos, "foo", "foo"), /NS_ERROR_ILLEGAL_VALUE/);
+  Assert.throws(() => xulStore.setValue(browserURI, dos, "foo", "foo"), /NS_ERROR_ILLEGAL_VALUE/);
 
   // Long attr names should trigger an exception
-  await Assert.rejects(XULStore.setValue(browserURI, "foo", dos, "foo"), /NS_ERROR_ILLEGAL_VALUE/);
+  Assert.throws(() => xulStore.setValue(browserURI, "foo", dos, "foo"), /NS_ERROR_ILLEGAL_VALUE/);
 
   // Long values should be truncated
   xulStore.setValue(browserURI, "dos", "dos", dos);
-  dos = await XULStore.getValue(browserURI, "dos", "dos");
+  dos = xulStore.getValue(browserURI, "dos", "dos");
   Assert.ok(dos.length == 4096);
   xulStore.removeValue(browserURI, "dos", "dos");
 });
@@ -82,22 +82,22 @@ add_task(async function testSetValue() {
   checkValue(browserURI, "side-bar", "width", "");
   xulStore.setValue(browserURI, "side-bar", "width", "1000");
   checkValue(browserURI, "side-bar", "width", "1000");
-  checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
-  checkArrays(["width"], await getAttributes(browserURI, "side-bar"));
+  checkArrays(["main-window", "side-bar"], getIDs(browserURI));
+  checkArrays(["width"], getAttributes(browserURI, "side-bar"));
 
   // Modify existing property
   checkValue(browserURI, "side-bar", "width", "1000");
   xulStore.setValue(browserURI, "side-bar", "width", "1024");
   checkValue(browserURI, "side-bar", "width", "1024");
-  checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
-  checkArrays(["width"], await getAttributes(browserURI, "side-bar"));
+  checkArrays(["main-window", "side-bar"], getIDs(browserURI));
+  checkArrays(["width"], getAttributes(browserURI, "side-bar"));
 
   // Add another attribute
   checkValue(browserURI, "side-bar", "height", "");
   xulStore.setValue(browserURI, "side-bar", "height", "1000");
   checkValue(browserURI, "side-bar", "height", "1000");
-  checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
-  checkArrays(["width", "height"], await getAttributes(browserURI, "side-bar"));
+  checkArrays(["main-window", "side-bar"], getIDs(browserURI));
+  checkArrays(["width", "height"], getAttributes(browserURI, "side-bar"));
 });
 
 add_task(async function testRemoveValue() {
@@ -106,14 +106,14 @@ add_task(async function testRemoveValue() {
   xulStore.removeValue(browserURI, "side-bar", "width");
   checkValue(browserURI, "side-bar", "width", "");
   checkValueExists(browserURI, "side-bar", "width", false);
-  checkArrays(["main-window", "side-bar"], await getIDs(browserURI));
-  checkArrays(["height"], await getAttributes(browserURI, "side-bar"));
+  checkArrays(["main-window", "side-bar"], getIDs(browserURI));
+  checkArrays(["height"], getAttributes(browserURI, "side-bar"));
 
   // Remove second attribute
   checkValue(browserURI, "side-bar", "height", "1000");
   xulStore.removeValue(browserURI, "side-bar", "height");
   checkValue(browserURI, "side-bar", "height", "");
-  checkArrays(["main-window"], await getIDs(browserURI));
+  checkArrays(["main-window"], getIDs(browserURI));
 
   // Removing an attribute that doesn't exists shouldn't fail
   xulStore.removeValue(browserURI, "main-window", "bar");
@@ -127,22 +127,22 @@ add_task(async function testRemoveValue() {
 
   // Remove all attributes in browserURI
   xulStore.removeValue(browserURI, "addon-bar", "collapsed");
-  checkArrays([], await getAttributes(browserURI, "addon-bar"));
+  checkArrays([], getAttributes(browserURI, "addon-bar"));
   xulStore.removeValue(browserURI, "main-window", "width");
   xulStore.removeValue(browserURI, "main-window", "height");
   xulStore.removeValue(browserURI, "main-window", "screenX");
   xulStore.removeValue(browserURI, "main-window", "screenY");
   xulStore.removeValue(browserURI, "main-window", "sizemode");
-  checkArrays([], await getAttributes(browserURI, "main-window"));
+  checkArrays([], getAttributes(browserURI, "main-window"));
   xulStore.removeValue(browserURI, "sidebar-title", "value");
-  checkArrays([], await getAttributes(browserURI, "sidebar-title"));
-  checkArrays([], await getIDs(browserURI));
+  checkArrays([], getAttributes(browserURI, "sidebar-title"));
+  checkArrays([], getIDs(browserURI));
 
   // Remove all attributes in aboutURI
   xulStore.removeValue(aboutURI, "prefCol", "ordinal");
   xulStore.removeValue(aboutURI, "prefCol", "sortDirection");
-  checkArrays([], await getAttributes(aboutURI, "prefCol"));
+  checkArrays([], getAttributes(aboutURI, "prefCol"));
   xulStore.removeValue(aboutURI, "lockCol", "ordinal");
-  checkArrays([], await getAttributes(aboutURI, "lockCol"));
-  checkArrays([], await getIDs(aboutURI));
+  checkArrays([], getAttributes(aboutURI, "lockCol"));
+  checkArrays([], getIDs(aboutURI));
 });

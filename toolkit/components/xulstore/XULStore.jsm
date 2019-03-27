@@ -8,7 +8,7 @@ const EXPORTED_SYMBOLS = ["XULStore"];
 
 // Get the nsIXULStore service to ensure that data is migrated from the old
 // store (xulstore.json) to the new one before we access the new store.
-Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
+const xulStore = Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
 
 const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
@@ -72,43 +72,31 @@ Services.obs.addObserver({
 
 const XULStore = {
   async setValue(docURI, id, attr, value) {
-    log("Saving " + attr + "=" + value + " for id=" + id + ", doc=" + docURI);
-
-    // bug 319846 -- don't save really long attributes or values.
-    if (id.length > 512 || attr.length > 512) {
-      throw Components.Exception("id or attribute name too long", Cr.NS_ERROR_ILLEGAL_VALUE);
-    }
-
-    if (value.length > 4096) {
-      Services.console.logStringMessage("XULStore: Warning, truncating long attribute value");
-      value = value.substr(0, 4096);
-    }
-
-    const gDatabase = await gDatabasePromise;
-    await gDatabase.put(makeKey(docURI, id, attr), value);
+    return xulStore.setValue(docURI, id, attr, value);
   },
 
   async hasValue(docURI, id, attr) {
-    log("has store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    return gDatabase.has(makeKey(docURI, id, attr));
+    return xulStore.hasValue(docURI, id, attr);
   },
 
   async getValue(docURI, id, attr) {
-    log("get store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    return await gDatabase.get(makeKey(docURI, id, attr)) || "";
+    return xulStore.getValue(docURI, id, attr);
   },
 
   async removeValue(docURI, id, attr) {
-    log("remove store value for id=" + id + ", attr=" + attr + ", doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    await gDatabase.delete(makeKey(docURI, id, attr));
+    return xulStore.removeValue(docURI, id, attr);
   },
 
+  /**
+   * Sets a value for a specified node's attribute, except in
+   * the case below (following the original XULDocument::persist):
+   * If the value is empty and if calling `hasValue` with the node's
+   * document and ID and `attr` would return true, then the
+   * value instead gets removed from the store (see Bug 1476680).
+   *
+   * @param node - DOM node
+   * @param attr - attribute to store
+   */
   async persist(node, attr) {
     if (!node.id) {
       throw new Error("Node without ID passed into persist()");
@@ -126,48 +114,19 @@ const XULStore = {
     // any time there's an empty attribute it gets removed from the
     // store. Since this is copying behavior from document.persist,
     // callers would need to be updated with that change.
-    if (!value && await this.hasValue(uri, node.id, attr)) {
-      await this.removeValue(uri, node.id, attr);
+    if (!value && xulStore.hasValue(uri, node.id, attr)) {
+      xulStore.removeValue(uri, node.id, attr);
     } else {
-      await this.setValue(uri, node.id, attr, value);
+      xulStore.setValue(uri, node.id, attr, value);
     }
   },
 
-  async getIDs(docURI) {
-    log("Getting ID enumerator for doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    const from = docURI.concat(SEPARATOR);
-    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
-    const enumerator = await gDatabase.enumerate(from, to);
-    const ids = new Set();
-
-    for (const {key} of enumerator) {
-      // IDs are the second of the three tab-delimited fields in the key.
-      const id = key.split(SEPARATOR)[1];
-      ids.add(id);
-    }
-
-    return ids;
+  getIDs(docURI) {
+    return new XULStoreEnumerator(xulStore.getIDsEnumerator(docURI));
   },
 
-  async getAttributes(docURI, id) {
-    log("Getting attribute enumerator for id=" + id + ", doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    const prefix = docURI.concat(SEPARATOR, id);
-    const from = prefix.concat(SEPARATOR);
-    const to = prefix.concat(SEPARATOR_NEXT_CHAR);
-    const enumerator = await gDatabase.enumerate(from, to);
-    const attrs = new Set();
-
-    for (const {key} of enumerator) {
-      // Attributes are the third of the three tab-delimited fields in the key.
-      const attr = key.split(SEPARATOR)[2];
-      attrs.add(attr);
-    }
-
-    return attrs;
+  getAttributes(docURI, id) {
+    return new XULStoreEnumerator(xulStore.getAttributeEnumerator(docURI, id));
   },
 
   async removeDocument(docURI) {
@@ -233,5 +192,25 @@ class XULStoreCache {
     }
     delete this.cache[id][attr];
     XULStore.removeValue(this.uri, id, attr).catch(Cu.reportError);
+  }
+}
+
+class XULStoreEnumerator {
+  constructor(enumerator) {
+    this.enumerator = enumerator;
+  }
+
+  hasMore() {
+    return this.enumerator.hasMore();
+  }
+
+  getNext() {
+    return this.enumerator.getNext();
+  }
+
+  * [Symbol.iterator]() {
+    while (this.enumerator.hasMore()) {
+      yield (this.enumerator.getNext());
+    }
   }
 }

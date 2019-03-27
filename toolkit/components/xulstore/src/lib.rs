@@ -31,7 +31,7 @@ use lmdb::Error as LmdbError;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
 };
 
 const SEPARATOR: char = '\u{0009}';
@@ -76,8 +76,8 @@ impl XULStore {
 
         let mut data_guard = DATA.write()?;
         let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
-        data.entry(doc.to_string()).or_insert(HashMap::new())
-           .entry(id.to_string()).or_insert(HashMap::new())
+        data.entry(doc.to_string()).or_insert(BTreeMap::new())
+           .entry(id.to_string()).or_insert(BTreeMap::new())
            .insert(attr.to_string(), value);
 
         Ok(())
@@ -139,18 +139,35 @@ impl XULStore {
 
                 let mut data_guard = DATA.write()?;
                 let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+                let mut ids_empty = false;
                 match data.get_mut(&doc.to_string()) {
                     Some(ids) => {
+                        let mut attrs_empty = false;
                         match ids.get_mut(&id.to_string()) {
-                            Some(attrs) => { attrs.remove(&attr.to_string()); },
+                            Some(attrs) => {
+                                attrs.remove(&attr.to_string());
+                                if attrs.is_empty() {
+                                    attrs_empty = true;
+                                }
+                            },
                             None => (),
+                        }
+                        if attrs_empty {
+                            ids.remove(&id.to_string());
+                            if ids.is_empty() {
+                                ids_empty = true;
+                            }
                         }
                     }
                     None => (),
                 };
+                if ids_empty {
+                    data.remove(&doc.to_string());
+                }
 
                 Ok(())
             }
+
 
             // The XULStore API doesn't care if a consumer tries to remove
             // a value that doesn't actually exist, so we ignore that error.
@@ -181,7 +198,7 @@ impl XULStore {
         };
 
         // We can remove the document from the data cache in one fell swoop.
-        data.remove_entry(&doc.to_string());
+        data.remove(&doc.to_string());
 
         let rkv_guard = RKV.read()?;
         let rkv = rkv_guard
@@ -221,7 +238,9 @@ impl XULStore {
 
         match data.get(&doc.to_string()) {
             Some(ids) => {
-                let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
+                let mut ids: Vec<String> = ids.keys()
+                .map(|id| id.to_owned())
+                .collect();
                 // TODO: rather than sorting here, use a pre-sorted
                 // data structure, such as a BTreeMap, so the items
                 // are already in sorted order.

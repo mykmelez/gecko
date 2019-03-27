@@ -9,10 +9,11 @@ use crate::{
     XULStore,
 };
 use libc::{c_char, c_void};
-use nserror::{nsresult, NS_ERROR_NO_AGGREGATION, NS_OK};
+use nserror::{nsresult, NS_ERROR_NO_AGGREGATION, NS_ERROR_NOT_IMPLEMENTED, NS_OK};
 use nsstring::{nsAString, nsString};
+use std::cell::RefCell;
 use std::ptr;
-use xpcom::{interfaces::nsISupports, nsIID, RefPtr};
+use xpcom::{interfaces::{nsIJSEnumerator, nsIStringEnumerator, nsISupports}, nsIID, RefPtr};
 
 // XULStore no longer expresses an XPCOM API.  Instead, JS consumers import
 // xultore.jsm, while C++ consumers include XULStore.h.  But we still construct
@@ -139,6 +140,83 @@ impl XULStoreService {
 
     fn remove_document(&self, doc: &nsAString) -> Result<(), nsresult> {
         XULStore::remove_document(doc).map_err(|err| err.into())
+    }
+
+    xpcom_method!(
+        get_ids_enumerator => GetIDsEnumerator(
+            doc: *const nsAString
+        ) -> * const nsIStringEnumerator
+    );
+
+    fn get_ids_enumerator(
+        &self,
+        doc: &nsAString,
+    ) -> Result<RefPtr<nsIStringEnumerator>, nsresult> {
+        match XULStore::get_ids(doc) {
+            Ok(val) => {
+                let enumerator = StringEnumerator::new(val);
+                Ok(RefPtr::new(enumerator.coerce::<nsIStringEnumerator>()))
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    xpcom_method!(
+        get_attribute_enumerator => GetAttributeEnumerator(
+            doc: *const nsAString,
+            id: *const nsAString
+        ) -> * const nsIStringEnumerator
+    );
+
+    fn get_attribute_enumerator(
+        &self,
+        doc: &nsAString,
+        id: &nsAString,
+    ) -> Result<RefPtr<nsIStringEnumerator>, nsresult> {
+        match XULStore::get_attrs(doc, id) {
+            Ok(val) => {
+                let enumerator = StringEnumerator::new(val);
+                Ok(RefPtr::new(enumerator.coerce::<nsIStringEnumerator>()))
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+}
+
+#[derive(xpcom)]
+#[xpimplements(nsIStringEnumerator)]
+#[refcnt = "nonatomic"]
+pub(crate) struct InitStringEnumerator {
+    iter: RefCell<XULStoreIterator>,
+}
+impl StringEnumerator {
+    pub(crate) fn new(iter: XULStoreIterator) -> RefPtr<StringEnumerator> {
+        StringEnumerator::allocate(InitStringEnumerator {
+            iter: RefCell::new(iter)
+        })
+    }
+
+    xpcom_method!(string_iterator => StringIterator() -> *const nsIJSEnumerator);
+
+    fn string_iterator(&self) -> Result<RefPtr<nsIJSEnumerator>, nsresult> {
+        Err(NS_ERROR_NOT_IMPLEMENTED)
+    }
+
+    xpcom_method!(has_more => HasMore() -> bool);
+
+    fn has_more(&self) -> Result<bool, nsresult> {
+        let iter = self.iter.borrow();
+        Ok(iter.has_more())
+    }
+
+    xpcom_method!(get_next => GetNext() -> nsAString);
+
+    fn get_next(&self) -> Result<nsString, nsresult> {
+        let mut iter = self.iter.borrow_mut();
+        match iter.get_next() {
+            Ok(value) => Ok(nsString::from(&value)),
+            Err(err) => Err(err.into()),
+        }
     }
 }
 

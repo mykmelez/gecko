@@ -68,7 +68,7 @@ interface nsIXULStore: nsISupports
    *
    * @param doc - document URI
    */
-  /* nsIStringEnumerator getIDsEnumerator(in AString doc); */
+  nsIStringEnumerator getIDsEnumerator(in AString doc);
 
   /**
    * Iterates over all of the attributes associated with a given document uri
@@ -77,5 +77,5 @@ interface nsIXULStore: nsISupports
    * @param doc - document URI
    * @param id - identifier of the node
    */
-  /* nsIStringEnumerator getAttributeEnumerator(in AString doc, in AString id); */
+  nsIStringEnumerator getAttributeEnumerator(in AString doc, in AString id);
 };
