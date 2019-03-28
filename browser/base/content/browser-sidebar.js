@@ -93,26 +93,26 @@ var SidebarUI = {
     this._initDeferred.resolve();
   },
 
-  async uninit() {
+  uninit() {
     // If this is the last browser window, persist various values that should be
     // remembered for after a restart / reopening a browser window.
     let enumerator = Services.wm.getEnumerator("navigator:browser");
     if (!enumerator.hasMoreElements()) {
-      await XULStore.persist(this._box, "sidebarcommand");
+      XULStore.persist(this._box, "sidebarcommand");
 
       if (this._box.hasAttribute("positionend")) {
-        await XULStore.persist(this._box, "positionend");
+        XULStore.persist(this._box, "positionend");
       } else {
-        await XULStore.removeValue(document.documentURI, "sidebar-box", "positionend");
+        XULStore.removeValue(document.documentURI, "sidebar-box", "positionend");
       }
       if (this._box.hasAttribute("checked")) {
-        await XULStore.persist(this._box, "checked");
+        XULStore.persist(this._box, "checked");
       } else {
-        await XULStore.removeValue(document.documentURI, "sidebar-box", "checked");
+        XULStore.removeValue(document.documentURI, "sidebar-box", "checked");
       }
 
-      await XULStore.persist(this._box, "width");
-      await XULStore.persist(this._title, "value");
+      XULStore.persist(this._box, "width");
+      XULStore.persist(this._title, "value");
     }
   },
 

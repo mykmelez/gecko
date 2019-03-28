@@ -5961,11 +5961,7 @@ function setToolbarVisibility(toolbar, isVisible, persist = true) {
 
   toolbar.setAttribute(hidingAttribute, !isVisible);
   if (persist) {
-    // NB: it isn't clear that we need to await persisting the value,
-    // as the rest of this function doesn't seem to depend on it, nor do
-    // its callers.  If we do need to do so, then we'll need to make
-    // this function async, which has cascading ramifications.
-    XULStore.persist(toolbar, hidingAttribute).catch(Cu.reportError);
+    XULStore.persist(toolbar, hidingAttribute);
   }
 
   let eventParams = {
