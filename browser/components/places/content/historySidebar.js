@@ -25,7 +25,7 @@ var gSearchBox;
 var gHistoryGrouping = "";
 var gSearching = false;
 
-async function HistorySidebarInit() {
+function HistorySidebarInit() {
   let uidensity = window.top.document.documentElement.getAttribute("uidensity");
   if (uidensity) {
     document.documentElement.setAttribute("uidensity", uidensity);
@@ -59,16 +59,15 @@ async function HistorySidebarInit() {
   else
     document.getElementById("byday").setAttribute("checked", "true");
 
-  await searchHistory("");
+  searchHistory("");
 }
 
-async function GroupBy(menuItem, groupingType) {
-  menuItem.parentNode.parentNode.setAttribute("selectedsort", groupingType);
+function GroupBy(groupingType) {
   gHistoryGrouping = groupingType;
-  await searchHistory(gSearchBox.value);
+  searchHistory(gSearchBox.value);
 }
 
-async function searchHistory(aInput) {
+function searchHistory(aInput) {
   var query = PlacesUtils.history.getNewQuery();
   var options = PlacesUtils.history.getNewQueryOptions();
 
@@ -109,12 +108,6 @@ async function searchHistory(aInput) {
   options.sortingMode = sortingMode;
   options.resultType = resultType;
   options.includeHidden = !!aInput;
-
-  // Ensure the tree is initialized before we load it with the query.
-  // We do this before starting the telemetry stopwatch to avoid changing
-  // the semantics of that metric, which is intended to measure
-  // the synchronous performance of the query load.
-  await gHistoryTree.initPromise;
 
   if (gHistoryGrouping == "lastvisited")
     TelemetryStopwatch.start("HISTORY_LASTVISITED_TREE_QUERY_TIME_MS");

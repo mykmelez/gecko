@@ -22,7 +22,7 @@ async function openPopupAndSelectFolder(guid, newBookmark = false) {
   }
 
   // Expand the folder tree.
-  await gEditItemOverlay.toggleFolderTreeVisibility();
+  document.getElementById("editBMPanel_foldersExpander").click();
   document.getElementById("editBMPanel_folderTree").selectItems([guid]);
 
   await hideBookmarksPanel();

@@ -33,7 +33,7 @@ add_task(async function() {
   ok(gEditItemOverlay, "gEditItemOverlay is in context");
   ok(gEditItemOverlay.initialized, "gEditItemOverlay is initialized");
 
-  await window.gEditItemOverlay.toggleFolderTreeVisibility();
+  window.gEditItemOverlay.toggleFolderTreeVisibility();
 
   let tree = gEditItemOverlay._element("folderTree");
 

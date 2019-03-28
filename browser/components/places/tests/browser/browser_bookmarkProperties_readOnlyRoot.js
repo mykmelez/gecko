@@ -38,7 +38,6 @@ add_task(async function test_library() {
   });
   let PlacesOrganizer = library.PlacesOrganizer;
   let tree = PlacesOrganizer._places;
-  await tree.initPromise;
   tree.focus();
   Assert.ok(!tree.controller.isCommandEnabled("placesCmd_show:info"),
             "'placesCmd_show:info' on current selected node is disabled");

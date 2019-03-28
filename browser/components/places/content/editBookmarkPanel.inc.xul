@@ -52,7 +52,7 @@
                 tooltiptext="&editBookmarkOverlay.foldersExpanderDown.tooltip;"
                 tooltiptextdown="&editBookmarkOverlay.foldersExpanderDown.tooltip;"
                 tooltiptextup="&editBookmarkOverlay.expanderUp.tooltip;"
-                oncommand="gEditItemOverlay.toggleFolderTreeVisibility().catch(Cu.reportError);"/>
+                oncommand="gEditItemOverlay.toggleFolderTreeVisibility();"/>
       </hbox>
     </vbox>
 

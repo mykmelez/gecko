@@ -158,7 +158,7 @@ add_task(async function test_search_contents() {
 
   let searchBox = library.document.getElementById("searchFilter");
   searchBox.value = "example";
-  await library.PlacesSearchBox.search(searchBox.value);
+  library.PlacesSearchBox.search(searchBox.value);
 
   let bookmarkNode = library.ContentTree.view.selectedNode;
   Assert.equal(bookmarkNode.uri, "http://example.com/", "Found the expected bookmark");

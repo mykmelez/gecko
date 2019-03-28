@@ -8,7 +8,7 @@ const EXPORTED_SYMBOLS = ["XULStore"];
 
 // Get the nsIXULStore service to ensure that data is migrated from the old
 // store (xulstore.json) to the new one before we access the new store.
-const xulStore = Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
+const xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
 
 const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");

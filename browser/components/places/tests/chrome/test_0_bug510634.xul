@@ -45,58 +45,57 @@
     SimpleTest.waitForExplicitFinish();
 
     function runTest() {
-      (async function() {
-        // Setup the places tree contents.
-        let tree = document.getElementById("tree");
-        await tree.setPlace(`place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`);
+      // Setup the places tree contents.
+      let tree = document.getElementById("tree");
+      tree.place = `place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`;
 
-        // The query-property is set on the title column for each row.
-        let titleColumn = tree.columns.getColumnAt(0);
+      // The query-property is set on the title column for each row.
+      let titleColumn = tree.columns.getColumnAt(0);
 
-        // Open All Bookmarks
-        tree.selectItems([PlacesUtils.virtualAllBookmarksGuid]);
-        PlacesUtils.asContainer(tree.selectedNode).containerOpen = true;
-        is(tree.selectedNode.uri,
-           "place:type=" + Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY,
-           "Opened All Bookmarks");
+      // Open All Bookmarks
+      tree.selectItems([PlacesUtils.virtualAllBookmarksGuid]);
+      PlacesUtils.asContainer(tree.selectedNode).containerOpen = true;
+      is(tree.selectedNode.uri,
+         "place:type=" + Ci.nsINavHistoryQueryOptions.RESULTS_AS_ROOTS_QUERY,
+         "Opened All Bookmarks");
 
-        const topLevelGuids = [
-          PlacesUtils.virtualHistoryGuid,
-          PlacesUtils.virtualDownloadsGuid,
-          PlacesUtils.virtualTagsGuid,
-          PlacesUtils.virtualAllBookmarksGuid
-        ];
+      const topLevelGuids = [
+        PlacesUtils.virtualHistoryGuid,
+        PlacesUtils.virtualDownloadsGuid,
+        PlacesUtils.virtualTagsGuid,
+        PlacesUtils.virtualAllBookmarksGuid
+      ];
 
-        for (let queryName of topLevelGuids) {
-          let found = false;
-          for (let i = 0; i < tree.view.rowCount && !found; i++) {
-            rowProperties = tree.view.getCellProperties(i, titleColumn).split(" ");
-            found = rowProperties.includes("OrganizerQuery_" + queryName);
-          }
-          ok(found, `OrganizerQuery_${queryName} is set`);
+      for (let queryName of topLevelGuids) {
+        let found = false;
+        for (let i = 0; i < tree.view.rowCount && !found; i++) {
+          rowProperties = tree.view.getCellProperties(i, titleColumn).split(" ");
+          found = rowProperties.includes("OrganizerQuery_" + queryName);
         }
+        ok(found, `OrganizerQuery_${queryName} is set`);
+      }
 
-        const folderGuids = [
-          PlacesUtils.bookmarks.toolbarGuid,
-          PlacesUtils.bookmarks.menuGuid,
-          PlacesUtils.bookmarks.unfiledGuid,
-        ];
+      const folderGuids = [
+        PlacesUtils.bookmarks.toolbarGuid,
+        PlacesUtils.bookmarks.menuGuid,
+        PlacesUtils.bookmarks.unfiledGuid,
+      ];
 
-        for (let guid of folderGuids) {
-          let found = false;
-          for (let i = 0; i < tree.view.rowCount && !found; i++) {
-            rowProperties = tree.view.getCellProperties(i, titleColumn).split(" ");
-            found = rowProperties.includes("queryFolder_" + guid);
-          }
-          ok(found, `queryFolder_${guid} is set`);
+      for (let guid of folderGuids) {
+        let found = false;
+        for (let i = 0; i < tree.view.rowCount && !found; i++) {
+          rowProperties = tree.view.getCellProperties(i, titleColumn).split(" ");
+          found = rowProperties.includes("queryFolder_" + guid);
         }
+        ok(found, `queryFolder_${guid} is set`);
+      }
 
-        // Close the root node
-        tree.result.root.containerOpen = false;
-      })().catch(err => {
-        ok(false, `Uncaught error: ${err}`);
-      }).then(SimpleTest.finish);
+      // Close the root node
+      tree.result.root.containerOpen = false;
+
+      SimpleTest.finish();
     }
+
   ]]>
   </script>
 </window>

@@ -97,7 +97,7 @@
 
         // Setup the places tree contents.
         let tree = document.getElementById("tree");
-        await tree.setPlace(queryURI);
+        tree.place = queryURI;
 
         // loop through the rows and check formatting
         let treeView = tree.view;

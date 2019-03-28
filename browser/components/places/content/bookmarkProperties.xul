@@ -18,7 +18,7 @@
         buttons="accept, cancel"
         buttoniconaccept="save"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-        onload="BookmarkPropertiesPanel.onDialogLoad().catch(Cu.reportError);"
+        onload="BookmarkPropertiesPanel.onDialogLoad();"
         onunload="BookmarkPropertiesPanel.onDialogUnload();"
         style="min-width: 30em;"
         persist="screenX screenY width">

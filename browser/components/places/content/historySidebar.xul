@@ -21,7 +21,7 @@
       class="sidebar-panel"
       orient="vertical"
       xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-      onload="HistorySidebarInit().catch(Cu.reportError);"
+      onload="HistorySidebarInit();"
       onunload="PlacesUIUtils.setMouseoverURL('', window);"
       aria-label="&historyButton.label;">
 
@@ -61,22 +61,22 @@
       <menupopup>
         <menuitem id="bydayandsite" label="&byDayAndSite.label;"
                   accesskey="&byDayAndSite.accesskey;" type="radio"
-                  oncommand="GroupBy(this, 'dayandsite').catch(Cu.reportError);"/>
+                  oncommand="this.parentNode.parentNode.setAttribute('selectedsort', 'dayandsite'); GroupBy('dayandsite');"/>
         <menuitem id="bysite" label="&bySite.label;"
                   accesskey="&bySite.accesskey;" type="radio"
-                  oncommand="GroupBy(this, 'site').catch(Cu.reportError);"/>
+                  oncommand="this.parentNode.parentNode.setAttribute('selectedsort', 'site'); GroupBy('site');"/>
         <menuitem id="byday" label="&byDate.label;"
                   accesskey="&byDate.accesskey;"
                   type="radio"
-                  oncommand="GroupBy(this, 'day').catch(Cu.reportError);"/>
+                  oncommand="this.parentNode.parentNode.setAttribute('selectedsort', 'day'); GroupBy('day');"/>
         <menuitem id="byvisited" label="&byMostVisited.label;"
                   accesskey="&byMostVisited.accesskey;"
                   type="radio"
-                  oncommand="GroupBy(this, 'visited').catch(Cu.reportError);"/>
+                  oncommand="this.parentNode.parentNode.setAttribute('selectedsort', 'visited'); GroupBy('visited');"/>
         <menuitem id="bylastvisited" label="&byLastVisited.label;"
                   accesskey="&byLastVisited.accesskey;"
                   type="radio"
-                  oncommand="GroupBy(this, 'lastvisited').catch(Cu.reportError);"/>
+                  oncommand="this.parentNode.parentNode.setAttribute('selectedsort', 'lastvisited'); GroupBy('lastvisited');"/>
       </menupopup>
     </button>
   </hbox>

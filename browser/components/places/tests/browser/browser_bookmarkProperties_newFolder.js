@@ -34,7 +34,7 @@ add_task(async function test_newFolder() {
   await clickBookmarkStar();
 
   // Open folder selector.
-  await gEditItemOverlay.toggleFolderTreeVisibility();
+  document.getElementById("editBMPanel_foldersExpander").click();
 
   let folderTree = document.getElementById("editBMPanel_folderTree");
 

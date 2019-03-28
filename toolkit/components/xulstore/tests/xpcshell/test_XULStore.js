@@ -9,7 +9,7 @@ do_get_profile();
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
-const xulStore = Cc["@mozilla.org/xul-store-service;1"].getService(Ci.nsIXULStore);
+const xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
 
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";

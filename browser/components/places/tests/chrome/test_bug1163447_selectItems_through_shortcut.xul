@@ -71,7 +71,7 @@
 
         // Setup the places tree contents.
         let tree = document.getElementById("tree");
-        await tree.setPlace(`place:parent=${PlacesUtils.bookmarks.toolbarGuid}`);
+        tree.place = `place:parent=${PlacesUtils.bookmarks.toolbarGuid}`;
 
         // Select the folder via the selectItems(folder.guid) API being tested
         tree.selectItems([folder.guid]);

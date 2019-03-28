@@ -43,7 +43,7 @@
 
 #define NS_KEY_VALUE_SERVICE_CONTRACTID "@mozilla.org/key-value-service;1"
 
-#define NS_XUL_STORE_SERVICE_CONTRACTID "@mozilla.org/xul-store-service;1"
+#define NS_XUL_STORE_SERVICE_CONTRACTID "@mozilla.org/xul/xulstore;1"
 
 /////////////////////////////////////////////////////////////////////////////
 

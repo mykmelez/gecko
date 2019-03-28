@@ -12,11 +12,6 @@
     constructor() {
       super();
 
-      const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-      this._initPromise = XULStore.cache(document.documentURI).then(xulStoreCache => {
-        this._xulStoreCache = xulStoreCache;
-      });
-
       this.addEventListener("focus", (event) => {
         this._cachedInsertionPoint = undefined;
 
@@ -127,15 +122,9 @@
 
       this._active = true;
 
-      this.initPromise.then(() => {
-        // Force an initial build.
-        if (this.place)
-          this.place = this.place;
-      });
-    }
-
-    get initPromise() {
-      return this._initPromise;
+      // Force an initial build.
+      if (this.place)
+        this.place = this.place;
     }
 
     get controller() {
@@ -216,12 +205,6 @@
     get place() {
       return this.getAttribute("place");
     }
-
-    async setPlace(val) {
-      await this.initPromise;
-      this.place = val;
-    }
-
     /**
      * nsIPlacesView
      */
@@ -399,9 +382,7 @@
       return this._active;
     }
 
-    async applyFilter(filterString, folderRestrict, includeHidden) {
-      await this.initPromise;
-
+    applyFilter(filterString, folderRestrict, includeHidden) {
       // preserve grouping
       var queryNode = PlacesUtils.asQuery(this.result.root);
       var options = queryNode.queryOptions.clone();
@@ -410,9 +391,9 @@
       // We do not yet support searching into grouped queries or into
       // tag containers, so we must fall to the default case.
       if (PlacesUtils.nodeIsHistoryContainer(queryNode) ||
-          PlacesUtils.nodeIsTagQuery(queryNode) ||
-          options.resultType == options.RESULTS_AS_TAGS_ROOT ||
-          options.resultType == options.RESULTS_AS_ROOTS_QUERY)
+        PlacesUtils.nodeIsTagQuery(queryNode) ||
+        options.resultType == options.RESULTS_AS_TAGS_ROOT ||
+        options.resultType == options.RESULTS_AS_ROOTS_QUERY)
         options.resultType = options.RESULTS_AS_URI;
 
       var query = PlacesUtils.history.getNewQuery();
@@ -429,8 +410,6 @@
     }
 
     load(query, options) {
-      console.assert(this._xulStoreCache, `XULStore cached for ${document.documentURI}`);
-
       let result = PlacesUtils.history
         .executeQuery(query, options);
 

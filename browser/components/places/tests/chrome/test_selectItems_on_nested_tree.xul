@@ -75,7 +75,7 @@
 
         // Setup the places tree contents.
         let tree = document.getElementById("tree");
-        await tree.setPlace(`place:parent=${PlacesUtils.bookmarks.unfiledGuid}`);
+        tree.place = `place:parent=${PlacesUtils.bookmarks.unfiledGuid}`;
 
         // Select the last bookmark.
         tree.selectItems([bm.guid]);

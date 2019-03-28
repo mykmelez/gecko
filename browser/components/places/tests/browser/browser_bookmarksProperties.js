@@ -14,11 +14,11 @@ const SIDEBAR_HISTORY_ID = "viewHistorySidebar";
 const SIDEBAR_BOOKMARKS_ID = "viewBookmarksSidebar";
 
 // For history sidebar.
-const SIDEBAR_HISTORY_BYLASTVISITED_VIEW = "lastvisited";
-const SIDEBAR_HISTORY_BYMOSTVISITED_VIEW = "visited";
-const SIDEBAR_HISTORY_BYDATE_VIEW = "day";
-const SIDEBAR_HISTORY_BYSITE_VIEW = "site";
-const SIDEBAR_HISTORY_BYDAYANDSITE_VIEW = "dayandsite";
+const SIDEBAR_HISTORY_BYLASTVISITED_VIEW = "bylastvisited";
+const SIDEBAR_HISTORY_BYMOSTVISITED_VIEW = "byvisited";
+const SIDEBAR_HISTORY_BYDATE_VIEW = "byday";
+const SIDEBAR_HISTORY_BYSITE_VIEW = "bysite";
+const SIDEBAR_HISTORY_BYDATEANDSITE_VIEW = "bydateandsite";
 
 // Action to execute on the current node.
 const ACTION_EDIT = 0;
@@ -386,12 +386,8 @@ function open_properties_dialog(test) {
     var sidebar = document.getElementById("sidebar");
 
     // If this is history sidebar, set the required view.
-    if (test.sidebar == SIDEBAR_HISTORY_ID) {
-      let menuItem = sidebar.contentDocument.getElementById(`by${test.historyView}`);
-      // Call GroupBy() directly rather than indirectly through
-      // menuItem.doCommand() so we can await its resolution.
-      await sidebar.contentWindow.GroupBy(menuItem, test.historyView);
-    }
+    if (test.sidebar == SIDEBAR_HISTORY_ID)
+      sidebar.contentDocument.getElementById(test.historyView).doCommand();
 
     // Get sidebar's Places tree.
     var sidebarTreeID = test.sidebar == SIDEBAR_BOOKMARKS_ID ?

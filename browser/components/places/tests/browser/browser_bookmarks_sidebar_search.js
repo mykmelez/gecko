@@ -8,7 +8,7 @@ let sidebar = document.getElementById("sidebar");
 const TEST_URI = "http://example.com/";
 const BOOKMARKS_COUNT = 4;
 
-async function assertBookmarks(searchValue) {
+function assertBookmarks(searchValue) {
   let found = 0;
 
   let searchBox = sidebar.contentDocument.getElementById("search-box");
@@ -16,9 +16,7 @@ async function assertBookmarks(searchValue) {
   ok(searchBox, "search box is in context");
 
   searchBox.value = searchValue;
-  // Call searchBookmarks() directly rather than indirectly through
-  // searchBox.doCommand() so we can await its resolution.
-  await sidebar.contentWindow.searchBookmarks(searchBox.value);
+  searchBox.doCommand();
 
   let tree = sidebar.contentDocument.getElementById("bookmarks-view");
 
@@ -50,11 +48,11 @@ add_task(async function test() {
     PlacesUtils.tagging.tagURI(url, ["test"]);
   }
 
-  await withSidebarTree("bookmarks", async function() {
+  await withSidebarTree("bookmarks", function() {
     // Search a bookmark by its title.
-    await assertBookmarks("example.com");
+    assertBookmarks("example.com");
     // Search a bookmark by its tag.
-    await assertBookmarks("test");
+    assertBookmarks("test");
   });
 
   // Cleanup.
