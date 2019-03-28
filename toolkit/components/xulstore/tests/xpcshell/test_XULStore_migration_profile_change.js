@@ -12,7 +12,7 @@ add_task(async function test_get_values() {
 
   // We haven't migrated any data yet (nor even changed to a profile), so there
   // shouldn't be a value in the store.
-  Assert.equal(await XULStore.getValue("doc1", "id1", "attr1"), "");
+  Assert.equal(XULStore.getValue("doc1", "id1", "attr1"), "");
 
   // Register an observer before the XULStore service registers its observer,
   // so we can observe the profile-after-change notification first and create
@@ -39,5 +39,5 @@ add_task(async function test_get_values() {
   do_get_profile(true);
 
   // XULStore should now have migrated the value from the old store.
-  Assert.equal(await XULStore.getValue("doc1", "id1", "attr1"), "value1");
+  Assert.equal(XULStore.getValue("doc1", "id1", "attr1"), "value1");
 });

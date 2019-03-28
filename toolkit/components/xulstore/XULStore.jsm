@@ -6,11 +6,8 @@
 
 const EXPORTED_SYMBOLS = ["XULStore"];
 
-// Get the nsIXULStore service to ensure that data is migrated from the old
-// store (xulstore.json) to the new one before we access the new store.
 const xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
 
-const {KeyValueService} = ChromeUtils.import("resource://gre/modules/kvstore.jsm");
 const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -49,43 +46,11 @@ function makeKey(docURI, id, attr) {
   return docURI.concat(SEPARATOR, id).concat(SEPARATOR, attr);
 }
 
-async function getDatabase() {
-  // This module should not generally be loaded before the profile dir
-  // is available, but it can happen during profile migration.
-  //
-  // This code must be kept in sync with the code that updates the store's
-  // location in toolkit/components/xulstore/src/ffi.rs.
-  const profileDir = OS.Constants.Path.profileDir || OS.Constants.Path.tmpDir;
-  const databaseDir = OS.Path.join(profileDir, "xulstore");
-  await OS.File.makeDir(databaseDir, { from: OS.Constants.Path.profileDir });
-  return KeyValueService.getOrCreate(databaseDir, "db");
-}
-
-XPCOMUtils.defineLazyGetter(this, "gDatabasePromise", getDatabase);
-
-Services.obs.addObserver({
-  async observe() {
-    gDatabasePromise = getDatabase();
-    cache = {};
-  },
-}, "profile-after-change");
-
 const XULStore = {
-  async setValue(docURI, id, attr, value) {
-    return xulStore.setValue(docURI, id, attr, value);
-  },
-
-  async hasValue(docURI, id, attr) {
-    return xulStore.hasValue(docURI, id, attr);
-  },
-
-  async getValue(docURI, id, attr) {
-    return xulStore.getValue(docURI, id, attr);
-  },
-
-  async removeValue(docURI, id, attr) {
-    return xulStore.removeValue(docURI, id, attr);
-  },
+  setValue: xulStore.setValue,
+  hasValue: xulStore.hasValue,
+  getValue: xulStore.getValue,
+  removeValue: xulStore.removeValue,
 
   /**
    * Sets a value for a specified node's attribute, except in
@@ -129,71 +94,8 @@ const XULStore = {
     return new XULStoreEnumerator(xulStore.getAttributeEnumerator(docURI, id));
   },
 
-  async removeDocument(docURI) {
-    log("remove store values for doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    const from = docURI.concat(SEPARATOR);
-    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
-    const enumerator = await gDatabase.enumerate(from, to);
-
-    await Promise.all(Array.from(enumerator).map(({key}) => gDatabase.delete(key)));
-  },
-
-  async cache(docURI) {
-    log("cache store values for doc=" + docURI);
-
-    const gDatabase = await gDatabasePromise;
-    const from = docURI.concat(SEPARATOR);
-    const to = docURI.concat(SEPARATOR_NEXT_CHAR);
-    const enumerator = await gDatabase.enumerate(from, to);
-    const cache = {};
-
-    for (const {key, value} of enumerator) {
-      const [, id, attr] = key.split(SEPARATOR);
-        if (!(id in cache)) {
-          cache[id] = {};
-        }
-        cache[id][attr] = value;
-    }
-
-    return new XULStoreCache(docURI, cache);
-  },
-
-  decache(docURI) {
-    delete cache[docURI];
-  },
+  removeDocument: xulStore.removeDocument,
 };
-
-class XULStoreCache {
-  constructor(uri, cache) {
-    this.uri = uri;
-    this.cache = cache;
-  }
-
-  getValue(id, attr) {
-    if (id in this.cache && attr in this.cache[id]) {
-      return this.cache[id][attr];
-    }
-    return "";
-  }
-
-  setValue(id, attr, value) {
-    if (!(id in this.cache)) {
-      this.cache[id] = {};
-    }
-    this.cache[id][attr] = value;
-    XULStore.setValue(this.uri, id, attr, value).catch(Cu.reportError);
-  }
-
-  removeValue(id, attr) {
-    if (!(id in this.cache) || !(attr in this.cache[id])) {
-      return;
-    }
-    delete this.cache[id][attr];
-    XULStore.removeValue(this.uri, id, attr).catch(Cu.reportError);
-  }
-}
 
 class XULStoreEnumerator {
   constructor(enumerator) {

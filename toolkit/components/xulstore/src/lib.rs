@@ -72,7 +72,10 @@ impl XULStore {
         };
 
         let mut data_guard = DATA.write()?;
-        let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_mut() {
+            Some(data) => data,
+            None => return Ok(()),
+        };
         data.entry(doc.to_string()).or_insert(BTreeMap::new())
            .entry(id.to_string()).or_insert(BTreeMap::new())
            .insert(attr.to_string(), value.clone());
@@ -88,7 +91,10 @@ impl XULStore {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
         let data_guard = DATA.read()?;
-        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_ref() {
+            Some(data) => data,
+            None => return Ok(false),
+        };
 
         match data.get(&doc.to_string()) {
             Some(ids) => {
@@ -105,7 +111,11 @@ impl XULStore {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
         let data_guard = DATA.read()?;
-        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_ref() {
+            Some(data) => data,
+            None => return Ok("".to_owned()),
+        };
+
         match data.get(&doc.to_string()) {
             Some(ids) => {
                 match ids.get(&id.to_string()) {
@@ -126,7 +136,11 @@ impl XULStore {
         debug!("XULStore remove value {} {} {}", doc, id, attr);
 
         let mut data_guard = DATA.write()?;
-        let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_mut() {
+            Some(data) => data,
+            None => return Ok(()),
+        };
+
         let mut ids_empty = false;
         match data.get_mut(&doc.to_string()) {
             Some(ids) => {
@@ -165,7 +179,11 @@ impl XULStore {
         debug!("XULStore remove document {}", doc);
 
         let mut data_guard = DATA.write()?;
-        let data = data_guard.as_mut().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_mut() {
+            Some(data) => data,
+            None => return Ok(()),
+        };
+
         let mut keys_to_remove: Vec<String> = Vec::new();
         let doc = doc.to_string();
 
@@ -195,7 +213,10 @@ impl XULStore {
         debug!("XULStore get IDs for {}", doc);
 
         let data_guard = DATA.read()?;
-        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_ref() {
+            Some(data) => data,
+            None => return Ok(XULStoreIterator::new(vec![].into_iter())),
+        };
 
         match data.get(&doc.to_string()) {
             Some(ids) => {
@@ -216,7 +237,10 @@ impl XULStore {
         debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
         let data_guard = DATA.read()?;
-        let data = data_guard.as_ref().ok_or(XULStoreError::Unavailable)?;
+        let data = match data_guard.as_ref() {
+            Some(data) => data,
+            None => return Ok(XULStoreIterator::new(vec![].into_iter())),
+        };
 
         match data.get(&doc.to_string()) {
             Some(ids) => {

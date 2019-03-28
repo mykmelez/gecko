@@ -21,7 +21,7 @@ function opened()
   runTest();
 }
 
-async function runTest()
+function runTest()
 {
   var firstRun = window.arguments[0];
   var button1 = document.getElementById("button1");
@@ -31,11 +31,11 @@ async function runTest()
     button2.removeAttribute("value");
 
     button2.setAttribute("foo", "bar");
-    await XULStore.persist(button2, "foo");
-    is(await XULStore.getValue(URI, "button2", "foo"), "bar", "attribute persisted");
+    XULStore.persist(button2, "foo");
+    is(XULStore.getValue(URI, "button2", "foo"), "bar", "attribute persisted");
     button2.removeAttribute("foo");
-    await XULStore.persist(button2, "foo");
-    is(await XULStore.hasValue(URI, "button2", "foo"), false, "attribute removed");
+    XULStore.persist(button2, "foo");
+    is(XULStore.hasValue(URI, "button2", "foo"), false, "attribute removed");
 
     window.close();
     window.opener.windowOpened();
