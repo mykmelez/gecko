@@ -13,7 +13,7 @@ async function test() {
   let aWindow = await open_manager(null);
   var categories = aWindow.document.getElementById("categories");
   categories.setAttribute("last-selected", "foo");
-  await XULStore.persist(categories, "last-selected");
+  XULStore.persist(categories, "last-selected");
 
   await close_manager(aWindow);
   Services.prefs.clearUserPref(PREF_UI_LASTCATEGORY);

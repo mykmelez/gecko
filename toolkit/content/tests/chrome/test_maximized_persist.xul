@@ -138,8 +138,8 @@
     win.close();
 
     // Clean up the XUL store for the given window.
-    const xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
-    xulStore.removeDocument(chrome_url);
+    let XULStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
+    XULStore.removeDocument(chrome_url);
 
     SimpleTest.finish();
   }
