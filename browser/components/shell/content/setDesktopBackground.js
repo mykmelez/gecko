@@ -48,7 +48,8 @@ var gSetBackground = {
       }
     }
 
-    document.addEventListener("dialogaccept", function() { gSetBackground.setDesktopBackground(); });
+    document.addEventListener("dialogaccept",
+      function() { gSetBackground.setDesktopBackground().catch(Cu.reportError); });
     // make sure that the correct dimensions will be used
     setTimeout(function(self) {
       self.init(window.arguments[0], window.arguments[1]);
