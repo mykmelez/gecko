@@ -96,6 +96,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "AudioChannelService.h"
 #include "nsAboutProtocolUtils.h"
@@ -1230,6 +1231,8 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mExternal = nullptr;
   mInstallTrigger = nullptr;
 
+  mLocalStorage = nullptr;
+  mSessionStorage = nullptr;
   mPerformance = nullptr;
 
   mSharedWorkers.Clear();
@@ -2457,10 +2460,21 @@ void nsPIDOMWindowInner::SetAudioCapture(bool aCapture) {
   }
 }
 
-void nsPIDOMWindowInner::SetActiveLoadingState(bool aIsLoading) /* const? */ {
+void nsPIDOMWindowInner::SetActiveLoadingState(bool aIsLoading) {
   if (!nsGlobalWindowInner::Cast(this)->IsChromeWindow()) {
     mTimeoutManager->SetLoading(aIsLoading);
   }
+
+  if (!aIsLoading) {
+    for (uint32_t i = 0; i < mAfterLoadRunners.Length(); ++i) {
+      NS_DispatchToCurrentThread(mAfterLoadRunners[i].forget());
+    }
+    mAfterLoadRunners.Clear();
+  }
+}
+
+void nsPIDOMWindowInner::AddAfterLoadRunner(nsIRunnable* aRunner) {
+  mAfterLoadRunners.AppendElement(aRunner);
 }
 
 // nsISpeechSynthesisGetter
@@ -3509,8 +3523,8 @@ void nsGlobalWindowInner::ScrollTo(const CSSIntPoint& aScroll,
     bool smoothScroll =
         sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
 
-    sf->ScrollToCSSPixels(scroll, smoothScroll ? nsIScrollableFrame::SMOOTH_MSD
-                                               : nsIScrollableFrame::INSTANT);
+    sf->ScrollToCSSPixels(
+        scroll, smoothScroll ? ScrollMode::eSmoothMsd : ScrollMode::eInstant);
   }
 }
 
@@ -3542,13 +3556,13 @@ void nsGlobalWindowInner::ScrollBy(const ScrollToOptions& aOptions) {
       scrollDelta.y = mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
     }
 
-    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    ScrollMode scrollMode = ScrollMode::eInstant;
     if (aOptions.mBehavior == ScrollBehavior::Smooth) {
-      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      scrollMode = ScrollMode::eSmoothMsd;
     } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
       ScrollStyles styles = sf->GetScrollStyles();
       if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-        scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+        scrollMode = ScrollMode::eSmoothMsd;
       }
     }
 
@@ -3568,8 +3582,7 @@ void nsGlobalWindowInner::ScrollByLines(int32_t numLines,
         sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
 
     sf->ScrollBy(nsIntPoint(0, numLines), nsIScrollableFrame::LINES,
-                 smoothScroll ? nsIScrollableFrame::SMOOTH_MSD
-                              : nsIScrollableFrame::INSTANT);
+                 smoothScroll ? ScrollMode::eSmoothMsd : ScrollMode::eInstant);
   }
 }
 
@@ -3585,8 +3598,7 @@ void nsGlobalWindowInner::ScrollByPages(int32_t numPages,
         sf->GetScrollStyles().IsSmoothScroll(aOptions.mBehavior);
 
     sf->ScrollBy(nsIntPoint(0, numPages), nsIScrollableFrame::PAGES,
-                 smoothScroll ? nsIScrollableFrame::SMOOTH_MSD
-                              : nsIScrollableFrame::INSTANT);
+                 smoothScroll ? ScrollMode::eSmoothMsd : ScrollMode::eInstant);
   }
 }
 

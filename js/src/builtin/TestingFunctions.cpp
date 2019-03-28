@@ -2200,7 +2200,7 @@ static bool GetWaitForAllPromise(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
   RootedNativeObject list(cx, &args[0].toObject().as<NativeObject>());
-  AutoObjectVector promises(cx);
+  RootedObjectVector promises(cx);
   uint32_t count = list->getDenseInitializedLength();
   if (!promises.resize(count)) {
     return false;
@@ -2944,7 +2944,10 @@ class CloneBufferObject : public NativeObject {
       return false;
     }
     auto iter = data->Start();
-    data->ReadBytes(iter, buffer.get(), size);
+    if (!data->ReadBytes(iter, buffer.get(), size)) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
     JSString* str = JS_NewStringCopyN(cx, buffer.get(), size);
     if (!str) {
       return false;
@@ -2976,7 +2979,10 @@ class CloneBufferObject : public NativeObject {
       return false;
     }
     auto iter = data->Start();
-    data->ReadBytes(iter, buffer.get(), size);
+    if (!data->ReadBytes(iter, buffer.get(), size)) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
 
     auto* rawBuffer = buffer.release();
     JSObject* arrayBuffer = JS::NewArrayBufferWithContents(cx, size, rawBuffer);

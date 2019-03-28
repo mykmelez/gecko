@@ -69,6 +69,7 @@
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/RestyleManager.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/SizeOfState.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
@@ -787,13 +788,13 @@ void Element::Scroll(const CSSIntPoint& aScroll,
                      const ScrollOptions& aOptions) {
   nsIScrollableFrame* sf = GetScrollFrame();
   if (sf) {
-    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    ScrollMode scrollMode = ScrollMode::eInstant;
     if (aOptions.mBehavior == ScrollBehavior::Smooth) {
-      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      scrollMode = ScrollMode::eSmoothMsd;
     } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
       ScrollStyles styles = sf->GetScrollStyles();
       if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-        scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+        scrollMode = ScrollMode::eSmoothMsd;
       }
     }
 
@@ -850,13 +851,13 @@ void Element::ScrollBy(const ScrollToOptions& aOptions) {
       scrollDelta.y = mozilla::ToZeroIfNonfinite(aOptions.mTop.Value());
     }
 
-    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    ScrollMode scrollMode = ScrollMode::eInstant;
     if (aOptions.mBehavior == ScrollBehavior::Smooth) {
-      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      scrollMode = ScrollMode::eSmoothMsd;
     } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
       ScrollStyles styles = sf->GetScrollStyles();
       if (styles.mScrollBehavior == NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-        scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+        scrollMode = ScrollMode::eSmoothMsd;
       }
     }
 
@@ -880,10 +881,10 @@ void Element::SetScrollTop(int32_t aScrollTop) {
   FlushType flushType = aScrollTop == 0 ? FlushType::Frames : FlushType::Layout;
   nsIScrollableFrame* sf = GetScrollFrame(nullptr, flushType);
   if (sf) {
-    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    ScrollMode scrollMode = ScrollMode::eInstant;
     if (sf->GetScrollStyles().mScrollBehavior ==
         NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      scrollMode = ScrollMode::eSmoothMsd;
     }
     sf->ScrollToCSSPixels(
         CSSIntPoint(sf->GetScrollPositionCSSPixels().x, aScrollTop),
@@ -902,10 +903,10 @@ void Element::SetScrollLeft(int32_t aScrollLeft) {
   // range.  So we need to flush layout no matter what.
   nsIScrollableFrame* sf = GetScrollFrame();
   if (sf) {
-    nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+    ScrollMode scrollMode = ScrollMode::eInstant;
     if (sf->GetScrollStyles().mScrollBehavior ==
         NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-      scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+      scrollMode = ScrollMode::eSmoothMsd;
     }
 
     sf->ScrollToCSSPixels(
@@ -1104,7 +1105,7 @@ void Element::GetSlot(nsAString& aName) {
 // https://dom.spec.whatwg.org/#dom-element-shadowroot
 ShadowRoot* Element::GetShadowRootByMode() const {
   /**
-   * 1. Let shadow be context object’s shadow root.
+   * 1. Let shadow be context object's shadow root.
    * 2. If shadow is null or its mode is "closed", then return null.
    */
   ShadowRoot* shadowRoot = GetShadowRoot();
@@ -1120,7 +1121,7 @@ ShadowRoot* Element::GetShadowRootByMode() const {
 
 bool Element::CanAttachShadowDOM() const {
   /**
-   * If context object’s namespace is not the HTML namespace,
+   * If context object's namespace is not the HTML namespace,
    * return false.
    *
    * Deviate from the spec here to allow shadow dom attachement to
@@ -1133,7 +1134,7 @@ bool Element::CanAttachShadowDOM() const {
   }
 
   /**
-   * If context object’s local name is not
+   * If context object's local name is not
    *    a valid custom element name, "article", "aside", "blockquote",
    *    "body", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
    *    "header", "main" "nav", "p", "section", or "span",
@@ -1161,9 +1162,9 @@ bool Element::CanAttachShadowDOM() const {
 already_AddRefed<ShadowRoot> Element::AttachShadow(const ShadowRootInit& aInit,
                                                    ErrorResult& aError) {
   /**
-   * 1. If context object’s namespace is not the HTML namespace,
+   * 1. If context object's namespace is not the HTML namespace,
    *    then throw a "NotSupportedError" DOMException.
-   * 2. If context object’s local name is not valid to attach shadow DOM to,
+   * 2. If context object's local name is not valid to attach shadow DOM to,
    *    then throw a "NotSupportedError" DOMException.
    */
   if (!CanAttachShadowDOM()) {
@@ -1205,8 +1206,8 @@ already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
 
   /**
    * 4. Let shadow be a new shadow root whose node document is
-   *    context object’s node document, host is context object,
-   *    and mode is init’s mode.
+   *    context object's node document, host is context object,
+   *    and mode is init's mode.
    */
   RefPtr<ShadowRoot> shadowRoot =
       new ShadowRoot(this, aMode, nodeInfo.forget());
@@ -1216,7 +1217,7 @@ already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
   }
 
   /**
-   * 5. Set context object’s shadow root to shadow.
+   * 5. Set context object's shadow root to shadow.
    */
   SetShadowRoot(shadowRoot);
 
@@ -1777,7 +1778,8 @@ nsresult Element::BindToTree(Document* aDocument, nsIContent* aParent,
     PseudoStyleType pseudoType = GetPseudoElementType();
     if ((pseudoType == PseudoStyleType::NotPseudo ||
          pseudoType == PseudoStyleType::before ||
-         pseudoType == PseudoStyleType::after) &&
+         pseudoType == PseudoStyleType::after ||
+         pseudoType == PseudoStyleType::marker) &&
         EffectSet::GetEffectSet(this, pseudoType)) {
       if (nsPresContext* presContext = aDocument->GetPresContext()) {
         presContext->EffectCompositor()->RequestRestyle(
@@ -1913,9 +1915,11 @@ void Element::UnbindFromTree(bool aDeep, bool aNullParent) {
   if (MayHaveAnimations()) {
     DeleteProperty(nsGkAtoms::transitionsOfBeforeProperty);
     DeleteProperty(nsGkAtoms::transitionsOfAfterProperty);
+    DeleteProperty(nsGkAtoms::transitionsOfMarkerProperty);
     DeleteProperty(nsGkAtoms::transitionsProperty);
     DeleteProperty(nsGkAtoms::animationsOfBeforeProperty);
     DeleteProperty(nsGkAtoms::animationsOfAfterProperty);
+    DeleteProperty(nsGkAtoms::animationsOfMarkerProperty);
     DeleteProperty(nsGkAtoms::animationsProperty);
     if (document) {
       if (nsPresContext* presContext = document->GetPresContext()) {
@@ -3493,14 +3497,19 @@ void Element::GetAnimations(const AnimationFilter& filter,
   } else if (IsGeneratedContentContainerForAfter()) {
     elem = GetParentElement();
     pseudoType = PseudoStyleType::after;
+  } else if (IsGeneratedContentContainerForMarker()) {
+    elem = GetParentElement();
+    pseudoType = PseudoStyleType::marker;
   }
 
   if (!elem) {
     return;
   }
 
-  if (!filter.mSubtree || pseudoType == PseudoStyleType::before ||
-      pseudoType == PseudoStyleType::after) {
+  if (!filter.mSubtree ||
+      pseudoType == PseudoStyleType::before ||
+      pseudoType == PseudoStyleType::after ||
+      pseudoType == PseudoStyleType::marker) {
     GetAnimationsUnsorted(elem, pseudoType, aAnimations);
   } else {
     for (nsIContent* node = this; node; node = node->GetNextNode(this)) {
@@ -3514,6 +3523,8 @@ void Element::GetAnimations(const AnimationFilter& filter,
                                      aAnimations);
       Element::GetAnimationsUnsorted(element, PseudoStyleType::after,
                                      aAnimations);
+      Element::GetAnimationsUnsorted(element, PseudoStyleType::marker,
+                                     aAnimations);
     }
   }
   aAnimations.Sort(AnimationPtrComparator<RefPtr<Animation>>());
@@ -3525,7 +3536,8 @@ void Element::GetAnimationsUnsorted(Element* aElement,
                                     nsTArray<RefPtr<Animation>>& aAnimations) {
   MOZ_ASSERT(aPseudoType == PseudoStyleType::NotPseudo ||
                  aPseudoType == PseudoStyleType::after ||
-                 aPseudoType == PseudoStyleType::before,
+                 aPseudoType == PseudoStyleType::before ||
+                 aPseudoType == PseudoStyleType::marker,
              "Unsupported pseudo type");
   MOZ_ASSERT(aElement, "Null element");
 

@@ -13,6 +13,7 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
@@ -750,10 +751,12 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       DeltaAccumulator::GetInstance()->InitLineOrPageDelta(aTargetFrame, this,
                                                            wheelEvent);
     } break;
-    case eSetSelection:
-      IMEStateManager::HandleSelectionEvent(aPresContext, GetFocusedContent(),
+    case eSetSelection: {
+      nsCOMPtr<nsIContent> focusedContent = GetFocusedContent();
+      IMEStateManager::HandleSelectionEvent(aPresContext, focusedContent,
                                             aEvent->AsSelectionEvent());
       break;
+    }
     case eContentCommandCut:
     case eContentCommandCopy:
     case eContentCommandPaste:
@@ -2655,25 +2658,25 @@ void EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   bool isDeltaModePixel =
       (aEvent->mDeltaMode == WheelEvent_Binding::DOM_DELTA_PIXEL);
 
-  nsIScrollableFrame::ScrollMode mode;
+  ScrollMode mode;
   switch (aEvent->mScrollType) {
     case WidgetWheelEvent::SCROLL_DEFAULT:
       if (isDeltaModePixel) {
-        mode = nsIScrollableFrame::NORMAL;
+        mode = ScrollMode::eNormal;
       } else if (aEvent->mFlags.mHandledByAPZ) {
-        mode = nsIScrollableFrame::SMOOTH_MSD;
+        mode = ScrollMode::eSmoothMsd;
       } else {
-        mode = nsIScrollableFrame::SMOOTH;
+        mode = ScrollMode::eSmooth;
       }
       break;
     case WidgetWheelEvent::SCROLL_SYNCHRONOUSLY:
-      mode = nsIScrollableFrame::INSTANT;
+      mode = ScrollMode::eInstant;
       break;
     case WidgetWheelEvent::SCROLL_ASYNCHRONOUSELY:
-      mode = nsIScrollableFrame::NORMAL;
+      mode = ScrollMode::eNormal;
       break;
     case WidgetWheelEvent::SCROLL_SMOOTHLY:
-      mode = nsIScrollableFrame::SMOOTH;
+      mode = ScrollMode::eSmooth;
       break;
     default:
       MOZ_CRASH("Invalid mScrollType value comes");
@@ -5694,7 +5697,7 @@ nsresult EventStateManager::DoContentCommandScrollEvent(
   }
 
   // The caller may want synchronous scrolling.
-  sf->ScrollBy(pt, scrollUnit, nsIScrollableFrame::INSTANT);
+  sf->ScrollBy(pt, scrollUnit, ScrollMode::eInstant);
   return NS_OK;
 }
 

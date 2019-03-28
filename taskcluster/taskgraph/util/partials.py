@@ -18,6 +18,7 @@ PLATFORM_RENAMES = {
     'windows2012-64': 'win64',
     'windows2012-aarch64': 'win64-aarch64',
     'osx-cross': 'macosx64',
+    'osx': 'macosx64',
 }
 
 BALROG_PLATFORM_MAP = {
@@ -80,6 +81,8 @@ def get_balrog_platform_name(platform):
         platform = platform.replace('-nightly', '')
     if '-devedition' in platform:
         platform = platform.replace('-devedition', '')
+    if '-shippable' in platform:
+        platform = platform.replace('-shippable', '')
     return PLATFORM_RENAMES.get(platform, platform)
 
 
@@ -97,7 +100,7 @@ def get_builds(release_history, platform, locale):
     return release_history.get(platform, {}).get(locale, {})
 
 
-def get_partials_artifacts(release_history, platform, locale):
+def get_partials_artifacts_from_params(release_history, platform, locale):
     platform = _sanitize_platform(platform)
     return [
         (artifact, details.get('previousVersion', None))
@@ -105,7 +108,7 @@ def get_partials_artifacts(release_history, platform, locale):
     ]
 
 
-def get_partials_artifact_map(release_history, platform, locale):
+def get_partials_info_from_params(release_history, platform, locale):
     platform = _sanitize_platform(platform)
 
     artifact_map = {}

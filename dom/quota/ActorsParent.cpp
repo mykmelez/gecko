@@ -33,7 +33,6 @@
 #include "mozilla/CondVar.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/PContent.h"
-#include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/cache/QuotaClient.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/localstorage/ActorsParent.h"
@@ -1375,7 +1374,7 @@ void ReportInternalError(const char* aFile, uint32_t aLine, const char* aStr) {
 
 namespace {
 
-nsString gBaseDirPath;
+StaticAutoPtr<nsString> gBaseDirPath;
 
 #ifdef DEBUG
 bool gQuotaManagerInitialized = false;
@@ -1554,13 +1553,9 @@ class MOZ_STACK_CLASS OriginParser final {
 };
 
 class RepositoryOperationBase : public StorageOperationBase {
-  int32_t mStorageVersion;
-
  public:
-  RepositoryOperationBase(nsIFile* aDirectory, bool aPersistent,
-                          int32_t aStorageVersion)
-      : StorageOperationBase(aDirectory, aPersistent),
-        mStorageVersion(aStorageVersion) {}
+  RepositoryOperationBase(nsIFile* aDirectory, bool aPersistent)
+      : StorageOperationBase(aDirectory, aPersistent) {}
 
   nsresult ProcessRepository();
 
@@ -1585,9 +1580,8 @@ class CreateOrUpgradeDirectoryMetadataHelper final
   nsCOMPtr<nsIFile> mPermanentStorageDir;
 
  public:
-  CreateOrUpgradeDirectoryMetadataHelper(nsIFile* aDirectory, bool aPersistent,
-                                         int32_t aStorageVersion)
-      : RepositoryOperationBase(aDirectory, aPersistent, aStorageVersion) {}
+  CreateOrUpgradeDirectoryMetadataHelper(nsIFile* aDirectory, bool aPersistent)
+      : RepositoryOperationBase(aDirectory, aPersistent) {}
 
  private:
   nsresult MaybeUpgradeOriginDirectory(nsIFile* aDirectory);
@@ -1600,9 +1594,8 @@ class CreateOrUpgradeDirectoryMetadataHelper final
 
 class UpgradeStorageFrom0_0To1_0Helper final : public RepositoryOperationBase {
  public:
-  UpgradeStorageFrom0_0To1_0Helper(nsIFile* aDirectory, bool aPersistent,
-                                   int32_t aStorageVersion)
-      : RepositoryOperationBase(aDirectory, aPersistent, aStorageVersion) {}
+  UpgradeStorageFrom0_0To1_0Helper(nsIFile* aDirectory, bool aPersistent)
+      : RepositoryOperationBase(aDirectory, aPersistent) {}
 
  private:
   nsresult PrepareOriginDirectory(OriginProps& aOriginProps,
@@ -1613,9 +1606,8 @@ class UpgradeStorageFrom0_0To1_0Helper final : public RepositoryOperationBase {
 
 class UpgradeStorageFrom1_0To2_0Helper final : public RepositoryOperationBase {
  public:
-  UpgradeStorageFrom1_0To2_0Helper(nsIFile* aDirectory, bool aPersistent,
-                                   int32_t aStorageVersion)
-      : RepositoryOperationBase(aDirectory, aPersistent, aStorageVersion) {}
+  UpgradeStorageFrom1_0To2_0Helper(nsIFile* aDirectory, bool aPersistent)
+      : RepositoryOperationBase(aDirectory, aPersistent) {}
 
  private:
   nsresult MaybeRemoveMorgueDirectory(const OriginProps& aOriginProps);
@@ -1633,9 +1625,8 @@ class UpgradeStorageFrom1_0To2_0Helper final : public RepositoryOperationBase {
 
 class UpgradeStorageFrom2_0To2_1Helper final : public RepositoryOperationBase {
  public:
-  UpgradeStorageFrom2_0To2_1Helper(nsIFile* aDirectory, bool aPersistent,
-                                   int32_t aStorageVersion)
-      : RepositoryOperationBase(aDirectory, aPersistent, aStorageVersion) {}
+  UpgradeStorageFrom2_0To2_1Helper(nsIFile* aDirectory, bool aPersistent)
+      : RepositoryOperationBase(aDirectory, aPersistent) {}
 
  private:
   nsresult PrepareOriginDirectory(OriginProps& aOriginProps,
@@ -1646,9 +1637,8 @@ class UpgradeStorageFrom2_0To2_1Helper final : public RepositoryOperationBase {
 
 class UpgradeStorageFrom2_1To2_2Helper final : public RepositoryOperationBase {
  public:
-  UpgradeStorageFrom2_1To2_2Helper(nsIFile* aDirectory, bool aPersistent,
-                                   int32_t aStorageVersion)
-      : RepositoryOperationBase(aDirectory, aPersistent, aStorageVersion) {}
+  UpgradeStorageFrom2_1To2_2Helper(nsIFile* aDirectory, bool aPersistent)
+      : RepositoryOperationBase(aDirectory, aPersistent) {}
 
  private:
   nsresult PrepareOriginDirectory(OriginProps& aOriginProps,
@@ -2508,6 +2498,14 @@ QuotaManager::Observer::Observe(nsISupports* aSubject, const char* aTopic,
   nsresult rv;
 
   if (!strcmp(aTopic, kProfileDoChangeTopic)) {
+    if (NS_WARN_IF(gBaseDirPath)) {
+      NS_WARNING("profile-before-change-qm must precede repeated "
+                 "profile-do-change!");
+      return NS_OK;
+    }
+
+    gBaseDirPath = new nsString();
+
     nsCOMPtr<nsIFile> baseDir;
     rv = NS_GetSpecialDirectory(NS_APP_INDEXEDDB_PARENT_DIR,
                                 getter_AddRefs(baseDir));
@@ -2519,7 +2517,7 @@ QuotaManager::Observer::Observe(nsISupports* aSubject, const char* aTopic,
       return rv;
     }
 
-    rv = baseDir->GetPath(gBaseDirPath);
+    rv = baseDir->GetPath(*gBaseDirPath);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -2528,6 +2526,11 @@ QuotaManager::Observer::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   if (!strcmp(aTopic, PROFILE_BEFORE_CHANGE_QM_OBSERVER_ID)) {
+    if (NS_WARN_IF(!gBaseDirPath)) {
+      NS_WARNING("profile-do-change must precede profile-before-change-qm!");
+      return NS_OK;
+    }
+
     // mPendingProfileChange is our re-entrancy guard (the nested event loop
     // below may cause re-entrancy).
     if (mPendingProfileChange) {
@@ -2551,7 +2554,7 @@ QuotaManager::Observer::Observe(nsISupports* aSubject, const char* aTopic,
 
     MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() { return mShutdownComplete; }));
 
-    gBaseDirPath.Truncate();
+    gBaseDirPath = nullptr;
 
     return NS_OK;
   }
@@ -2914,16 +2917,19 @@ void QuotaManager::GetOrCreate(nsIRunnable* aCallback,
   AssertIsOnBackgroundThread();
 
   if (IsShuttingDown()) {
-    MOZ_ASSERT(false, "Calling GetOrCreate() after shutdown!");
+    MOZ_ASSERT(false, "Calling QuotaManager::GetOrCreate() after shutdown!");
     return;
   }
 
-  if (gInstance || gCreateFailed) {
+  if (NS_WARN_IF(!gBaseDirPath)) {
+    NS_WARNING("profile-do-change must precede QuotaManager::GetOrCreate()");
+    MOZ_ASSERT(!gInstance);
+  } else if (gInstance || gCreateFailed) {
     MOZ_ASSERT_IF(gCreateFailed, !gInstance);
   } else {
     RefPtr<QuotaManager> manager = new QuotaManager();
 
-    nsresult rv = manager->Init(gBaseDirPath);
+    nsresult rv = manager->Init(*gBaseDirPath);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       gCreateFailed = true;
     } else {
@@ -3295,9 +3301,8 @@ nsresult QuotaManager::Init(const nsAString& aBasePath) {
     return NS_ERROR_FAILURE;
   }
 
-  static_assert(Client::IDB == 0 && Client::ASMJS == 1 &&
-                    Client::DOMCACHE == 2 && Client::SDB == 3 &&
-                    Client::LS == 4 && Client::TYPE_MAX == 5,
+  static_assert(Client::IDB == 0 && Client::DOMCACHE == 1 && Client::SDB == 2 &&
+                    Client::LS == 3 && Client::TYPE_MAX == 4,
                 "Fix the registration!");
 
   MOZ_ASSERT(mClients.Capacity() == Client::TYPE_MAX,
@@ -3305,7 +3310,6 @@ nsresult QuotaManager::Init(const nsAString& aBasePath) {
 
   // Register clients.
   mClients.AppendElement(indexedDB::CreateQuotaClient());
-  mClients.AppendElement(asmjscache::CreateClient());
   mClients.AppendElement(cache::CreateQuotaClient());
   mClients.AppendElement(simpledb::CreateQuotaClient());
   if (NextGenLocalStorageEnabled()) {
@@ -4056,11 +4060,31 @@ nsresult QuotaManager::InitializeOrigin(PersistenceType aPersistenceType,
     }
 
     Client::Type clientType;
-    rv = Client::TypeFromText(leafName, clientType, kStorageVersion);
+    rv = Client::TypeFromText(leafName, clientType);
     if (NS_FAILED(rv)) {
       UNKNOWN_FILE_WARNING(leafName);
       REPORT_TELEMETRY_INIT_ERR(kInternalError, Ori_UnexpectedClient);
       RECORD_IN_NIGHTLY(statusKeeper, NS_ERROR_UNEXPECTED);
+
+      // Our upgrade process should have attempted to delete the deprecated
+      // client directory and failed to upgrade if it could not be deleted. So
+      // if we're here, either a) there's a bug in our code or b) a user copied
+      // over parts of an old profile into a new profile for some reason and the
+      // upgrade process won't be run again to fix it. If it's a bug, we want to
+      // assert, but only on nightly where the bug would have been introduced
+      // and we can do something about it. If it's the user, it's best for us to
+      // try and delete the origin and/or mark it broken, so we do that for
+      // non-nightly builds by trying to delete the deprecated client directory
+      // and return the initialization error for the origin.
+      if (Client::IsDeprecatedClient(leafName)) {
+        rv = file->Remove(true);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(rv);
+        }
+
+        MOZ_DIAGNOSTIC_ASSERT(true, "Found a deprecated client");
+      }
+
       CONTINUE_IN_NIGHTLY_RETURN_IN_OTHERS(NS_ERROR_UNEXPECTED);
     }
 
@@ -4155,8 +4179,7 @@ nsresult QuotaManager::MaybeUpgradeIndexedDBDirectory() {
   return NS_OK;
 }
 
-nsresult QuotaManager::MaybeUpgradePersistentStorageDirectory(
-    int32_t aStorageVersion) {
+nsresult QuotaManager::MaybeUpgradePersistentStorageDirectory() {
   AssertIsOnIOThread();
 
   nsCOMPtr<nsIFile> persistentStorageDir;
@@ -4214,8 +4237,7 @@ nsresult QuotaManager::MaybeUpgradePersistentStorageDirectory(
   // Create real metadata files for origin directories in persistent storage.
   RefPtr<CreateOrUpgradeDirectoryMetadataHelper> helper =
       new CreateOrUpgradeDirectoryMetadataHelper(persistentStorageDir,
-                                                 /* aPersistent */ true,
-                                                 aStorageVersion);
+                                                 /* aPersistent */ true);
 
   rv = helper->ProcessRepository();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4246,9 +4268,9 @@ nsresult QuotaManager::MaybeUpgradePersistentStorageDirectory(
       return NS_OK;
     }
 
-    helper = new CreateOrUpgradeDirectoryMetadataHelper(temporaryStorageDir,
-                                                        /* aPersistent */ false,
-                                                        aStorageVersion);
+    helper =
+        new CreateOrUpgradeDirectoryMetadataHelper(temporaryStorageDir,
+                                                   /* aPersistent */ false);
 
     rv = helper->ProcessRepository();
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4351,8 +4373,7 @@ nsresult QuotaManager::UpgradeStorage(const int32_t aOldVersion,
     }
 
     bool persistent = persistenceType == PERSISTENCE_TYPE_PERSISTENT;
-    RefPtr<RepositoryOperationBase> helper =
-        new Helper(directory, persistent, aOldVersion);
+    RefPtr<RepositoryOperationBase> helper = new Helper(directory, persistent);
     rv = helper->ProcessRepository();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
@@ -4389,7 +4410,7 @@ nsresult QuotaManager::UpgradeStorageFrom0_0To1_0(
     return rv;
   }
 
-  rv = MaybeUpgradePersistentStorageDirectory(/* aStorageVersion */ 0);
+  rv = MaybeUpgradePersistentStorageDirectory();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -6988,15 +7009,6 @@ nsresult QuotaUsageRequestBase::GetUsageForOrigin(
     rv = directory->GetDirectoryEntries(getter_AddRefs(entries));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // A version to pass to Client::TypeFromText if the version is greater than
-    // the version for deprecating asmjs cache, then the assertion for ensuring
-    // would be enabled.
-    // If the mNeedsQuotaManagerInit is true, the storage version is guaranteed
-    // to be the newest version. Otherwise, just disable the check here because
-    // the overhead for getting the version is too big and the assertion will
-    // be checked during initialization anyway.
-    int32_t storageVersion =
-        mNeedsQuotaManagerInit ? kStorageVersion : /* Disable the check */ 0;
     nsCOMPtr<nsIFile> file;
     while (NS_SUCCEEDED((rv = entries->GetNextFile(getter_AddRefs(file)))) &&
            file && !mCanceled) {
@@ -7044,7 +7056,7 @@ nsresult QuotaUsageRequestBase::GetUsageForOrigin(
       }
 
       Client::Type clientType;
-      rv = Client::TypeFromText(leafName, clientType, storageVersion);
+      rv = Client::TypeFromText(leafName, clientType);
       if (NS_FAILED(rv)) {
         UNKNOWN_FILE_WARNING(leafName);
         if (!initialized) {
@@ -7648,52 +7660,92 @@ void ClearRequestBase::DeleteFiles(QuotaManager* aQuotaManager,
       return;
     }
 
+    bool initialized;
+    if (aPersistenceType == PERSISTENCE_TYPE_PERSISTENT) {
+      initialized = aQuotaManager->IsOriginInitialized(origin);
+    } else {
+      initialized = aQuotaManager->IsTemporaryStorageInitialized();
+    }
+
     UsageInfo usageInfo;
 
     if (!mClientType.IsNull()) {
-      Client::Type clientType = mClientType.Value();
-
-      nsAutoString clientDirectoryName;
-      rv = Client::TypeToText(clientType, clientDirectoryName);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
+      // Checking whether there is any other client in the directory is needed.
+      // If there is not, removing whole directory is needed.
+      nsCOMPtr<nsIDirectoryEnumerator> originEntries;
+      bool hasOtherClient = false;
+      if (NS_WARN_IF(NS_FAILED(
+              file->GetDirectoryEntries(getter_AddRefs(originEntries)))) ||
+          !originEntries) {
         return;
       }
 
-      rv = file->Append(clientDirectoryName);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
+      nsCOMPtr<nsIFile> clientFile;
+      while (NS_SUCCEEDED((rv = originEntries->GetNextFile(
+                               getter_AddRefs(clientFile)))) &&
+             clientFile) {
+        bool isDirectory;
+        rv = clientFile->IsDirectory(&isDirectory);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        if (!isDirectory) {
+          continue;
+        }
+
+        nsString leafName;
+        rv = clientFile->GetLeafName(leafName);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        Client::Type clientType;
+        rv = Client::TypeFromText(leafName, clientType);
+        if (NS_FAILED(rv)) {
+          UNKNOWN_FILE_WARNING(leafName);
+          continue;
+        }
+
+        if (clientType != mClientType.Value()) {
+          hasOtherClient = true;
+          break;
+        }
       }
 
-      bool exists;
-      rv = file->Exists(&exists);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
+      if (hasOtherClient) {
+        nsAutoString clientDirectoryName;
+        rv = Client::TypeToText(mClientType.Value(), clientDirectoryName);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        rv = file->Append(clientDirectoryName);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        bool exists;
+        rv = file->Exists(&exists);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        if (!exists) {
+          continue;
+        }
       }
 
-      if (!exists) {
-        continue;
-      }
-
-      bool initialized;
-      if (aPersistenceType == PERSISTENCE_TYPE_PERSISTENT) {
-        initialized = aQuotaManager->IsOriginInitialized(origin);
-      } else {
-        initialized = aQuotaManager->IsTemporaryStorageInitialized();
-      }
-
-      Client* client = aQuotaManager->GetClient(clientType);
-      MOZ_ASSERT(client);
-
-      Atomic<bool> dummy(false);
       if (initialized) {
+        Client* client = aQuotaManager->GetClient(mClientType.Value());
+        MOZ_ASSERT(client);
+
+        Atomic<bool> dummy(false);
         rv = client->GetUsageForOrigin(aPersistenceType, group, origin, dummy,
                                        &usageInfo);
-      } else {
-        rv = client->InitOrigin(aPersistenceType, group, origin, dummy,
-                                &usageInfo);
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
       }
     }
 
@@ -7710,6 +7762,12 @@ void ClearRequestBase::DeleteFiles(QuotaManager* aQuotaManager,
 
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to remove directory, giving up!");
+    }
+
+    // If it hasn't been initialized, we don't need to update the quota and
+    // notify the removing client.
+    if (!initialized) {
+      return;
     }
 
     if (aPersistenceType != PERSISTENCE_TYPE_PERSISTENT) {
@@ -9035,12 +9093,15 @@ nsresult RepositoryOperationBase::MaybeUpgradeClients(
 
     bool removed;
     rv = PrepareClientDirectory(file, leafName, removed);
-    if (NS_FAILED(rv) || removed) {
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    if (removed) {
       continue;
     }
 
     Client::Type clientType;
-    rv = Client::TypeFromText(leafName, clientType, mStorageVersion);
+    rv = Client::TypeFromText(leafName, clientType);
     if (NS_FAILED(rv)) {
       UNKNOWN_FILE_WARNING(leafName);
       continue;

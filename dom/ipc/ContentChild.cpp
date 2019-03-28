@@ -1168,7 +1168,9 @@ void ContentChild::LaunchRDDProcess() {
         nsresult rv;
         Endpoint<PRemoteDecoderManagerChild> endpoint;
         Unused << SendLaunchRDDProcess(&rv, &endpoint);
-        if (rv == NS_OK) {
+        // Only call InitForContent if we got a valid enpoint back which
+        // indicates we needed to launch an RDD process.
+        if (rv == NS_OK && endpoint.IsValid()) {
           RemoteDecoderManagerChild::InitForContent(std::move(endpoint));
         }
       }));
@@ -3839,9 +3841,10 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
-    BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction) {
+    BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction,
+    BrowsingContext::FieldEpochs&& aEpochs) {
   if (aContext) {
-    aTransaction.Apply(aContext, nullptr);
+    aTransaction.Apply(aContext, nullptr, &aEpochs);
   }
   return IPC_OK();
 }

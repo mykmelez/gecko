@@ -461,7 +461,8 @@ bool nsLayoutUtils::IsAnimationLoggingEnabled() {
 
 bool nsLayoutUtils::AreRetainedDisplayListsEnabled() {
 #ifdef MOZ_WIDGET_ANDROID
-  return gfxPrefs::LayoutRetainDisplayList();;
+  return gfxPrefs::LayoutRetainDisplayList();
+  ;
 #else
   if (XRE_IsContentProcess()) {
     return gfxPrefs::LayoutRetainDisplayList();
@@ -8829,8 +8830,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
         // Restore the visual viewport offset to the copy stored on the
         // main thread.
         presShell->ScrollToVisual(presShell->GetVisualViewportOffset(),
-                                  FrameMetrics::eRestore,
-                                  nsIPresShell::ScrollMode::eInstant);
+                                  FrameMetrics::eRestore, ScrollMode::eInstant);
       }
 
       if (const Maybe<nsIPresShell::VisualScrollUpdate>& visualUpdate =
@@ -9595,8 +9595,7 @@ static nsRect ComputeSVGReferenceRect(nsIFrame* aFrame,
         //    system established by the `viewBox` attribute.
         // 2. The dimension of the reference box is set to the width and height
         //    values of the `viewBox` attribute.
-        SVGViewBox* viewBox = svgElement->GetViewBox();
-        const SVGViewBoxRect& value = viewBox->GetAnimValue();
+        const SVGViewBoxRect& value = svgElement->GetViewBox()->GetAnimValue();
         r = nsRect(nsPresContext::CSSPixelsToAppUnits(value.x),
                    nsPresContext::CSSPixelsToAppUnits(value.y),
                    nsPresContext::CSSPixelsToAppUnits(value.width),
@@ -9738,34 +9737,6 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   params.textPerf = aPresContext->GetTextPerfMetrics();
   params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
   return aPresContext->DeviceContext()->GetMetricsFor(font, params);
-}
-
-/* static */
-void nsLayoutUtils::FixupNoneGeneric(nsFont* aFont, uint8_t aGenericFontID,
-                                     const nsFont* aDefaultVariableFont) {
-  bool useDocumentFonts = StaticPrefs::browser_display_use_document_fonts();
-  if (aGenericFontID == kGenericFont_NONE ||
-      (!useDocumentFonts && (aGenericFontID == kGenericFont_cursive ||
-                             aGenericFontID == kGenericFont_fantasy))) {
-    FontFamilyType defaultGeneric =
-        aDefaultVariableFont->fontlist.GetDefaultFontType();
-    MOZ_ASSERT(aDefaultVariableFont->fontlist.IsEmpty() &&
-               (defaultGeneric == eFamily_serif ||
-                defaultGeneric == eFamily_sans_serif));
-    if (defaultGeneric != eFamily_none) {
-      if (useDocumentFonts) {
-        aFont->fontlist.SetDefaultFontType(defaultGeneric);
-      } else {
-        // Either prioritize the first generic in the list,
-        // or (if there isn't one) prepend the default variable font.
-        if (!aFont->fontlist.PrioritizeFirstGeneric()) {
-          aFont->fontlist.PrependGeneric(defaultGeneric);
-        }
-      }
-    }
-  } else {
-    aFont->fontlist.SetDefaultFontType(eFamily_none);
-  }
 }
 
 /* static */

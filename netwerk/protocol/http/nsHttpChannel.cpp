@@ -371,6 +371,7 @@ void nsHttpChannel::ReleaseMainThreadOnlyReferences() {
   arrayToRelease.AppendElement(mRedirectURI.forget());
   arrayToRelease.AppendElement(mRedirectChannel.forget());
   arrayToRelease.AppendElement(mPreflightChannel.forget());
+  arrayToRelease.AppendElement(mDNSPrefetch.forget());
 
   NS_DispatchToMainThread(new ProxyReleaseRunnable(std::move(arrayToRelease)));
 }
@@ -546,9 +547,12 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   bool shouldUpgrade = mUpgradeToSecure;
   if (isHttp) {
     if (!shouldUpgrade) {
-      RefPtr<nsHttpChannel> self = this;
-      auto resultCallback = [self{std::move(self)}](bool aResult,
-                                                    nsresult aStatus) {
+      // Make sure http channel is released on main thread.
+      // See bug 1539148 for details.
+      nsMainThreadPtrHandle<nsHttpChannel> self(
+          new nsMainThreadPtrHolder<nsHttpChannel>(
+              "nsHttpChannel::OnBeforeConnect::self", this));
+      auto resultCallback = [self(self)](bool aResult, nsresult aStatus) {
         nsresult rv = self->ContinueOnBeforeConnect(aResult, aStatus);
         if (NS_FAILED(rv)) {
           self->CloseCacheEntry(false);
@@ -1089,10 +1093,9 @@ nsresult nsHttpChannel::SetupTransaction() {
     }
 
     if (mIgnoreCacheEntry) {
-      if (!mAvailableCachedAltDataType.IsEmpty()) {
-        mAvailableCachedAltDataType.Truncate();
-        mAltDataLength = 0;
-      }
+      mAvailableCachedAltDataType.Truncate();
+      mDeliveringAltData = false;
+      mAltDataLength = -1;
       mCacheInputStream.CloseAndRelease();
     }
   }
@@ -1630,6 +1633,36 @@ void WarnWrongMIMEOfScript(nsHttpChannel *aChannel, nsIURI *aURI,
   }
 }
 
+void nsHttpChannel::SetCachedContentType() {
+  if (!mResponseHead) {
+    return;
+  }
+
+  nsAutoCString contentTypeStr;
+  mResponseHead->ContentType(contentTypeStr);
+
+  uint8_t contentType = nsICacheEntry::CONTENT_TYPE_OTHER;
+  if (nsContentUtils::IsJavascriptMIMEType(
+          NS_ConvertUTF8toUTF16(contentTypeStr))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_JAVASCRIPT;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("text/css")) ||
+             mLoadInfo->GetExternalContentPolicyType() ==
+                 nsIContentPolicy::TYPE_STYLESHEET) {
+    contentType = nsICacheEntry::CONTENT_TYPE_STYLESHEET;
+  } else if (StringBeginsWith(contentTypeStr,
+                              NS_LITERAL_CSTRING("application/wasm"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_WASM;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("image/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_IMAGE;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("video/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_MEDIA;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("audio/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_MEDIA;
+  }
+
+  mCacheEntry->SetContentType(contentType);
+}
+
 nsresult nsHttpChannel::CallOnStartRequest() {
   LOG(("nsHttpChannel::CallOnStartRequest [this=%p]", this));
 
@@ -1725,6 +1758,10 @@ nsresult nsHttpChannel::CallOnStartRequest() {
 
   if (mResponseHead && !mResponseHead->HasContentCharset())
     mResponseHead->SetContentCharset(mContentCharsetHint);
+
+  if (mCacheEntry && mCacheEntryIsWriteOnly) {
+    SetCachedContentType();
+  }
 
   LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this,
        mListener.get()));
@@ -4968,12 +5005,14 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry *cacheEntry,
       LOG(("Opened alt-data input stream type=%s", altDataType.get()));
       // We have succeeded.
       mAvailableCachedAltDataType = altDataType;
+      mDeliveringAltData = deliverAltData;
+
+      // Set the correct data size on the channel.
+      Unused << cacheEntry->GetAltDataSize(&altDataSize);
+      mAltDataLength = altDataSize;
 
       if (deliverAltData) {
-        // Set the correct data size on the channel.
-        Unused << cacheEntry->GetAltDataSize(&altDataSize);
         stream = altData;
-        mAltDataLength = altDataSize;
       }
     }
   }
@@ -5295,6 +5334,7 @@ nsresult nsHttpChannel::InitCacheEntry() {
          "recreating cache entry\n"));
     // clean the altData cache and reset this to avoid wrong content length
     mAvailableCachedAltDataType.Truncate();
+    mDeliveringAltData = false;
 
     nsCOMPtr<nsICacheEntry> currentEntry;
     currentEntry.swap(mCacheEntry);
@@ -6599,7 +6639,7 @@ nsresult nsHttpChannel::BeginConnect() {
     return mStatus;
   }
 
-  if (!(mLoadFlags & LOAD_CLASSIFY_URI)) {
+  if (!NS_ShouldClassifyChannel(this)) {
     MaybeStartDNSPrefetch();
     return ContinueBeginConnectWithResult();
   }
@@ -7477,6 +7517,7 @@ nsHttpChannel::OnStartRequest(nsIRequest *request) {
         }
       }
       mAvailableCachedAltDataType.Truncate();
+      mDeliveringAltData = false;
     } else if (WRONG_RACING_RESPONSE_SOURCE(request)) {
       LOG(("  Early return when racing. This response not needed."));
       return NS_OK;
@@ -7805,7 +7846,6 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsresult status) {
       mTransactionTimings.domainLookupStart = mDNSPrefetch->StartTimestamp();
       mTransactionTimings.domainLookupEnd = mDNSPrefetch->EndTimestamp();
     }
-    mDNSPrefetch = nullptr;
 
     // handle auth retry...
     if (authRetry) {

@@ -57,6 +57,14 @@ var TelemetryUtils = {
     EventPingMinimumFrequency: "toolkit.telemetry.eventping.minimumFrequency",
     EventPingMaximumFrequency: "toolkit.telemetry.eventping.maximumFrequency",
 
+    // Ecosystem Telemetry Preferences
+    EcosystemTelemetryEnabled: "toolkit.telemetry.ecosystemtelemetry.enabled",
+
+    // Prio Ping Preferences
+    PrioPingEnabled: "toolkit.telemetry.prioping.enabled",
+    PrioPingFrequency: "toolkit.telemetry.prioping.frequency",
+    PrioPingDataLimit: "toolkit.telemetry.prioping.dataLimit",
+
     // Log Preferences
     LogLevel: "toolkit.telemetry.log.level",
     LogDump: "toolkit.telemetry.log.dump",

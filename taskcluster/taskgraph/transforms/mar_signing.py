@@ -15,7 +15,7 @@ from taskgraph.util.scriptworker import (
     get_signing_cert_scope_per_platform,
     get_worker_type_for_scope,
 )
-from taskgraph.util.partials import get_balrog_platform_name, get_partials_artifacts
+from taskgraph.util.partials import get_balrog_platform_name, get_partials_artifacts_from_params
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.util.treeherder import join_symbol
 
@@ -42,7 +42,7 @@ def generate_partials_artifacts(job, release_history, platform, locale=None):
     else:
         locale = 'en-US'
 
-    artifacts = get_partials_artifacts(release_history, platform, locale)
+    artifacts = get_partials_artifacts_from_params(release_history, platform, locale)
 
     upstream_artifacts = [{
         "taskId": {"task-reference": '<partials>'},
@@ -135,7 +135,11 @@ def make_task_description(config, jobs):
             upstream_artifacts = generate_complete_artifacts(dep_job, config.kind)
 
         build_platform = dep_job.attributes.get('build_platform')
-        is_nightly = job.get('nightly', dep_job.attributes.get('nightly'))
+        is_nightly = job.get(
+            'nightly',  # First check current job
+            dep_job.attributes.get(
+                'nightly',  # Then dep job for 'nightly'
+                dep_job.attributes.get('shippable')))  # lastly dep job for 'shippable'
         signing_cert_scope = get_signing_cert_scope_per_platform(
             build_platform, is_nightly, config
         )

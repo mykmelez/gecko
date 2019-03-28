@@ -938,7 +938,7 @@ class NativeObject : public ShapedObject {
 
   static MOZ_MUST_USE bool fillInAfterSwap(JSContext* cx,
                                            HandleNativeObject obj,
-                                           const AutoValueVector& values,
+                                           HandleValueVector values,
                                            void* priv);
 
  public:
@@ -1582,7 +1582,7 @@ inline bool NativeGetProperty(JSContext* cx, HandleNativeObject obj,
 }
 
 extern bool NativeGetElement(JSContext* cx, HandleNativeObject obj,
-                             HandleValue reciever, int32_t index,
+                             HandleValue receiver, int32_t index,
                              MutableHandleValue vp);
 
 bool GetSparseElementHelper(JSContext* cx, HandleArrayObject obj,
