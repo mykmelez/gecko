@@ -12,8 +12,6 @@ const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.j
 
 ChromeUtils.defineModuleGetter(this, "ActorManagerParent",
                                "resource://gre/modules/ActorManagerParent.jsm");
-ChromeUtils.defineModuleGetter(this, "XULStore",
-                               "resource://gre/modules/XULStore.jsm");
 
 const PREF_PDFJS_ENABLED_CACHE_STATE = "pdfjs.enabledCache.state";
 
@@ -300,7 +298,7 @@ let ACTORS = {
   },
 };
 
-(async function earlyBlankFirstPaint() {
+(function earlyBlankFirstPaint() {
   if (!Services.prefs.getBoolPref("browser.startup.blankWindow", false))
     return;
 
@@ -310,10 +308,11 @@ let ACTORS = {
         "default-theme@mozilla.org")
     return;
 
+  let store = Services.xulStore;
   let getValue = attr =>
-    XULStore.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
-  let width = await getValue("width");
-  let height = await getValue("height");
+    store.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
+  let width = getValue("width");
+  let height = getValue("height");
 
   // The clean profile case isn't handled yet. Return early for now.
   if (!width || !height)
@@ -334,11 +333,11 @@ let ACTORS = {
   }
 
   let docElt = win.document.documentElement;
-  docElt.setAttribute("screenX", await getValue("screenX"));
-  docElt.setAttribute("screenY", await getValue("screenY"));
+  docElt.setAttribute("screenX", getValue("screenX"));
+  docElt.setAttribute("screenY", getValue("screenY"));
 
   // The sizemode="maximized" attribute needs to be set before first paint.
-  let sizemode = await getValue("sizemode");
+  let sizemode = getValue("sizemode");
   if (sizemode == "maximized") {
     docElt.setAttribute("sizemode", sizemode);
 
@@ -721,7 +720,7 @@ BrowserGlue.prototype = {
         this._openPreferences("privacy-permissions", { origin: "notifOpenSettings" });
         break;
       case "final-ui-startup":
-        await this._beforeUIStartup();
+        this._beforeUIStartup();
         break;
       case "browser-delayed-startup-finished":
         this._onFirstWindowLoaded(subject);
@@ -801,9 +800,9 @@ BrowserGlue.prototype = {
           if (Services.prefs.prefHasUserValue("app.update.postupdate"))
             this._showUpdateNotification();
         } else if (data == "force-ui-migration") {
-          await this._migrateUI();
+          this._migrateUI();
         } else if (data == "force-distribution-customization") {
-          await this._distributionCustomizer.applyCustomizations();
+          this._distributionCustomizer.applyCustomizations();
           // To apply distribution bookmarks use "places-init-complete".
         } else if (data == "force-places-init") {
           this._initPlaces(false);
@@ -1003,7 +1002,7 @@ BrowserGlue.prototype = {
 
   // runs on startup, before the first command line handler is invoked
   // (i.e. before the first window is opened)
-  _beforeUIStartup: async function BG__beforeUIStartup() {
+  _beforeUIStartup: function BG__beforeUIStartup() {
     SessionStartup.init();
 
     if (Services.prefs.prefHasUserValue(PREF_PDFJS_ENABLED_CACHE_STATE)) {
@@ -1027,6 +1026,12 @@ BrowserGlue.prototype = {
       Services.ww.openWindow(null, "chrome://browser/content/safeMode.xul",
                              "_blank", "chrome,centerscreen,modal,resizable=no", null);
     }
+
+    // apply distribution customizations
+    this._distributionCustomizer.applyCustomizations();
+
+    // handle any UI migration
+    this._migrateUI();
 
     listeners.init();
 
@@ -1083,18 +1088,6 @@ BrowserGlue.prototype = {
     Normandy.init();
 
     SaveToPocket.init();
-
-    // We delay awaiting async functions until completing synchronous operations
-    // to ensure that the synchronous operations complete in time.
-    // In particular, SessionStore.init() registers notification observers
-    // that would miss notifications if we awaited this._migrateUI() beforehand.
-
-    // apply distribution customizations
-    await this._distributionCustomizer.applyCustomizations();
-
-    // handle any UI migration
-    await this._migrateUI();
-
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
   },
 
@@ -2242,13 +2235,15 @@ BrowserGlue.prototype = {
    * If the user does not have a persisted value for the toolbar's
    * "collapsed" attribute, try to determine whether it's customized.
    */
-  async _maybeToggleBookmarkToolbarVisibility() {
+  _maybeToggleBookmarkToolbarVisibility() {
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
     const NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE = 3;
-    if (!(await XULStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed"))) {
+    let xulStore = Services.xulStore;
+
+    if (!xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")) {
       // We consider the toolbar customized if it has more than NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE
       // children, or if it has a persisted currentset value.
-      let toolbarIsCustomized = await XULStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "currentset");
+      let toolbarIsCustomized = xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "currentset");
       let getToolbarFolderCount = () => {
         let toolbarFolder = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.toolbarGuid).root;
         let toolbarChildCount = toolbarFolder.childCount;
@@ -2257,13 +2252,13 @@ BrowserGlue.prototype = {
       };
 
       if (toolbarIsCustomized || getToolbarFolderCount() > NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE) {
-        await XULStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
+        xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
       }
     }
   },
 
   // eslint-disable-next-line complexity
-  _migrateUI: async function BG__migrateUI() {
+  _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
     const UI_VERSION = 81;
@@ -2280,7 +2275,7 @@ BrowserGlue.prototype = {
         // New profiles may have existing bookmarks (imported from another browser or
         // copied into the profile) and we want to show the bookmark toolbar for them
         // in some cases.
-        await this._maybeToggleBookmarkToolbarVisibility();
+        this._maybeToggleBookmarkToolbarVisibility();
       } catch (ex) {
         Cu.reportError(ex);
       }
@@ -2289,6 +2284,8 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion >= UI_VERSION)
       return;
+
+    let xulStore = Services.xulStore;
 
     if (currentUIVersion < 51) {
       // Switch to compact UI density if the user is using a formerly compact
@@ -2331,8 +2328,8 @@ BrowserGlue.prototype = {
       // Now, the sidebarcommand always indicates the last opened sidebar, and we
       // correctly persist the checked attribute to indicate whether or not the
       // sidebar was open. We should set the checked attribute in case it wasn't:
-      if (await XULStore.getValue(BROWSER_DOCURL, "sidebar-box", "sidebarcommand")) {
-        await XULStore.setValue(BROWSER_DOCURL, "sidebar-box", "checked", "true");
+      if (xulStore.getValue(BROWSER_DOCURL, "sidebar-box", "sidebarcommand")) {
+        xulStore.setValue(BROWSER_DOCURL, "sidebar-box", "checked", "true");
       }
     }
 
@@ -2418,7 +2415,7 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion < 61) {
       // Remove persisted toolbarset from navigator toolbox
-      await XULStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
+      xulStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
     }
 
     if (currentUIVersion < 62) {
@@ -2427,7 +2424,7 @@ BrowserGlue.prototype = {
                       "TabsToolbar", "toolbar-menubar"];
       for (let resourceName of ["mode", "iconsize"]) {
         for (let toolbarId of toolbars) {
-          await XULStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
+          xulStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
         }
       }
     }
@@ -2555,7 +2552,7 @@ BrowserGlue.prototype = {
       // Remove currentset from all the toolbars
       let toolbars = ["nav-bar", "PersonalToolbar", "TabsToolbar", "toolbar-menubar"];
       for (let toolbarId of toolbars) {
-        await XULStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
+        xulStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
       }
     }
 

@@ -10,6 +10,7 @@ const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.j
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   gCertDB: ["@mozilla.org/security/x509certdb;1", "nsIX509CertDB"],
+  gXulStore: ["@mozilla.org/xul/xulstore;1", "nsIXULStore"],
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
@@ -18,7 +19,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   CustomizableUI: "resource:///modules/CustomizableUI.jsm",
   ProxyPolicies: "resource:///modules/policies/ProxyPolicies.jsm",
   WebsiteFilter: "resource:///modules/policies/WebsiteFilter.jsm",
-  XULStore: "resource://gre/modules/XULStore.jsm",
 });
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["File", "FileReader"]);
@@ -452,9 +452,9 @@ var Policies = {
       // This policy is meant to change the default behavior, not to force it.
       // If this policy was alreay applied and the user chose to re-hide the
       // bookmarks toolbar, do not show it again.
-      runOncePerModification("displayBookmarksToolbar", value, async () => {
-        await XULStore.setValue(BROWSER_DOCUMENT_URL, "PersonalToolbar", "collapsed", value);
-      }).catch(Cu.reportError);
+      runOncePerModification("displayBookmarksToolbar", value, () => {
+        gXulStore.setValue(BROWSER_DOCUMENT_URL, "PersonalToolbar", "collapsed", value);
+      });
     },
   },
 
@@ -464,9 +464,9 @@ var Policies = {
         // This policy is meant to change the default behavior, not to force it.
         // If this policy was alreay applied and the user chose to re-hide the
         // menu bar, do not show it again.
-      runOncePerModification("displayMenuBar", value, async () => {
-        await XULStore.setValue(BROWSER_DOCUMENT_URL, "toolbar-menubar", "autohide", value);
-      }).catch(Cu.reportError);
+      runOncePerModification("displayMenuBar", value, () => {
+        gXulStore.setValue(BROWSER_DOCUMENT_URL, "toolbar-menubar", "autohide", value);
+      });
     },
   },
 

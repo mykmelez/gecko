@@ -48,8 +48,7 @@ var gSetBackground = {
       }
     }
 
-    document.addEventListener("dialogaccept",
-      function() { gSetBackground.setDesktopBackground().catch(Cu.reportError); });
+    document.addEventListener("dialogaccept", function() { gSetBackground.setDesktopBackground(); });
     // make sure that the correct dimensions will be used
     setTimeout(function(self) {
       self.init(window.arguments[0], window.arguments[1]);
@@ -83,9 +82,9 @@ var gSetBackground = {
     this.updatePosition();
   },
 
-  async setDesktopBackground() {
+  setDesktopBackground() {
     if (AppConstants.platform != "macosx") {
-      await XULStore.persist(document.getElementById("menuPosition"), "value");
+      XULStore.persist(document.getElementById("menuPosition"), "value");
       this._shell.desktopBackgroundColor = this._hexStringToLong(this._backgroundColor);
     } else {
       Services.obs.addObserver(this, "shell:desktop-background-changed");

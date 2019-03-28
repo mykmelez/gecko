@@ -97,7 +97,7 @@ const XULStore = {
    * @param node - DOM node
    * @param attr - attribute to store
    */
-  async persist(node, attr) {
+  persist(node, attr) {
     if (!node.id) {
       throw new Error("Node without ID passed into persist()");
     }

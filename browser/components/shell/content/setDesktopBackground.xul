@@ -74,7 +74,7 @@
     <hbox align="right">
       <button id="setDesktopBackground"
               label="&setDesktopBackground.title;"
-              oncommand="gSetBackground.setDesktopBackground().catch(Cu.reportError);"/>
+              oncommand="gSetBackground.setDesktopBackground();"/>
       <button id="showDesktopPreferences"
               label="&openDesktopPrefs.label;"
               oncommand="gSetBackground.showDesktopPrefs();"
