@@ -35,9 +35,7 @@ use moz_task::{create_thread, Task, TaskRunnable};
 use nserror::nsresult;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::{
-    collections::BTreeMap,
-};
+use std::collections::BTreeMap;
 use xpcom::{interfaces::nsIThread, RefPtr, ThreadBoundRefPtr};
 
 const SEPARATOR: char = '\u{0009}';
@@ -53,7 +51,7 @@ lazy_static! {
             Err(err) => {
                 error!("error creating XULStore thread: {}", err);
                 return None;
-            },
+            }
         };
 
         Some(ThreadBoundRefPtr::new(thread))
@@ -73,7 +71,7 @@ impl XULStore {
 
         // bug 319846 -- don't save really long attributes or values.
         if id.len() > 512 || attr.len() > 512 {
-          return Err(XULStoreError::IdAttrNameTooLong);
+            return Err(XULStoreError::IdAttrNameTooLong);
         }
 
         let key = make_key(doc, id, attr);
@@ -89,12 +87,18 @@ impl XULStore {
             Some(data) => data,
             None => return Ok(()),
         };
-        data.entry(doc.to_string()).or_insert_with(BTreeMap::new)
-           .entry(id.to_string()).or_insert_with(BTreeMap::new)
-           .insert(attr.to_string(), value.clone());
+        data.entry(doc.to_string())
+            .or_insert_with(BTreeMap::new)
+            .entry(id.to_string())
+            .or_insert_with(BTreeMap::new)
+            .insert(attr.to_string(), value.clone());
 
         let task = Box::new(SetValueTask::new(key, value));
-        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        let thread = THREAD
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .get_ref()
+            .ok_or(XULStoreError::Unavailable)?;
         TaskRunnable::new("XULStore::SetValue", task)?.dispatch(thread)?;
 
         Ok(())
@@ -110,12 +114,10 @@ impl XULStore {
         };
 
         match data.get(&doc.to_string()) {
-            Some(ids) => {
-                match ids.get(&id.to_string()) {
-                    Some(attrs) => Ok(attrs.contains_key(&attr.to_string())),
-                    None => Ok(false),
-                }
-            }
+            Some(ids) => match ids.get(&id.to_string()) {
+                Some(attrs) => Ok(attrs.contains_key(&attr.to_string())),
+                None => Ok(false),
+            },
             None => Ok(false),
         }
     }
@@ -130,17 +132,13 @@ impl XULStore {
         };
 
         match data.get(&doc.to_string()) {
-            Some(ids) => {
-                match ids.get(&id.to_string()) {
-                    Some(attrs) => {
-                        match attrs.get(&attr.to_string()) {
-                            Some(value) => Ok(value.to_owned()),
-                            None => Ok("".to_owned()),
-                        }
-                    }
+            Some(ids) => match ids.get(&id.to_string()) {
+                Some(attrs) => match attrs.get(&attr.to_string()) {
+                    Some(value) => Ok(value.to_owned()),
                     None => Ok("".to_owned()),
-                }
-            }
+                },
+                None => Ok("".to_owned()),
+            },
             None => Ok("".to_owned()),
         }
     }
@@ -176,7 +174,11 @@ impl XULStore {
 
         let key = make_key(doc, id, attr);
         let task = Box::new(RemoveValueTask::new(key));
-        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        let thread = THREAD
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .get_ref()
+            .ok_or(XULStoreError::Unavailable)?;
         TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(thread)?;
 
         Ok(())
@@ -207,7 +209,11 @@ impl XULStore {
         data.remove(&doc);
 
         let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
-        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        let thread = THREAD
+            .as_ref()
+            .ok_or(XULStoreError::Unavailable)?
+            .get_ref()
+            .ok_or(XULStoreError::Unavailable)?;
         TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(thread)?;
 
         Ok(())
@@ -224,15 +230,13 @@ impl XULStore {
 
         match data.get(&doc.to_string()) {
             Some(ids) => {
-                let mut ids: Vec<String> = ids.keys()
-                .map(|id| id.to_owned())
-                .collect();
+                let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
                 // TODO: rather than sorting here, use a pre-sorted
                 // data structure, such as a BTreeMap, so the items
                 // are already in sorted order.
                 ids.sort();
                 Ok(XULStoreIterator::new(ids.into_iter()))
-            },
+            }
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
         }
     }
@@ -250,16 +254,17 @@ impl XULStore {
             Some(ids) => {
                 match ids.get(&id.to_string()) {
                     Some(attrs) => {
-                        let mut attrs: Vec<String> = attrs.keys().map(|attr| attr.to_owned()).collect();
+                        let mut attrs: Vec<String> =
+                            attrs.keys().map(|attr| attr.to_owned()).collect();
                         // TODO: rather than sorting here, use a pre-sorted
                         // data structure, such as a BTreeMap, so the items
                         // are already in sorted order.
                         attrs.sort();
                         Ok(XULStoreIterator::new(attrs.into_iter()))
-                    },
+                    }
                     None => Ok(XULStoreIterator::new(vec![].into_iter())),
                 }
-            },
+            }
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
         }
     }
@@ -272,10 +277,7 @@ pub struct SetValueTask {
 }
 
 impl SetValueTask {
-    pub fn new(
-        key: String,
-        value: String,
-    ) -> SetValueTask {
+    pub fn new(key: String, value: String) -> SetValueTask {
         SetValueTask {
             key,
             value,
@@ -304,7 +306,7 @@ impl Task for SetValueTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
             // TODO: error! -> info!
-            Some(Ok(())) => { error!("setValue succeeded")},
+            Some(Ok(())) => error!("setValue succeeded"),
             Some(Err(err)) => error!("setValue error: {}", err),
             None => error!("setValue error: unexpected result"),
         };
@@ -319,9 +321,7 @@ pub struct RemoveValueTask {
 }
 
 impl RemoveValueTask {
-    pub fn new(
-        key: String,
-    ) -> RemoveValueTask {
+    pub fn new(key: String) -> RemoveValueTask {
         RemoveValueTask {
             key,
             result: AtomicCell::default(),
@@ -359,7 +359,7 @@ impl Task for RemoveValueTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
             // TODO: error! -> info!
-            Some(Ok(())) => { error!("removeValue succeeded")},
+            Some(Ok(())) => error!("removeValue succeeded"),
             Some(Err(err)) => error!("removeValue error: {}", err),
             None => error!("removeValue error: unexpected result"),
         };
@@ -374,9 +374,7 @@ pub struct RemoveDocumentTask {
 }
 
 impl RemoveDocumentTask {
-    pub fn new(
-        keys_to_remove: Vec<String>,
-    ) -> RemoveDocumentTask {
+    pub fn new(keys_to_remove: Vec<String>) -> RemoveDocumentTask {
         RemoveDocumentTask {
             keys_to_remove,
             result: AtomicCell::default(),
@@ -397,8 +395,9 @@ impl Task for RemoveDocumentTask {
 
             // Removing the document from the store requires iterating the keys
             // to remove.
-            self.keys_to_remove.iter().map(|key|
-                match store.delete(&mut writer, &key) {
+            self.keys_to_remove
+                .iter()
+                .map(|key| match store.delete(&mut writer, &key) {
                     Ok(_) => Ok(()),
 
                     // The XULStore API doesn't care if a consumer tries to remove
@@ -409,8 +408,8 @@ impl Task for RemoveDocumentTask {
                     Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => Ok(()),
 
                     Err(err) => Err(err.into()),
-                }
-            ).collect::<Result<Vec<()>, XULStoreError>>()?;
+                })
+                .collect::<Result<Vec<()>, XULStoreError>>()?;
 
             writer.commit()?;
 
@@ -421,7 +420,7 @@ impl Task for RemoveDocumentTask {
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
             // TODO: error! -> info!
-            Some(Ok(())) => { error!("removeDocument succeeded")},
+            Some(Ok(())) => error!("removeDocument succeeded"),
             Some(Err(err)) => error!("removeDocument error: {}", err),
             None => error!("removeDocument error: unexpected result"),
         };

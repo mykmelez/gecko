@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use crate::{error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key, SEPARATOR};
+use crate::{
+    error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key, SEPARATOR,
+};
 use nsstring::nsString;
 use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -250,11 +252,18 @@ fn get_data() -> XULStoreResult<XULStoreData> {
             // TODO: make this UnexpectedKey.
             return Err(XULStoreError::UnexpectedValue);
         }
-        let (doc, id, attr) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
+        let (doc, id, attr) = (
+            parts[0].to_owned(),
+            parts[1].to_owned(),
+            parts[2].to_owned(),
+        );
 
-        all.entry(doc).or_insert_with(BTreeMap::new)
-           .entry(id).or_insert_with(BTreeMap::new)
-           .entry(attr).or_insert(value);
+        all.entry(doc)
+            .or_insert_with(BTreeMap::new)
+            .entry(id)
+            .or_insert_with(BTreeMap::new)
+            .entry(attr)
+            .or_insert(value);
     }
 
     Ok(all)

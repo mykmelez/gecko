@@ -9,11 +9,14 @@ use crate::{
     XULStore,
 };
 use libc::{c_char, c_void};
-use nserror::{nsresult, NS_ERROR_NO_AGGREGATION, NS_ERROR_NOT_IMPLEMENTED, NS_OK};
+use nserror::{nsresult, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsAString, nsString};
 use std::cell::RefCell;
 use std::ptr;
-use xpcom::{interfaces::{nsIJSEnumerator, nsIStringEnumerator, nsISupports}, nsIID, RefPtr};
+use xpcom::{
+    interfaces::{nsIJSEnumerator, nsIStringEnumerator, nsISupports},
+    nsIID, RefPtr,
+};
 
 // XULStore no longer expresses an XPCOM API.  Instead, JS consumers import
 // xultore.jsm, while C++ consumers include XULStore.h.  But we still construct
@@ -148,10 +151,7 @@ impl XULStoreService {
         ) -> * const nsIStringEnumerator
     );
 
-    fn get_ids_enumerator(
-        &self,
-        doc: &nsAString,
-    ) -> Result<RefPtr<nsIStringEnumerator>, nsresult> {
+    fn get_ids_enumerator(&self, doc: &nsAString) -> Result<RefPtr<nsIStringEnumerator>, nsresult> {
         match XULStore::get_ids(doc) {
             Ok(val) => {
                 let enumerator = StringEnumerator::new(val);
@@ -192,7 +192,7 @@ pub(crate) struct InitStringEnumerator {
 impl StringEnumerator {
     pub(crate) fn new(iter: XULStoreIterator) -> RefPtr<StringEnumerator> {
         StringEnumerator::allocate(InitStringEnumerator {
-            iter: RefCell::new(iter)
+            iter: RefCell::new(iter),
         })
     }
 
