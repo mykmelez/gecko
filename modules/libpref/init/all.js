@@ -3217,7 +3217,8 @@ pref("layout.display-list.dump-parent", false);
 pref("layout.display-list.retain", true);
 pref("layout.display-list.retain.chrome", false);
 #else
-pref("layout.display-list.retain", false);
+pref("layout.display-list.retain", true);
+pref("layout.display-list.retain.chrome", true);
 #endif
 
 // Set the maximum amount of modified frames allowed before doing a full
@@ -5616,7 +5617,7 @@ pref("network.trr.disable-ECS", true);
 // After this many failed TRR requests in a row, consider TRR borked
 pref("network.trr.max-fails", 5);
 // Comma separated list of domains that we should not use TRR for
-pref("network.trr.excluded-domains", "");
+pref("network.trr.excluded-domains", "localhost,local");
 
 pref("captivedetect.canonicalURL", "http://detectportal.firefox.com/success.txt");
 pref("captivedetect.canonicalContent", "success\n");
