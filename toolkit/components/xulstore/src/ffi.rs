@@ -5,7 +5,7 @@
 use crate::{
     error::XULStoreNsResult,
     iter::XULStoreIterator,
-    statics::{update_profile_dir, DATA},
+    statics::update_profile_dir,
     XULStore,
 };
 use libc::{c_char, c_void};
@@ -52,15 +52,6 @@ pub struct InitXULStoreService {}
 
 impl XULStoreService {
     fn new() -> RefPtr<XULStoreService> {
-        // Trigger initialization of statics (if they haven't already been
-        // initialized).  DATA accesses STORE, which accesses RKV,
-        // which accesses PROFILE_DIR, so getting the read guard for DATA
-        // suffices to initialize all statics.
-        //
-        // TODO: remove this unnecessary initialization step if we decide
-        // to make all XULStore access be synchronous.
-        let _ = DATA.read();
-
         XULStoreService::allocate(InitXULStoreService {})
     }
 

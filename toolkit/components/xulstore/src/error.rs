@@ -59,6 +59,9 @@ pub enum XULStoreError {
     #[fail(display = "unavailable")]
     Unavailable,
 
+    #[fail(display = "unexpected key: {:?}", _0)]
+    UnexpectedKey(String),
+
     #[fail(display = "unexpected value")]
     UnexpectedValue,
 }
@@ -77,6 +80,7 @@ impl From<XULStoreError> for nsresult {
             XULStoreError::RkvStoreError(_) => NS_ERROR_FAILURE,
             XULStoreError::IdAttrNameTooLong => NS_ERROR_ILLEGAL_VALUE,
             XULStoreError::Unavailable => NS_ERROR_NOT_AVAILABLE,
+            XULStoreError::UnexpectedKey(_) => NS_ERROR_UNEXPECTED,
             XULStoreError::UnexpectedValue => NS_ERROR_UNEXPECTED,
         }
     }

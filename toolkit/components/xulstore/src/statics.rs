@@ -45,7 +45,7 @@ lazy_static! {
         })
     };
 
-    pub(crate) static ref DATA: RwLock<Option<XULStoreData>> = {
+    pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = {
         RwLock::new(get_data().ok())
     };
 }
@@ -200,7 +200,7 @@ pub(crate) fn update_profile_dir() {
             };
         }
 
-        let mut data_guard = DATA.write()?;
+        let mut data_guard = CACHE.write()?;
         *data_guard = get_data().ok();
 
         Ok(())
@@ -249,8 +249,7 @@ fn get_data() -> XULStoreResult<XULStoreData> {
 
         let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
         if parts.len() != 3 {
-            // TODO: make this UnexpectedKey.
-            return Err(XULStoreError::UnexpectedValue);
+            return Err(XULStoreError::UnexpectedKey(key.to_owned()));
         }
         let (doc, id, attr) = (
             parts[0].to_owned(),

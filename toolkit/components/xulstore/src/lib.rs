@@ -27,7 +27,7 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{DATA, RKV, STORE},
+    statics::{CACHE, RKV, STORE},
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
@@ -82,7 +82,7 @@ impl XULStore {
             String::from_utf16(value)?
         };
 
-        let mut data_guard = DATA.write()?;
+        let mut data_guard = CACHE.write()?;
         let data = match data_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
@@ -107,7 +107,7 @@ impl XULStore {
     fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
-        let data_guard = DATA.read()?;
+        let data_guard = CACHE.read()?;
         let data = match data_guard.as_ref() {
             Some(data) => data,
             None => return Ok(false),
@@ -125,7 +125,7 @@ impl XULStore {
     fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
-        let data_guard = DATA.read()?;
+        let data_guard = CACHE.read()?;
         let data = match data_guard.as_ref() {
             Some(data) => data,
             None => return Ok("".to_owned()),
@@ -146,7 +146,7 @@ impl XULStore {
     fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
         debug!("XULStore remove value {} {} {}", doc, id, attr);
 
-        let mut data_guard = DATA.write()?;
+        let mut data_guard = CACHE.write()?;
         let data = match data_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
@@ -187,7 +187,7 @@ impl XULStore {
     fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
         debug!("XULStore remove document {}", doc);
 
-        let mut data_guard = DATA.write()?;
+        let mut data_guard = CACHE.write()?;
         let data = match data_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
@@ -222,7 +222,7 @@ impl XULStore {
     fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get IDs for {}", doc);
 
-        let data_guard = DATA.read()?;
+        let data_guard = CACHE.read()?;
         let data = match data_guard.as_ref() {
             Some(data) => data,
             None => return Ok(XULStoreIterator::new(vec![].into_iter())),
@@ -231,10 +231,6 @@ impl XULStore {
         match data.get(&doc.to_string()) {
             Some(ids) => {
                 let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
-                // TODO: rather than sorting here, use a pre-sorted
-                // data structure, such as a BTreeMap, so the items
-                // are already in sorted order.
-                ids.sort();
                 Ok(XULStoreIterator::new(ids.into_iter()))
             }
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
@@ -244,7 +240,7 @@ impl XULStore {
     fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
-        let data_guard = DATA.read()?;
+        let data_guard = CACHE.read()?;
         let data = match data_guard.as_ref() {
             Some(data) => data,
             None => return Ok(XULStoreIterator::new(vec![].into_iter())),
@@ -256,10 +252,6 @@ impl XULStore {
                     Some(attrs) => {
                         let mut attrs: Vec<String> =
                             attrs.keys().map(|attr| attr.to_owned()).collect();
-                        // TODO: rather than sorting here, use a pre-sorted
-                        // data structure, such as a BTreeMap, so the items
-                        // are already in sorted order.
-                        attrs.sort();
                         Ok(XULStoreIterator::new(attrs.into_iter()))
                     }
                     None => Ok(XULStoreIterator::new(vec![].into_iter())),
@@ -305,10 +297,9 @@ impl Task for SetValueTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
-            // TODO: error! -> info!
-            Some(Ok(())) => error!("setValue succeeded"),
-            Some(Err(err)) => error!("setValue error: {}", err),
-            None => error!("setValue error: unexpected result"),
+            Some(Ok(())) => (),
+            Some(Err(err)) => error!("error setting value: {}", err),
+            None => error!("error setting value: unexpected result"),
         };
 
         Ok(())
@@ -347,9 +338,14 @@ impl Task for RemoveValueTask {
                     Ok(())
                 }
 
-                // The XULStore API doesn't care if a consumer tries to remove
-                // a value that doesn't actually exist, so we ignore that error.
-                Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => Ok(()),
+                // The XULStore API doesn't care if a consumer tries
+                // to remove a value that doesn't exist in the store,
+                // so we ignore the error, although in this case the key
+                // should exist since it was in the cache!
+                Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
+                    warn!("tried to remove key that isn't in the store");
+                    Ok(())
+                },
 
                 Err(err) => Err(err.into()),
             }
@@ -358,10 +354,9 @@ impl Task for RemoveValueTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
-            // TODO: error! -> info!
-            Some(Ok(())) => error!("removeValue succeeded"),
-            Some(Err(err)) => error!("removeValue error: {}", err),
-            None => error!("removeValue error: unexpected result"),
+            Some(Ok(())) => (),
+            Some(Err(err)) => error!("error removing value: {}", err),
+            None => error!("error removing value: unexpected result"),
         };
 
         Ok(())
@@ -400,12 +395,14 @@ impl Task for RemoveDocumentTask {
                 .map(|key| match store.delete(&mut writer, &key) {
                     Ok(_) => Ok(()),
 
-                    // The XULStore API doesn't care if a consumer tries to remove
-                    // a value that doesn't actually exist, so we ignore that error,
-                    // although in this case the key should exist since it was in
-                    // the cache!
-                    // TODO: warn if a key doesn't exist.
-                    Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => Ok(()),
+                    // The XULStore API doesn't care if a consumer tries
+                    // to remove a value that doesn't exist in the store,
+                    // so we ignore the error, although in this case the key
+                    // should exist since it was in the cache!
+                    Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
+                        warn!("tried to remove key that isn't in the store");
+                        Ok(())
+                    },
 
                     Err(err) => Err(err.into()),
                 })
@@ -419,8 +416,7 @@ impl Task for RemoveDocumentTask {
 
     fn done(&self) -> Result<(), nsresult> {
         match self.result.swap(None) {
-            // TODO: error! -> info!
-            Some(Ok(())) => error!("removeDocument succeeded"),
+            Some(Ok(())) => (),
             Some(Err(err)) => error!("removeDocument error: {}", err),
             None => error!("removeDocument error: unexpected result"),
         };
