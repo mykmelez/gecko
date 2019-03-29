@@ -89,8 +89,8 @@ impl XULStore {
             Some(data) => data,
             None => return Ok(()),
         };
-        data.entry(doc.to_string()).or_insert(BTreeMap::new())
-           .entry(id.to_string()).or_insert(BTreeMap::new())
+        data.entry(doc.to_string()).or_insert_with(BTreeMap::new)
+           .entry(id.to_string()).or_insert_with(BTreeMap::new)
            .insert(attr.to_string(), value.clone());
 
         let task = Box::new(SetValueTask::new(key, value));
@@ -155,26 +155,20 @@ impl XULStore {
         };
 
         let mut ids_empty = false;
-        match data.get_mut(&doc.to_string()) {
-            Some(ids) => {
-                let mut attrs_empty = false;
-                match ids.get_mut(&id.to_string()) {
-                    Some(attrs) => {
-                        attrs.remove(&attr.to_string());
-                        if attrs.is_empty() {
-                            attrs_empty = true;
-                        }
-                    },
-                    None => (),
-                }
-                if attrs_empty {
-                    ids.remove(&id.to_string());
-                    if ids.is_empty() {
-                        ids_empty = true;
-                    }
+        if let Some(ids) = data.get_mut(&doc.to_string()) {
+            let mut attrs_empty = false;
+            if let Some(attrs) = ids.get_mut(&id.to_string()) {
+                attrs.remove(&attr.to_string());
+                if attrs.is_empty() {
+                    attrs_empty = true;
                 }
             }
-            None => (),
+            if attrs_empty {
+                ids.remove(&id.to_string());
+                if ids.is_empty() {
+                    ids_empty = true;
+                }
+            }
         };
         if ids_empty {
             data.remove(&doc.to_string());
@@ -201,19 +195,16 @@ impl XULStore {
         let doc = doc.to_string();
 
         // Build a list of keys to remove from the store.
-        match data.get(&doc) {
-            Some(ids) => {
-                for (id, attrs) in ids {
-                    for (attr, _value) in attrs {
-                        keys_to_remove.push(make_key(&doc, id, attr));
-                    }
+        if let Some(ids) = data.get(&doc) {
+            for (id, attrs) in ids {
+                for attr in attrs.keys() {
+                    keys_to_remove.push(make_key(&doc, id, attr));
                 }
             }
-            None => (),
         };
 
         // We can remove the document from the data cache in one fell swoop.
-        data.remove(&doc.to_string());
+        data.remove(&doc);
 
         let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
         let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;

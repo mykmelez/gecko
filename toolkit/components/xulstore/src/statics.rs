@@ -239,7 +239,7 @@ fn get_data() -> XULStoreResult<XULStoreData> {
                 match (str::from_utf8(&key), unwrap_value(&value)) {
                     (Ok(key), Ok(value)) => (key, value),
                     (Err(err), _) => return Err(err.into()),
-                    (_, Err(err)) => return Err(err.into()),
+                    (_, Err(err)) => return Err(err),
                 }
             }
             Err(err) => return Err(err.into()),
@@ -252,8 +252,8 @@ fn get_data() -> XULStoreResult<XULStoreData> {
         }
         let (doc, id, attr) = (parts[0].to_owned(), parts[1].to_owned(), parts[2].to_owned());
 
-        all.entry(doc).or_insert(BTreeMap::new())
-           .entry(id).or_insert(BTreeMap::new())
+        all.entry(doc).or_insert_with(BTreeMap::new)
+           .entry(id).or_insert_with(BTreeMap::new)
            .entry(attr).or_insert(value);
     }
 
