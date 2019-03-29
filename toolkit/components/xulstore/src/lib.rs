@@ -247,16 +247,13 @@ impl XULStore {
         };
 
         match data.get(&doc.to_string()) {
-            Some(ids) => {
-                match ids.get(&id.to_string()) {
-                    Some(attrs) => {
-                        let mut attrs: Vec<String> =
-                            attrs.keys().map(|attr| attr.to_owned()).collect();
-                        Ok(XULStoreIterator::new(attrs.into_iter()))
-                    }
-                    None => Ok(XULStoreIterator::new(vec![].into_iter())),
+            Some(ids) => match ids.get(&id.to_string()) {
+                Some(attrs) => {
+                    let mut attrs: Vec<String> = attrs.keys().map(|attr| attr.to_owned()).collect();
+                    Ok(XULStoreIterator::new(attrs.into_iter()))
                 }
-            }
+                None => Ok(XULStoreIterator::new(vec![].into_iter())),
+            },
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
         }
     }
@@ -345,7 +342,7 @@ impl Task for RemoveValueTask {
                 Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
                     warn!("tried to remove key that isn't in the store");
                     Ok(())
-                },
+                }
 
                 Err(err) => Err(err.into()),
             }
@@ -402,7 +399,7 @@ impl Task for RemoveDocumentTask {
                     Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
                         warn!("tried to remove key that isn't in the store");
                         Ok(())
-                    },
+                    }
 
                     Err(err) => Err(err.into()),
                 })
