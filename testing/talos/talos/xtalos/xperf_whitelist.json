@@ -571,5 +571,11 @@
     "maxcount": 2,
     "minbytes": 0,
     "maxbytes": 16384
+  },
+  "{profile}\\xulstore\\data.mdb": {
+    "mincount": 0,
+    "maxcount": 4,
+    "minbytes": 0,
+    "maxbytes": 608
   }
 }

@@ -11,10 +11,6 @@ const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";
 
-function run_test() {
-  run_next_test();
-}
-
 function checkValue(uri, id, attr, reference) {
   let value = XULStore.getValue(uri, id, attr);
   Assert.equal(value, reference);

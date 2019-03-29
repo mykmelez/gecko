@@ -309,9 +309,8 @@ let ACTORS = {
     return;
 
   // We define a lazy module getter for XULStore below, but it hasn't yet
-  // been defined at this early point.  Arguably, it isn't lazy in that case,
-  // so we might as well move this line to the top of the file to explicitly
-  // define it eagerly.
+  // been defined at this point, although eslint can't tell that.
+  /* eslint-disable-next-line no-shadow */
   const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
   let getValue = attr =>
