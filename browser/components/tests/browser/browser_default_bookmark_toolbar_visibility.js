@@ -9,9 +9,9 @@
  */
 add_task(async function test_default_bookmark_toolbar_visibility() {
   const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
-  let xulStore = Services.xulStore;
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
-  is(xulStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed"), "",
+  is(XULStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed"), "",
      "Check that @collapsed isn't persisted");
   ok(document.getElementById("PersonalToolbar").collapsed,
      "The bookmarks toolbar should be collapsed by default");
