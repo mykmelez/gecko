@@ -38,13 +38,26 @@ use rkv::{StoreError as RkvStoreError, Value};
 use std::{
     collections::BTreeMap,
 };
-use xpcom::RefPtr;
-use xpcom::interfaces::nsIThread;
+use xpcom::{interfaces::nsIThread, RefPtr, ThreadBoundRefPtr};
 
 const SEPARATOR: char = '\u{0009}';
 
 pub(crate) fn make_key<T: std::fmt::Display>(doc: &T, id: &T, attr: &T) -> String {
     format!("{}{}{}{}{}", doc, SEPARATOR, id, SEPARATOR, attr)
+}
+
+lazy_static! {
+    pub static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
+        let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
+            Ok(thread) => thread,
+            Err(err) => {
+                error!("error creating XULStore thread: {}", err);
+                return None;
+            },
+        };
+
+        Some(ThreadBoundRefPtr::new(thread))
+    };
 }
 
 struct XULStore {}
@@ -81,8 +94,8 @@ impl XULStore {
            .insert(attr.to_string(), value.clone());
 
         let task = Box::new(SetValueTask::new(key, value));
-        let thread: RefPtr<nsIThread> = create_thread("XULStore")?;
-        TaskRunnable::new("XULStore::SetValue", task)?.dispatch(&thread)?;
+        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        TaskRunnable::new("XULStore::SetValue", task)?.dispatch(thread)?;
 
         Ok(())
     }
@@ -169,8 +182,8 @@ impl XULStore {
 
         let key = make_key(doc, id, attr);
         let task = Box::new(RemoveValueTask::new(key));
-        let thread: RefPtr<nsIThread> = create_thread("XULStore")?;
-        TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(&thread)?;
+        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(thread)?;
 
         Ok(())
     }
@@ -203,8 +216,8 @@ impl XULStore {
         data.remove(&doc.to_string());
 
         let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
-        let thread: RefPtr<nsIThread> = create_thread("XULStore")?;
-        TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(&thread)?;
+        let thread = THREAD.as_ref().ok_or(XULStoreError::Unavailable)?.get_ref().ok_or(XULStoreError::Unavailable)?;
+        TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(thread)?;
 
         Ok(())
     }
