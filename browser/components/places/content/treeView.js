@@ -5,6 +5,7 @@
 /* import-globals-from controller.js */
 
 var {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
 /**
  * This returns the key for any node/details object.
@@ -345,7 +346,7 @@ PlacesTreeView.prototype = {
         let isopen = false;
 
         if (uri) {
-          let val = Services.xulStore.getValue(document.documentURI, uri, "open");
+          let val = XULStore.getValue(document.documentURI, uri, "open");
           isopen = (val == "true");
         }
 
@@ -1491,9 +1492,9 @@ PlacesTreeView.prototype = {
       let docURI = document.documentURI;
 
       if (node.containerOpen) {
-        Services.xulStore.removeValue(docURI, uri, "open");
+        XULStore.removeValue(docURI, uri, "open");
       } else {
-        Services.xulStore.setValue(docURI, uri, "open", "true");
+        XULStore.setValue(docURI, uri, "open", "true");
       }
     }
 

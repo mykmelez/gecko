@@ -308,9 +308,14 @@ let ACTORS = {
         "default-theme@mozilla.org")
     return;
 
-  let store = Services.xulStore;
+  // We define a lazy module getter for XULStore below, but it hasn't yet
+  // been defined at this early point.  Arguably, it isn't lazy in that case,
+  // so we might as well move this line to the top of the file to explicitly
+  // define it eagerly.
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+
   let getValue = attr =>
-    store.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
+    XULStore.getValue(AppConstants.BROWSER_CHROME_URL, "main-window", attr);
   let width = getValue("width");
   let height = getValue("height");
 
@@ -430,6 +435,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UITour: "resource:///modules/UITour.jsm",
   WebChannel: "resource://gre/modules/WebChannel.jsm",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.jsm",
+  XULStore: "resource://gre/modules/XULStore.jsm",
 });
 
 // eslint-disable-next-line no-unused-vars
@@ -2238,12 +2244,11 @@ BrowserGlue.prototype = {
   _maybeToggleBookmarkToolbarVisibility() {
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
     const NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE = 3;
-    let xulStore = Services.xulStore;
 
-    if (!xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")) {
+    if (!XULStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")) {
       // We consider the toolbar customized if it has more than NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE
       // children, or if it has a persisted currentset value.
-      let toolbarIsCustomized = xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "currentset");
+      let toolbarIsCustomized = XULStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "currentset");
       let getToolbarFolderCount = () => {
         let toolbarFolder = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.toolbarGuid).root;
         let toolbarChildCount = toolbarFolder.childCount;
@@ -2252,7 +2257,7 @@ BrowserGlue.prototype = {
       };
 
       if (toolbarIsCustomized || getToolbarFolderCount() > NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE) {
-        xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
+        XULStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
       }
     }
   },
@@ -2284,8 +2289,6 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion >= UI_VERSION)
       return;
-
-    let xulStore = Services.xulStore;
 
     if (currentUIVersion < 51) {
       // Switch to compact UI density if the user is using a formerly compact
@@ -2328,8 +2331,8 @@ BrowserGlue.prototype = {
       // Now, the sidebarcommand always indicates the last opened sidebar, and we
       // correctly persist the checked attribute to indicate whether or not the
       // sidebar was open. We should set the checked attribute in case it wasn't:
-      if (xulStore.getValue(BROWSER_DOCURL, "sidebar-box", "sidebarcommand")) {
-        xulStore.setValue(BROWSER_DOCURL, "sidebar-box", "checked", "true");
+      if (XULStore.getValue(BROWSER_DOCURL, "sidebar-box", "sidebarcommand")) {
+        XULStore.setValue(BROWSER_DOCURL, "sidebar-box", "checked", "true");
       }
     }
 
@@ -2415,7 +2418,7 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion < 61) {
       // Remove persisted toolbarset from navigator toolbox
-      xulStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
+      XULStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
     }
 
     if (currentUIVersion < 62) {
@@ -2424,7 +2427,7 @@ BrowserGlue.prototype = {
                       "TabsToolbar", "toolbar-menubar"];
       for (let resourceName of ["mode", "iconsize"]) {
         for (let toolbarId of toolbars) {
-          xulStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
+          XULStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
         }
       }
     }
@@ -2552,7 +2555,7 @@ BrowserGlue.prototype = {
       // Remove currentset from all the toolbars
       let toolbars = ["nav-bar", "PersonalToolbar", "TabsToolbar", "toolbar-menubar"];
       for (let toolbarId of toolbars) {
-        xulStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
+        XULStore.removeValue(BROWSER_DOCURL, toolbarId, "currentset");
       }
     }
 
