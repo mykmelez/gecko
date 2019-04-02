@@ -591,7 +591,9 @@ NS_INTERFACE_MAP_END
 mozilla::ipc::IPCResult ContentChild::RecvSetXPCOMProcessAttributes(
     const XPCOMInitData& aXPCOMInit, const StructuredCloneData& aInitialData,
     nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache,
-    nsTArray<SystemFontListEntry>&& aFontList) {
+    nsTArray<SystemFontListEntry>&& aFontList,
+    const Maybe<SharedMemoryHandle>& aSharedUASheetHandle,
+    const uintptr_t& aSharedUASheetAddress) {
   if (!sShutdownCanary) {
     return IPC_OK();
   }
@@ -599,6 +601,7 @@ mozilla::ipc::IPCResult ContentChild::RecvSetXPCOMProcessAttributes(
   mLookAndFeelCache = std::move(aLookAndFeelIntCache);
   mFontList = std::move(aFontList);
   gfx::gfxVars::SetValuesForInitialize(aXPCOMInit.gfxNonDefaultVarUpdates());
+  InitSharedUASheets(aSharedUASheetHandle, aSharedUASheetAddress);
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
 
@@ -1198,6 +1201,20 @@ void ContentChild::InitGraphicsDeviceData(const ContentDeviceData& aData) {
   gfxPlatform::InitChild(aData);
 }
 
+void ContentChild::InitSharedUASheets(const Maybe<SharedMemoryHandle>& aHandle,
+                                      uintptr_t aAddress) {
+  MOZ_ASSERT_IF(!aHandle, !aAddress);
+
+  if (!aAddress) {
+    return;
+  }
+
+  // Map the shared memory storing the user agent style sheets.  Do this as
+  // early as possible to maximize the chance of being able to map at the
+  // address we want.
+  nsLayoutStylesheetCache::SetSharedMemory(*aHandle, aAddress);
+}
+
 void ContentChild::InitXPCOM(
     const XPCOMInitData& aXPCOMInit,
     const mozilla::dom::ipc::StructuredCloneData& aInitialData) {
@@ -1405,6 +1422,12 @@ mozilla::ipc::IPCResult ContentChild::RecvRequestPerformanceMetrics(
   return IPC_OK();
 }
 
+#if defined(XP_MACOSX)
+extern "C" {
+void CGSShutdownServerConnections();
+};
+#endif
+
 mozilla::ipc::IPCResult ContentChild::RecvInitRendering(
     Endpoint<PCompositorManagerChild>&& aCompositor,
     Endpoint<PImageBridgeChild>&& aImageBridge,
@@ -1434,6 +1457,16 @@ mozilla::ipc::IPCResult ContentChild::RecvInitRendering(
     return GetResultForRenderingInitFailure(aVRBridge.OtherPid());
   }
   VideoDecoderManagerChild::InitForContent(std::move(aVideoManager));
+
+#if defined(XP_MACOSX) && !defined(MOZ_SANDBOX)
+  // Close all current connections to the WindowServer. This ensures that the
+  // Activity Monitor will not label the content process as "Not responding"
+  // because it's not running a native event loop. See bug 1384336. When the
+  // build is configured with sandbox support, this is called during sandbox
+  // setup.
+  CGSShutdownServerConnections();
+#endif
+
   return IPC_OK();
 }
 
@@ -1502,19 +1535,23 @@ mozilla::ipc::IPCResult ContentChild::RecvReinitRenderingForDeviceReset() {
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 extern "C" {
 CGError CGSSetDenyWindowServerConnections(bool);
-void CGSShutdownServerConnections();
 };
 
 static bool StartMacOSContentSandbox() {
+  // Close all current connections to the WindowServer. This ensures that the
+  // Activity Monitor will not label the content process as "Not responding"
+  // because it's not running a native event loop. See bug 1384336.
+  // This is required with or without the sandbox enabled. Until the
+  // window server is blocked as the policy level, this should be called
+  // just before CGSSetDenyWindowServerConnections() so there are no
+  // windowserver connections active when CGSSetDenyWindowServerConnections()
+  // is called.
+  CGSShutdownServerConnections();
+
   int sandboxLevel = GetEffectiveContentSandboxLevel();
   if (sandboxLevel < 1) {
     return false;
   }
-
-  // Close all current connections to the WindowServer. This ensures that the
-  // Activity Monitor will not label the content process as "Not responding"
-  // because it's not running a native event loop. See bug 1384336.
-  CGSShutdownServerConnections();
 
   // Actual security benefits are only acheived when we additionally deny
   // future connections, however this currently breaks WebGL so it's not done
@@ -1755,9 +1792,9 @@ bool ContentChild::SendPBrowserConstructor(
     return false;
   }
 
-  return PContentChild::SendPBrowserConstructor(aActor, aTabId, aSameTabGroupAs,
-                                                aContext, aChromeFlags, aCpID,
-                                                aBrowsingContext, aIsForBrowser);
+  return PContentChild::SendPBrowserConstructor(
+      aActor, aTabId, aSameTabGroupAs, aContext, aChromeFlags, aCpID,
+      aBrowsingContext, aIsForBrowser);
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvPBrowserConstructor(
@@ -3755,7 +3792,8 @@ mozilla::ipc::IPCResult ContentChild::RecvRegisterBrowsingContextGroup(
     MOZ_ASSERT_IF(parent, parent->Group() == group);
 #endif
 
-    RefPtr<BrowsingContext> ctxt = BrowsingContext::CreateFromIPC(std::move(init), group, nullptr);
+    RefPtr<BrowsingContext> ctxt =
+        BrowsingContext::CreateFromIPC(std::move(init), group, nullptr);
 
     // FIXME: We should deal with cached & detached contexts as well.
     ctxt->Attach(/* aFromIPC */ true);

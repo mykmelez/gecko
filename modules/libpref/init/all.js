@@ -528,19 +528,8 @@ pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1); // kModerate
 pref("media.getusermedia.agc_enabled", true);
 pref("media.getusermedia.agc", 1); // kAdaptiveDigital
-// capture_delay: Adjustments for OS-specific input delay (lower bound)
-// playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
 pref("media.navigator.audio.full_duplex", true);
-#if defined(XP_MACOSX)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(XP_WIN)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(ANDROID)
-pref("media.peerconnection.capture_delay", 100);
-#else
-pref("media.peerconnection.capture_delay", 70);
-#endif
 #endif
 
 pref("dom.webaudio.enabled", true);
@@ -3217,8 +3206,7 @@ pref("layout.display-list.dump-parent", false);
 pref("layout.display-list.retain", true);
 pref("layout.display-list.retain.chrome", false);
 #else
-pref("layout.display-list.retain", true);
-pref("layout.display-list.retain.chrome", true);
+pref("layout.display-list.retain", false);
 #endif
 
 // Set the maximum amount of modified frames allowed before doing a full
@@ -5203,7 +5191,7 @@ pref("extensions.webextensions.keepStorageOnUninstall", false);
 pref("extensions.webextensions.keepUuidOnUninstall", false);
 // Redirect basedomain used by identity api
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
-pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,input.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
+pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
 // Whether or not webextension icon theming is supported.
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);

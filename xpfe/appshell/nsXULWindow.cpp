@@ -2286,8 +2286,7 @@ nsXULWindow::BeforeStartLayout() {
 }
 
 NS_IMETHODIMP
-nsXULWindow::LockAspectRatio(bool aShouldLock)
-{
+nsXULWindow::LockAspectRatio(bool aShouldLock) {
   mWindow->LockAspectRatio(aShouldLock);
   return NS_OK;
 }
