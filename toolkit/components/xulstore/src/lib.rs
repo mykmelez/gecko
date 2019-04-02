@@ -27,7 +27,7 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{CACHE, RKV, STORE, THREAD},
+    statics::{CACHE, DATABASE, THREAD},
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
@@ -263,14 +263,13 @@ impl SetValueTask {
 impl Task for SetValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let rkv_guard = RKV.read()?;
-            let rkv = rkv_guard
+            let db_guard = DATABASE.read()?;
+            let db = db_guard
                 .as_ref()
-                .ok_or(XULStoreError::Unavailable)?
-                .read()?;
-            let mut writer = rkv.write()?;
-            let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
-            store.put(&mut writer, &self.key, &Value::Str(&self.value))?;
+                .ok_or(XULStoreError::Unavailable)?;
+            let env = db.env.read()?;
+            let mut writer = env.write()?;
+            db.store.put(&mut writer, &self.key, &Value::Str(&self.value))?;
             writer.commit()?;
 
             Ok(())
@@ -305,15 +304,14 @@ impl RemoveValueTask {
 impl Task for RemoveValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let rkv_guard = RKV.read()?;
-            let rkv = rkv_guard
+            let db_guard = DATABASE.read()?;
+            let db = db_guard
                 .as_ref()
-                .ok_or(XULStoreError::Unavailable)?
-                .read()?;
-            let mut writer = rkv.write()?;
-            let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
+                .ok_or(XULStoreError::Unavailable)?;
+            let env = db.env.read()?;
+            let mut writer = env.write()?;
 
-            match store.delete(&mut writer, &self.key) {
+            match db.store.delete(&mut writer, &self.key) {
                 Ok(_) => {
                     writer.commit()?;
 
@@ -362,19 +360,18 @@ impl RemoveDocumentTask {
 impl Task for RemoveDocumentTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let rkv_guard = RKV.read()?;
-            let rkv = rkv_guard
+            let db_guard = DATABASE.read()?;
+            let db = db_guard
                 .as_ref()
-                .ok_or(XULStoreError::Unavailable)?
-                .read()?;
-            let mut writer = rkv.write()?;
-            let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
+                .ok_or(XULStoreError::Unavailable)?;
+            let env = db.env.read()?;
+            let mut writer = env.write()?;
 
             // Removing the document from the store requires iterating the keys
             // to remove.
             self.keys_to_remove
                 .iter()
-                .map(|key| match store.delete(&mut writer, &key) {
+                .map(|key| match db.store.delete(&mut writer, &key) {
                     Ok(_) => Ok(()),
 
                     // The XULStore API doesn't care if a consumer tries

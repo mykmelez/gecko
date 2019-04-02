@@ -28,22 +28,8 @@ lazy_static! {
     };
 
     #[derive(Debug)]
-    pub(crate) static ref RKV: RwLock<Option<Arc<RwLock<Rkv>>>> = {
-        RwLock::new(get_rkv().ok())
-    };
-
-    #[derive(Debug)]
-    pub(crate) static ref STORE: RwLock<Option<SingleStore>> = {
-        RwLock::new(match get_store() {
-            Ok(store) => {
-                maybe_migrate_data(store);
-                Some(store)
-            }
-            Err(err) => {
-                error!("error getting store: {}", err);
-                None
-            },
-        })
+    pub(crate) static ref DATABASE: RwLock<Option<Database>> = {
+        RwLock::new(get_database().ok())
     };
 
     pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = {
@@ -100,6 +86,23 @@ fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
     Ok(xulstore_dir)
 }
 
+pub(crate) struct Database {
+    pub env: Arc<RwLock<Rkv>>,
+    pub store: SingleStore,
+}
+
+impl Database {
+    fn new(env: Arc<RwLock<Rkv>>, store: SingleStore) -> Database {
+        Database { env, store }
+    }
+}
+
+pub(crate) fn get_database() -> XULStoreResult<Database> {
+    let env = get_rkv()?;
+    let store = get_store(env.clone())?;
+    Ok(Database::new(env, store))
+}
+
 pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
     let mut manager = Manager::singleton().write()?;
     let xulstore_dir = get_xulstore_dir()?;
@@ -108,17 +111,17 @@ pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
         .map_err(|err| err.into())
 }
 
-pub(crate) fn get_store() -> XULStoreResult<SingleStore> {
-    let rkv_guard = RKV.read()?;
-    let rkv = rkv_guard
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .read()?;
-    rkv.open_single("db", StoreOptions::create())
-        .map_err(|err| err.into())
+pub(crate) fn get_store(env: Arc<RwLock<Rkv>>) -> XULStoreResult<SingleStore> {
+    match env.read()?.open_single("db", StoreOptions::create()) {
+        Ok(store) => {
+            maybe_migrate_data(env.clone(), store);
+            Ok(store)
+        },
+        Err(err) => Err(err.into()),
+    }
 }
 
-fn maybe_migrate_data(store: SingleStore) {
+fn maybe_migrate_data(env: Arc<RwLock<Rkv>>, store: SingleStore) {
     // Failure to migrate data isn't fatal, so we don't return a result.
     // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
@@ -137,12 +140,8 @@ fn maybe_migrate_data(store: SingleStore) {
         let json: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>> =
             serde_json::from_reader(file)?;
 
-        let rkv_guard = RKV.read()?;
-        let rkv = rkv_guard
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .read()?;
-        let mut writer = rkv.write()?;
+        let env = env.read()?;
+        let mut writer = env.write()?;
 
         for (doc, ids) in json {
             for (id, attrs) in ids {
@@ -192,25 +191,10 @@ pub(crate) fn update_profile_dir() {
         }
 
         {
-            // The get_store() call below will also try to lock the RKV static,
-            // so we do this in a block to ensure the RwLockWriteGuard goes out
-            // of scope and gets dropped (releasing the lock) beforehand.
-            let mut rkv_guard = RKV.write()?;
-            *rkv_guard = get_rkv().ok();
-        }
-
-        {
-            let mut store_guard = STORE.write()?;
-            *store_guard = match get_store() {
-                Ok(store) => {
-                    maybe_migrate_data(store);
-                    Some(store)
-                }
-                Err(err) => {
-                    error!("error getting store: {}", err);
-                    None
-                }
-            };
+            let mut db_guard = DATABASE.write()?;
+            // TODO: ensure we drop the old environment before we create
+            // the new one.
+            *db_guard = get_database().ok();
         }
 
         let mut data_guard = CACHE.write()?;
@@ -237,15 +221,14 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
 }
 
 fn get_data() -> XULStoreResult<XULStoreData> {
-    let store = *STORE.read()?.as_ref().ok_or(XULStoreError::Unavailable)?;
-    let rkv_guard = RKV.read()?;
-    let rkv = rkv_guard
+    let db_guard = DATABASE.read()?;
+    let db = db_guard
         .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .read()?;
-    let reader = rkv.read()?;
+        .ok_or(XULStoreError::Unavailable)?;
+    let env = db.env.read()?;
+    let reader = env.read()?;
     let mut all = BTreeMap::new();
-    let iterator = store.iter_start(&reader)?;
+    let iterator = db.store.iter_start(&reader)?;
 
     for result in iterator {
         let (key, value): (&str, String) = match result {
