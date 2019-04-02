@@ -5,6 +5,7 @@
 use crate::{
     error::XULStoreError, error::XULStoreResult, ffi::ProfileChangeObserver, make_key, SEPARATOR,
 };
+use moz_task::create_thread;
 use nsstring::nsString;
 use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -16,7 +17,7 @@ use std::{
     str,
     sync::{Arc, RwLock},
 };
-use xpcom::{interfaces::nsIFile, XpCom};
+use xpcom::{interfaces::{nsIFile, nsIThread}, RefPtr, ThreadBoundRefPtr, XpCom};
 
 type XULStoreData = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
@@ -47,6 +48,18 @@ lazy_static! {
 
     pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = {
         RwLock::new(get_data().ok())
+    };
+
+    pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
+        let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
+            Ok(thread) => thread,
+            Err(err) => {
+                error!("error creating XULStore thread: {}", err);
+                return None;
+            }
+        };
+
+        Some(ThreadBoundRefPtr::new(thread))
     };
 }
 

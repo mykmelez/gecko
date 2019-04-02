@@ -27,35 +27,20 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{CACHE, RKV, STORE},
+    statics::{CACHE, RKV, STORE, THREAD},
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
-use moz_task::{create_thread, Task, TaskRunnable};
+use moz_task::{Task, TaskRunnable};
 use nserror::nsresult;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::collections::BTreeMap;
-use xpcom::{interfaces::nsIThread, RefPtr, ThreadBoundRefPtr};
 
 const SEPARATOR: char = '\u{0009}';
 
 pub(crate) fn make_key<T: std::fmt::Display>(doc: &T, id: &T, attr: &T) -> String {
     format!("{}{}{}{}{}", doc, SEPARATOR, id, SEPARATOR, attr)
-}
-
-lazy_static! {
-    pub static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
-        let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
-            Ok(thread) => thread,
-            Err(err) => {
-                error!("error creating XULStore thread: {}", err);
-                return None;
-            }
-        };
-
-        Some(ThreadBoundRefPtr::new(thread))
-    };
 }
 
 struct XULStore {}
