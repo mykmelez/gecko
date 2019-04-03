@@ -50,12 +50,11 @@ class XULStoreIterator final {
     return xulstore_iter_get_next(this, item);
   }
 
-  ~XULStoreIterator() {}
-
  private:
   XULStoreIterator() = delete;
   XULStoreIterator(const XULStoreIterator&) = delete;
   XULStoreIterator& operator=(const XULStoreIterator&) = delete;
+  ~XULStoreIterator() = delete;
 };
 
 template <>
