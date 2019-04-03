@@ -264,8 +264,7 @@ impl Task for SetValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
             let db = cache_database()?;
-            let env = db.env.read()?;
-            let mut writer = env.write()?;
+            let mut writer = db.env.write()?;
             db.store
                 .put(&mut writer, &self.key, &Value::Str(&self.value))?;
             writer.commit()?;
@@ -303,8 +302,7 @@ impl Task for RemoveValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
             let db = cache_database()?;
-            let env = db.env.read()?;
-            let mut writer = env.write()?;
+            let mut writer = db.env.write()?;
 
             match db.store.delete(&mut writer, &self.key) {
                 Ok(_) => {
@@ -356,8 +354,7 @@ impl Task for RemoveDocumentTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
             let db = cache_database()?;
-            let env = db.env.read()?;
-            let mut writer = env.write()?;
+            let mut writer = db.env.write()?;
 
             // Removing the document from the store requires iterating the keys
             // to remove.

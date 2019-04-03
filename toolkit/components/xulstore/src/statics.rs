@@ -7,7 +7,7 @@ use crate::{
 };
 use moz_task::create_thread;
 use nsstring::nsString;
-use rkv::{Manager, Rkv, SingleStore, StoreOptions, Value};
+use rkv::{Rkv, SingleStore, StoreOptions, Value};
 use std::{
     collections::BTreeMap,
     ffi::CString,
@@ -15,7 +15,7 @@ use std::{
     ops::DerefMut,
     path::PathBuf,
     str,
-    sync::{Arc, RwLock},
+    sync::RwLock,
 };
 use xpcom::{
     interfaces::{nsIFile, nsIThread},
@@ -80,41 +80,38 @@ fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
 }
 
 pub(crate) struct Database {
-    pub env: Arc<RwLock<Rkv>>,
+    pub env: Rkv,
     pub store: SingleStore,
 }
 
 impl Database {
-    fn new(env: Arc<RwLock<Rkv>>, store: SingleStore) -> Database {
+    fn new(env: Rkv, store: SingleStore) -> Database {
         Database { env, store }
     }
 }
 
 pub(crate) fn cache_database() -> XULStoreResult<Database> {
     let env = get_env()?;
-    let store = get_store(env.clone())?;
+    let store = get_store(&env)?;
     Ok(Database::new(env, store))
 }
 
-fn get_env() -> XULStoreResult<Arc<RwLock<Rkv>>> {
-    let mut manager = Manager::singleton().write()?;
+fn get_env() -> XULStoreResult<Rkv> {
     let xulstore_dir = get_xulstore_dir()?;
-    manager
-        .get_or_create(xulstore_dir.as_path(), Rkv::new)
-        .map_err(|err| err.into())
+    Rkv::new(xulstore_dir.as_path()).map_err(|err| err.into())
 }
 
-fn get_store(env: Arc<RwLock<Rkv>>) -> XULStoreResult<SingleStore> {
-    match env.read()?.open_single("db", StoreOptions::create()) {
+fn get_store(env: &Rkv) -> XULStoreResult<SingleStore> {
+    match env.open_single("db", StoreOptions::create()) {
         Ok(store) => {
-            maybe_migrate_data(env.clone(), store);
+            maybe_migrate_data(env, store);
             Ok(store)
         }
         Err(err) => Err(err.into()),
     }
 }
 
-fn maybe_migrate_data(env: Arc<RwLock<Rkv>>, store: SingleStore) {
+fn maybe_migrate_data(env: &Rkv, store: SingleStore) {
     // Failure to migrate data isn't fatal, so we don't return a result.
     // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
@@ -133,7 +130,6 @@ fn maybe_migrate_data(env: Arc<RwLock<Rkv>>, store: SingleStore) {
         let json: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>> =
             serde_json::from_reader(file)?;
 
-        let env = env.read()?;
         let mut writer = env.write()?;
 
         for (doc, ids) in json {
@@ -208,8 +204,7 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
 
 fn cache_data() -> XULStoreResult<XULStoreData> {
     let db = cache_database()?;
-    let env = db.env.read()?;
-    let reader = env.read()?;
+    let reader = db.env.read()?;
     let mut all = BTreeMap::new();
     let iterator = db.store.iter_start(&reader)?;
 
