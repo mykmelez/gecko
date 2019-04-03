@@ -17,7 +17,7 @@ use std::{
     ops::DerefMut,
     path::PathBuf,
     str,
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 use xpcom::{
     interfaces::{nsIFile, nsIThread},
@@ -27,9 +27,9 @@ use xpcom::{
 type XULStoreCache = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
 lazy_static! {
-    pub(crate) static ref PROFILE_DIR: RwLock<Option<PathBuf>> = {
+    pub(crate) static ref PROFILE_DIR: Mutex<Option<PathBuf>> = {
         observe_profile_change();
-        RwLock::new(get_profile_dir().ok())
+        Mutex::new(get_profile_dir().ok())
     };
     pub(crate) static ref CACHE: RwLock<Option<XULStoreCache>> = { RwLock::new(cache_data().ok()) };
     pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
@@ -47,9 +47,6 @@ lazy_static! {
 
 // Memoized to the PROFILE_DIR lazy static. Prefer that accessor to calling
 // this function, to avoid extra trips across the XPCOM FFI.
-//
-// NB: this code must be kept in sync with the code that updates the store's
-// location in toolkit/components/xulstore/XULStore.jsm.
 fn get_profile_dir() -> XULStoreResult<PathBuf> {
     let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
     let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
@@ -70,10 +67,9 @@ fn get_profile_dir() -> XULStoreResult<PathBuf> {
 
 fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
     let mut xulstore_dir = PROFILE_DIR
-        .read()?
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .clone();
+        .lock()?
+        .clone()
+        .ok_or(XULStoreError::Unavailable)?;
     xulstore_dir.push("xulstore");
 
     create_dir_all(xulstore_dir.clone())?;
@@ -118,10 +114,9 @@ fn maybe_migrate_data(env: &Rkv, store: SingleStore) {
     // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
         let mut old_datastore = PROFILE_DIR
-            .read()?
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .clone();
+            .lock()?
+            .clone()
+            .ok_or(XULStoreError::Unavailable)?;
         old_datastore.push("xulstore.json");
         if !old_datastore.exists() {
             debug!("old datastore doesn't exist: {:?}", old_datastore);
@@ -177,7 +172,7 @@ pub(crate) fn update_profile_dir() {
     // But we use a closure returning a result to enable use of the ? operator.
     (|| -> XULStoreResult<()> {
         {
-            let mut profile_dir_guard = PROFILE_DIR.write()?;
+            let mut profile_dir_guard = PROFILE_DIR.lock()?;
             *profile_dir_guard = get_profile_dir().ok();
         }
 
