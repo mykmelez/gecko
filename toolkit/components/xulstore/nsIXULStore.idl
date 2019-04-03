@@ -5,7 +5,6 @@
 #include "nsISupports.idl"
 
 interface nsIStringEnumerator;
-webidl Node;
 
 /**
  * The XUL store is used to store information related to a XUL document/application.
@@ -13,7 +12,6 @@ webidl Node;
  * window location, toolbars that are open and nodes that are open and closed in a tree.
  */
 [scriptable, uuid(987c4b35-c426-4dd7-ad49-3c9fa4c65d20)]
-
 interface nsIXULStore: nsISupports
 {
   /**
