@@ -17,7 +17,10 @@ use std::{
     str,
     sync::{Arc, RwLock},
 };
-use xpcom::{interfaces::{nsIFile, nsIThread}, RefPtr, ThreadBoundRefPtr, XpCom};
+use xpcom::{
+    interfaces::{nsIFile, nsIThread},
+    RefPtr, ThreadBoundRefPtr, XpCom,
+};
 
 type XULStoreData = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
@@ -26,16 +29,7 @@ lazy_static! {
         observe_profile_change();
         RwLock::new(get_profile_dir().ok())
     };
-
-    #[derive(Debug)]
-    pub(crate) static ref DATABASE: RwLock<Option<Database>> = {
-        RwLock::new(get_database().ok())
-    };
-
-    pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = {
-        RwLock::new(get_data().ok())
-    };
-
+    pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = { RwLock::new(cache_data().ok()) };
     pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
         let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
             Ok(thread) => thread,
@@ -54,7 +48,7 @@ lazy_static! {
 //
 // NB: this code must be kept in sync with the code that updates the store's
 // location in toolkit/components/xulstore/XULStore.jsm.
-pub(crate) fn get_profile_dir() -> XULStoreResult<PathBuf> {
+fn get_profile_dir() -> XULStoreResult<PathBuf> {
     let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
     let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
     let property = CString::new("ProfD")?;
@@ -79,7 +73,6 @@ fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
         .ok_or(XULStoreError::Unavailable)?
         .clone();
     xulstore_dir.push("xulstore");
-    info!("get XULStore dir: {:?}", &xulstore_dir);
 
     create_dir_all(xulstore_dir.clone())?;
 
@@ -97,13 +90,13 @@ impl Database {
     }
 }
 
-pub(crate) fn get_database() -> XULStoreResult<Database> {
-    let env = get_rkv()?;
+pub(crate) fn cache_database() -> XULStoreResult<Database> {
+    let env = get_env()?;
     let store = get_store(env.clone())?;
     Ok(Database::new(env, store))
 }
 
-pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
+fn get_env() -> XULStoreResult<Arc<RwLock<Rkv>>> {
     let mut manager = Manager::singleton().write()?;
     let xulstore_dir = get_xulstore_dir()?;
     manager
@@ -111,12 +104,12 @@ pub(crate) fn get_rkv() -> XULStoreResult<Arc<RwLock<Rkv>>> {
         .map_err(|err| err.into())
 }
 
-pub(crate) fn get_store(env: Arc<RwLock<Rkv>>) -> XULStoreResult<SingleStore> {
+fn get_store(env: Arc<RwLock<Rkv>>) -> XULStoreResult<SingleStore> {
     match env.read()?.open_single("db", StoreOptions::create()) {
         Ok(store) => {
             maybe_migrate_data(env.clone(), store);
             Ok(store)
-        },
+        }
         Err(err) => Err(err.into()),
     }
 }
@@ -190,15 +183,8 @@ pub(crate) fn update_profile_dir() {
             *profile_dir_guard = get_profile_dir().ok();
         }
 
-        {
-            let mut db_guard = DATABASE.write()?;
-            // TODO: ensure we drop the old environment before we create
-            // the new one.
-            *db_guard = get_database().ok();
-        }
-
-        let mut data_guard = CACHE.write()?;
-        *data_guard = get_data().ok();
+        let mut cache_guard = CACHE.write()?;
+        *cache_guard = cache_data().ok();
 
         Ok(())
     })()
@@ -220,11 +206,8 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
     }
 }
 
-fn get_data() -> XULStoreResult<XULStoreData> {
-    let db_guard = DATABASE.read()?;
-    let db = db_guard
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?;
+fn cache_data() -> XULStoreResult<XULStoreData> {
+    let db = cache_database()?;
     let env = db.env.read()?;
     let reader = env.read()?;
     let mut all = BTreeMap::new();

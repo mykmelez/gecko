@@ -27,7 +27,7 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{CACHE, DATABASE, THREAD},
+    statics::{cache_database, CACHE, THREAD},
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
@@ -67,8 +67,8 @@ impl XULStore {
             String::from_utf16(value)?
         };
 
-        let mut data_guard = CACHE.write()?;
-        let data = match data_guard.as_mut() {
+        let mut cache_guard = CACHE.write()?;
+        let data = match cache_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
         };
@@ -92,8 +92,8 @@ impl XULStore {
     fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
         debug!("XULStore has value: {} {} {}", doc, id, attr);
 
-        let data_guard = CACHE.read()?;
-        let data = match data_guard.as_ref() {
+        let cache_guard = CACHE.read()?;
+        let data = match cache_guard.as_ref() {
             Some(data) => data,
             None => return Ok(false),
         };
@@ -110,8 +110,8 @@ impl XULStore {
     fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
         debug!("XULStore get value {} {} {}", doc, id, attr);
 
-        let data_guard = CACHE.read()?;
-        let data = match data_guard.as_ref() {
+        let cache_guard = CACHE.read()?;
+        let data = match cache_guard.as_ref() {
             Some(data) => data,
             None => return Ok("".to_owned()),
         };
@@ -131,8 +131,8 @@ impl XULStore {
     fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
         debug!("XULStore remove value {} {} {}", doc, id, attr);
 
-        let mut data_guard = CACHE.write()?;
-        let data = match data_guard.as_mut() {
+        let mut cache_guard = CACHE.write()?;
+        let data = match cache_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
         };
@@ -172,8 +172,8 @@ impl XULStore {
     fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
         debug!("XULStore remove document {}", doc);
 
-        let mut data_guard = CACHE.write()?;
-        let data = match data_guard.as_mut() {
+        let mut cache_guard = CACHE.write()?;
+        let data = match cache_guard.as_mut() {
             Some(data) => data,
             None => return Ok(()),
         };
@@ -207,8 +207,8 @@ impl XULStore {
     fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get IDs for {}", doc);
 
-        let data_guard = CACHE.read()?;
-        let data = match data_guard.as_ref() {
+        let cache_guard = CACHE.read()?;
+        let data = match cache_guard.as_ref() {
             Some(data) => data,
             None => return Ok(XULStoreIterator::new(vec![].into_iter())),
         };
@@ -225,8 +225,8 @@ impl XULStore {
     fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
         debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
-        let data_guard = CACHE.read()?;
-        let data = match data_guard.as_ref() {
+        let cache_guard = CACHE.read()?;
+        let data = match cache_guard.as_ref() {
             Some(data) => data,
             None => return Ok(XULStoreIterator::new(vec![].into_iter())),
         };
@@ -263,13 +263,11 @@ impl SetValueTask {
 impl Task for SetValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db_guard = DATABASE.read()?;
-            let db = db_guard
-                .as_ref()
-                .ok_or(XULStoreError::Unavailable)?;
+            let db = cache_database()?;
             let env = db.env.read()?;
             let mut writer = env.write()?;
-            db.store.put(&mut writer, &self.key, &Value::Str(&self.value))?;
+            db.store
+                .put(&mut writer, &self.key, &Value::Str(&self.value))?;
             writer.commit()?;
 
             Ok(())
@@ -304,10 +302,7 @@ impl RemoveValueTask {
 impl Task for RemoveValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db_guard = DATABASE.read()?;
-            let db = db_guard
-                .as_ref()
-                .ok_or(XULStoreError::Unavailable)?;
+            let db = cache_database()?;
             let env = db.env.read()?;
             let mut writer = env.write()?;
 
@@ -360,10 +355,7 @@ impl RemoveDocumentTask {
 impl Task for RemoveDocumentTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db_guard = DATABASE.read()?;
-            let db = db_guard
-                .as_ref()
-                .ok_or(XULStoreError::Unavailable)?;
+            let db = cache_database()?;
             let env = db.env.read()?;
             let mut writer = env.write()?;
 
