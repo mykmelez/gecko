@@ -43,204 +43,202 @@ pub(crate) fn make_key(doc: &impl Display, id: &impl Display, attr: &impl Displa
     format!("{}{}{}{}{}", doc, SEPARATOR, id, SEPARATOR, attr)
 }
 
-struct XULStore {}
+pub(crate) fn set_value(
+    doc: &nsAString,
+    id: &nsAString,
+    attr: &nsAString,
+    value: &nsAString,
+) -> XULStoreResult<()> {
+    debug!("XULStore set value: {} {} {} {}", doc, id, attr, value);
 
-impl XULStore {
-    fn set_value(
-        doc: &nsAString,
-        id: &nsAString,
-        attr: &nsAString,
-        value: &nsAString,
-    ) -> XULStoreResult<()> {
-        debug!("XULStore set value: {} {} {} {}", doc, id, attr, value);
-
-        // bug 319846 -- don't save really long attributes or values.
-        if id.len() > 512 || attr.len() > 512 {
-            return Err(XULStoreError::IdAttrNameTooLong);
-        }
-
-        let key = make_key(doc, id, attr);
-        let value = if value.len() > 4096 {
-            warn!("XULStore: truncating long attribute value");
-            String::from_utf16(&value[0..4096])?
-        } else {
-            String::from_utf16(value)?
-        };
-
-        let mut cache_guard = CACHE.write()?;
-        let data = match cache_guard.as_mut() {
-            Some(data) => data,
-            None => return Ok(()),
-        };
-        data.entry(doc.to_string())
-            .or_insert_with(BTreeMap::new)
-            .entry(id.to_string())
-            .or_insert_with(BTreeMap::new)
-            .insert(attr.to_string(), value.clone());
-
-        let task = Box::new(SetValueTask::new(key, value));
-        let thread = THREAD
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .get_ref()
-            .ok_or(XULStoreError::Unavailable)?;
-        TaskRunnable::new("XULStore::SetValue", task)?.dispatch(thread)?;
-
-        Ok(())
+    // bug 319846 -- don't save really long attributes or values.
+    if id.len() > 512 || attr.len() > 512 {
+        return Err(XULStoreError::IdAttrNameTooLong);
     }
 
-    fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
-        debug!("XULStore has value: {} {} {}", doc, id, attr);
+    let key = make_key(doc, id, attr);
+    let value = if value.len() > 4096 {
+        warn!("XULStore: truncating long attribute value");
+        String::from_utf16(&value[0..4096])?
+    } else {
+        String::from_utf16(value)?
+    };
 
-        let cache_guard = CACHE.read()?;
-        let data = match cache_guard.as_ref() {
-            Some(data) => data,
-            None => return Ok(false),
-        };
+    let mut cache_guard = CACHE.write()?;
+    let data = match cache_guard.as_mut() {
+        Some(data) => data,
+        None => return Ok(()),
+    };
+    data.entry(doc.to_string())
+        .or_insert_with(BTreeMap::new)
+        .entry(id.to_string())
+        .or_insert_with(BTreeMap::new)
+        .insert(attr.to_string(), value.clone());
 
-        match data.get(&doc.to_string()) {
-            Some(ids) => match ids.get(&id.to_string()) {
-                Some(attrs) => Ok(attrs.contains_key(&attr.to_string())),
-                None => Ok(false),
-            },
+    let task = Box::new(SetValueTask::new(key, value));
+    let thread = THREAD
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .get_ref()
+        .ok_or(XULStoreError::Unavailable)?;
+    TaskRunnable::new("XULStore::SetValue", task)?.dispatch(thread)?;
+
+    Ok(())
+}
+
+pub(crate) fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
+    debug!("XULStore has value: {} {} {}", doc, id, attr);
+
+    let cache_guard = CACHE.read()?;
+    let data = match cache_guard.as_ref() {
+        Some(data) => data,
+        None => return Ok(false),
+    };
+
+    match data.get(&doc.to_string()) {
+        Some(ids) => match ids.get(&id.to_string()) {
+            Some(attrs) => Ok(attrs.contains_key(&attr.to_string())),
             None => Ok(false),
-        }
+        },
+        None => Ok(false),
     }
+}
 
-    fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
-        debug!("XULStore get value {} {} {}", doc, id, attr);
+pub(crate) fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
+    debug!("XULStore get value {} {} {}", doc, id, attr);
 
-        let cache_guard = CACHE.read()?;
-        let data = match cache_guard.as_ref() {
-            Some(data) => data,
-            None => return Ok("".to_owned()),
-        };
+    let cache_guard = CACHE.read()?;
+    let data = match cache_guard.as_ref() {
+        Some(data) => data,
+        None => return Ok("".to_owned()),
+    };
 
-        match data.get(&doc.to_string()) {
-            Some(ids) => match ids.get(&id.to_string()) {
-                Some(attrs) => match attrs.get(&attr.to_string()) {
-                    Some(value) => Ok(value.to_owned()),
-                    None => Ok("".to_owned()),
-                },
+    match data.get(&doc.to_string()) {
+        Some(ids) => match ids.get(&id.to_string()) {
+            Some(attrs) => match attrs.get(&attr.to_string()) {
+                Some(value) => Ok(value.to_owned()),
                 None => Ok("".to_owned()),
             },
             None => Ok("".to_owned()),
+        },
+        None => Ok("".to_owned()),
+    }
+
+    Err(err) => Err(err.into()),
+}
+
+pub(crate) fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
+    debug!("XULStore remove value {} {} {}", doc, id, attr);
+
+    let mut cache_guard = CACHE.write()?;
+    let data = match cache_guard.as_mut() {
+        Some(data) => data,
+        None => return Ok(()),
+    };
+
+    let mut ids_empty = false;
+    if let Some(ids) = data.get_mut(&doc.to_string()) {
+        let mut attrs_empty = false;
+        if let Some(attrs) = ids.get_mut(&id.to_string()) {
+            attrs.remove(&attr.to_string());
+            if attrs.is_empty() {
+                attrs_empty = true;
+            }
         }
-    }
-
-    fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
-        debug!("XULStore remove value {} {} {}", doc, id, attr);
-
-        let mut cache_guard = CACHE.write()?;
-        let data = match cache_guard.as_mut() {
-            Some(data) => data,
-            None => return Ok(()),
-        };
-
-        let mut ids_empty = false;
-        if let Some(ids) = data.get_mut(&doc.to_string()) {
-            let mut attrs_empty = false;
-            if let Some(attrs) = ids.get_mut(&id.to_string()) {
-                attrs.remove(&attr.to_string());
-                if attrs.is_empty() {
-                    attrs_empty = true;
-                }
+        if attrs_empty {
+            ids.remove(&id.to_string());
+            if ids.is_empty() {
+                ids_empty = true;
             }
-            if attrs_empty {
-                ids.remove(&id.to_string());
-                if ids.is_empty() {
-                    ids_empty = true;
-                }
-            }
-        };
-        if ids_empty {
-            data.remove(&doc.to_string());
         }
-
-        let key = make_key(doc, id, attr);
-        let task = Box::new(RemoveValueTask::new(key));
-        let thread = THREAD
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .get_ref()
-            .ok_or(XULStoreError::Unavailable)?;
-        TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(thread)?;
-
-        Ok(())
+    };
+    if ids_empty {
+        data.remove(&doc.to_string());
     }
 
-    fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
-        debug!("XULStore remove document {}", doc);
+    let key = make_key(doc, id, attr);
+    let task = Box::new(RemoveValueTask::new(key));
+    let thread = THREAD
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .get_ref()
+        .ok_or(XULStoreError::Unavailable)?;
+    TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(thread)?;
 
-        let mut cache_guard = CACHE.write()?;
-        let data = match cache_guard.as_mut() {
-            Some(data) => data,
-            None => return Ok(()),
-        };
+    Ok(())
+}
 
-        let mut keys_to_remove: Vec<String> = Vec::new();
-        let doc = doc.to_string();
+pub(crate) fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
+    debug!("XULStore remove document {}", doc);
 
-        // Build a list of keys to remove from the store.
-        if let Some(ids) = data.get(&doc) {
-            for (id, attrs) in ids {
-                for attr in attrs.keys() {
-                    keys_to_remove.push(make_key(&doc, id, attr));
-                }
+    let mut cache_guard = CACHE.write()?;
+    let data = match cache_guard.as_mut() {
+        Some(data) => data,
+        None => return Ok(()),
+    };
+
+    let mut keys_to_remove: Vec<String> = Vec::new();
+    let doc = doc.to_string();
+
+    // Build a list of keys to remove from the store.
+    if let Some(ids) = data.get(&doc) {
+        for (id, attrs) in ids {
+            for attr in attrs.keys() {
+                keys_to_remove.push(make_key(&doc, id, attr));
             }
-        };
+        }
+    };
 
-        // We can remove the document from the data cache in one fell swoop.
-        data.remove(&doc);
+    // We can remove the document from the data cache in one fell swoop.
+    data.remove(&doc);
 
-        let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
-        let thread = THREAD
-            .as_ref()
-            .ok_or(XULStoreError::Unavailable)?
-            .get_ref()
-            .ok_or(XULStoreError::Unavailable)?;
-        TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(thread)?;
+    let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
+    let thread = THREAD
+        .as_ref()
+        .ok_or(XULStoreError::Unavailable)?
+        .get_ref()
+        .ok_or(XULStoreError::Unavailable)?;
+    TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(thread)?;
 
-        Ok(())
+    Ok(())
+}
+
+pub(crate) fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
+    debug!("XULStore get IDs for {}", doc);
+
+    let cache_guard = CACHE.read()?;
+    let data = match cache_guard.as_ref() {
+        Some(data) => data,
+        None => return Ok(XULStoreIterator::new(vec![].into_iter())),
+    };
+
+    match data.get(&doc.to_string()) {
+        Some(ids) => {
+            let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
+            Ok(XULStoreIterator::new(ids.into_iter()))
+        }
+        None => Ok(XULStoreIterator::new(vec![].into_iter())),
     }
+}
 
-    fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
-        debug!("XULStore get IDs for {}", doc);
+pub(crate) fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
+    debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
-        let cache_guard = CACHE.read()?;
-        let data = match cache_guard.as_ref() {
-            Some(data) => data,
-            None => return Ok(XULStoreIterator::new(vec![].into_iter())),
-        };
+    let cache_guard = CACHE.read()?;
+    let data = match cache_guard.as_ref() {
+        Some(data) => data,
+        None => return Ok(XULStoreIterator::new(vec![].into_iter())),
+    };
 
-        match data.get(&doc.to_string()) {
-            Some(ids) => {
-                let mut ids: Vec<String> = ids.keys().map(|id| id.to_owned()).collect();
-                Ok(XULStoreIterator::new(ids.into_iter()))
+    match data.get(&doc.to_string()) {
+        Some(ids) => match ids.get(&id.to_string()) {
+            Some(attrs) => {
+                let mut attrs: Vec<String> = attrs.keys().map(|attr| attr.to_owned()).collect();
+                Ok(XULStoreIterator::new(attrs.into_iter()))
             }
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
-        }
-    }
-
-    fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
-        debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
-
-        let cache_guard = CACHE.read()?;
-        let data = match cache_guard.as_ref() {
-            Some(data) => data,
-            None => return Ok(XULStoreIterator::new(vec![].into_iter())),
-        };
-
-        match data.get(&doc.to_string()) {
-            Some(ids) => match ids.get(&id.to_string()) {
-                Some(attrs) => {
-                    let mut attrs: Vec<String> = attrs.keys().map(|attr| attr.to_owned()).collect();
-                    Ok(XULStoreIterator::new(attrs.into_iter()))
-                }
-                None => Ok(XULStoreIterator::new(vec![].into_iter())),
-            },
-            None => Ok(XULStoreIterator::new(vec![].into_iter())),
-        }
+        },
+        None => Ok(XULStoreIterator::new(vec![].into_iter())),
     }
 }
 
