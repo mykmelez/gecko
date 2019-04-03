@@ -17,7 +17,7 @@ use std::{
     ops::DerefMut,
     path::PathBuf,
     str,
-    sync::{Mutex, RwLock},
+    sync::Mutex,
 };
 use xpcom::{
     interfaces::{nsIFile, nsIThread},
@@ -31,7 +31,7 @@ lazy_static! {
         observe_profile_change();
         Mutex::new(get_profile_dir().ok())
     };
-    pub(crate) static ref CACHE: RwLock<Option<XULStoreCache>> = { RwLock::new(cache_data().ok()) };
+    pub(crate) static ref CACHE: Mutex<Option<XULStoreCache>> = { Mutex::new(cache_data().ok()) };
     pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
         let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
             Ok(thread) => thread,
@@ -176,7 +176,7 @@ pub(crate) fn update_profile_dir() {
             *profile_dir_guard = get_profile_dir().ok();
         }
 
-        let mut cache_guard = CACHE.write()?;
+        let mut cache_guard = CACHE.lock()?;
         *cache_guard = cache_data().ok();
 
         Ok(())
