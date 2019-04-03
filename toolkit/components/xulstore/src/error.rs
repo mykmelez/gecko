@@ -42,11 +42,8 @@ pub enum XULStoreError {
     #[fail(display = "interior nul byte")]
     NulError,
 
-    // NB: We can avoid storing the nsCString error description
-    // once nsresult is a real type with a Display implementation
-    // per https://bugzilla.mozilla.org/show_bug.cgi?id=1513350.
     #[fail(display = "error result {}", _0)]
-    Nsresult(nsCString, nsresult),
+    NsResult(nsresult),
 
     #[fail(display = "poison error getting read/write lock")]
     PoisonError,
@@ -75,7 +72,7 @@ impl From<XULStoreError> for nsresult {
             XULStoreError::IoError(_) => NS_ERROR_FAILURE,
             XULStoreError::IterationFinished => NS_ERROR_FAILURE,
             XULStoreError::JsonError(_) => NS_ERROR_FAILURE,
-            XULStoreError::Nsresult(_, result) => result,
+            XULStoreError::NsResult(result) => result,
             XULStoreError::NulError => NS_ERROR_UNEXPECTED,
             XULStoreError::PoisonError => NS_ERROR_UNEXPECTED,
             XULStoreError::RkvStoreError(_) => NS_ERROR_FAILURE,
@@ -104,7 +101,7 @@ impl From<FromUtf16Error> for XULStoreError {
 
 impl From<nsresult> for XULStoreError {
     fn from(result: nsresult) -> XULStoreError {
-        XULStoreError::Nsresult(result.error_name(), result)
+        XULStoreError::NsResult(result)
     }
 }
 
