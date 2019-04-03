@@ -90,7 +90,7 @@ impl Database {
     }
 }
 
-pub(crate) fn cache_database() -> XULStoreResult<Database> {
+pub(crate) fn get_database() -> XULStoreResult<Database> {
     let env = get_env()?;
     let store = get_store(&env)?;
     Ok(Database::new(env, store))
@@ -203,7 +203,7 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
 }
 
 fn cache_data() -> XULStoreResult<XULStoreData> {
-    let db = cache_database()?;
+    let db = get_database()?;
     let reader = db.env.read()?;
     let mut all = BTreeMap::new();
     let iterator = db.store.iter_start(&reader)?;

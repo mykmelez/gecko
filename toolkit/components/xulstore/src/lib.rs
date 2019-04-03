@@ -27,7 +27,7 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{cache_database, CACHE, THREAD},
+    statics::{get_database, CACHE, THREAD},
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
@@ -263,7 +263,7 @@ impl SetValueTask {
 impl Task for SetValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = cache_database()?;
+            let db = get_database()?;
             let mut writer = db.env.write()?;
             db.store
                 .put(&mut writer, &self.key, &Value::Str(&self.value))?;
@@ -301,7 +301,7 @@ impl RemoveValueTask {
 impl Task for RemoveValueTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = cache_database()?;
+            let db = get_database()?;
             let mut writer = db.env.write()?;
 
             match db.store.delete(&mut writer, &self.key) {
@@ -353,7 +353,7 @@ impl RemoveDocumentTask {
 impl Task for RemoveDocumentTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = cache_database()?;
+            let db = get_database()?;
             let mut writer = db.env.write()?;
 
             // Removing the document from the store requires iterating the keys
