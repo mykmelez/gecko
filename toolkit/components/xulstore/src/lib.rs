@@ -35,11 +35,11 @@ use moz_task::{Task, TaskRunnable};
 use nserror::nsresult;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Display, str};
 
 const SEPARATOR: char = '\u{0009}';
 
-pub(crate) fn make_key<T: std::fmt::Display>(doc: &T, id: &T, attr: &T) -> String {
+pub(crate) fn make_key(doc: &impl Display, id: &impl Display, attr: &impl Display) -> String {
     format!("{}{}{}{}{}", doc, SEPARATOR, id, SEPARATOR, attr)
 }
 
