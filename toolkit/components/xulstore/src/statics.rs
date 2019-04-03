@@ -45,6 +45,26 @@ lazy_static! {
     };
 }
 
+pub struct Database {
+    pub env: Rkv,
+    pub store: SingleStore,
+}
+
+impl Database {
+    fn new(env: Rkv, store: SingleStore) -> Database {
+        Database { env, store }
+    }
+}
+
+pub(crate) fn get_database() -> XULStoreResult<Database> {
+    let xulstore_dir = get_xulstore_dir()?;
+    let env = Rkv::new(xulstore_dir.as_path())?;
+    let store = env.open_single("db", StoreOptions::create())?;
+    maybe_migrate_data(&env, store);
+
+    Ok(Database::new(env, store))
+}
+
 // Memoized to the PROFILE_DIR lazy static. Prefer that accessor to calling
 // this function, to avoid extra trips across the XPCOM FFI.
 fn get_profile_dir() -> XULStoreResult<PathBuf> {
@@ -75,38 +95,6 @@ fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
     create_dir_all(xulstore_dir.clone())?;
 
     Ok(xulstore_dir)
-}
-
-pub(crate) struct Database {
-    pub env: Rkv,
-    pub store: SingleStore,
-}
-
-impl Database {
-    fn new(env: Rkv, store: SingleStore) -> Database {
-        Database { env, store }
-    }
-}
-
-pub(crate) fn get_database() -> XULStoreResult<Database> {
-    let env = get_env()?;
-    let store = get_store(&env)?;
-    Ok(Database::new(env, store))
-}
-
-fn get_env() -> XULStoreResult<Rkv> {
-    let xulstore_dir = get_xulstore_dir()?;
-    Rkv::new(xulstore_dir.as_path()).map_err(|err| err.into())
-}
-
-fn get_store(env: &Rkv) -> XULStoreResult<SingleStore> {
-    match env.open_single("db", StoreOptions::create()) {
-        Ok(store) => {
-            maybe_migrate_data(env, store);
-            Ok(store)
-        }
-        Err(err) => Err(err.into()),
-    }
 }
 
 fn maybe_migrate_data(env: &Rkv, store: SingleStore) {
