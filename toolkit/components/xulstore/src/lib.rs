@@ -104,7 +104,11 @@ pub(crate) fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XU
     }
 }
 
-pub(crate) fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<String> {
+pub(crate) fn get_value(
+    doc: &nsAString,
+    id: &nsAString,
+    attr: &nsAString,
+) -> XULStoreResult<String> {
     debug!("XULStore get value {} {} {}", doc, id, attr);
 
     let cache_guard = CACHE.read()?;
@@ -125,7 +129,11 @@ pub(crate) fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XU
     }
 }
 
-pub(crate) fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
+pub(crate) fn remove_value(
+    doc: &nsAString,
+    id: &nsAString,
+    attr: &nsAString,
+) -> XULStoreResult<()> {
     debug!("XULStore remove value {} {} {}", doc, id, attr);
 
     let mut cache_guard = CACHE.write()?;

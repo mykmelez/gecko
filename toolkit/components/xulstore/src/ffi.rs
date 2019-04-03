@@ -3,9 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate as XULStore;
-use crate::{
-    iter::XULStoreIterator, statics::update_profile_dir,
-};
+use crate::{iter::XULStoreIterator, statics::update_profile_dir};
 use libc::{c_char, c_void};
 use nserror::{nsresult, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION, NS_OK};
 use nsstring::{nsAString, nsString};

@@ -3,7 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::{
-    error::{XULStoreError, XULStoreResult}, ffi::ProfileChangeObserver, make_key, SEPARATOR,
+    error::{XULStoreError, XULStoreResult},
+    ffi::ProfileChangeObserver,
+    make_key, SEPARATOR,
 };
 use moz_task::create_thread;
 use nsstring::nsString;

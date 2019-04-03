@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_ILLEGAL_VALUE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED};
+use nserror::{
+    nsresult, NS_ERROR_FAILURE, NS_ERROR_ILLEGAL_VALUE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED,
+};
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
 use std::{
