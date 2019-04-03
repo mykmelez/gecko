@@ -16,6 +16,7 @@ use std::{
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
 
 // This newtype enables us to implement From<XULStoreResult> for nsresult.
+#[repr(transparent)]
 pub struct XULStoreNsResult(pub nsresult);
 
 #[derive(Debug, Fail)]
