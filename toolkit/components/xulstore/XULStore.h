@@ -51,14 +51,17 @@ class XULStoreIterator final {
   }
 
   ~XULStoreIterator() {}
-  static void operator delete(void* iterator) {
-    xulstore_iter_free(reinterpret_cast<XULStoreIterator*>(iterator));
-  }
 
  private:
   XULStoreIterator() = delete;
   XULStoreIterator(const XULStoreIterator&) = delete;
   XULStoreIterator& operator=(const XULStoreIterator&) = delete;
+};
+
+template <>
+class DefaultDelete<XULStoreIterator> {
+public:
+void operator()(XULStoreIterator* ptr) const { xulstore_iter_free(ptr); }
 };
 
 class XULStore final {
