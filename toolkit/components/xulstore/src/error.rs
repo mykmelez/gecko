@@ -14,7 +14,7 @@ use std::{
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
 
 #[derive(Debug, Fail)]
-pub enum XULStoreError {
+pub(crate) enum XULStoreError {
     #[fail(display = "error converting bytes: {:?}", _0)]
     ConvertBytes(Utf8Error),
 

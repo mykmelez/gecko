@@ -10,15 +10,15 @@ pub struct XULStoreIterator {
 }
 
 impl<'a> XULStoreIterator {
-    pub fn new(values: IntoIter<String>) -> Self {
+    pub(crate) fn new(values: IntoIter<String>) -> Self {
         Self { values }
     }
 
-    pub fn has_more(&self) -> bool {
+    pub(crate) fn has_more(&self) -> bool {
         !self.values.as_slice().is_empty()
     }
 
-    pub fn get_next(&mut self) -> XULStoreResult<String> {
+    pub(crate) fn get_next(&mut self) -> XULStoreResult<String> {
         Ok(self.values.next().ok_or(XULStoreError::IterationFinished)?)
     }
 }

@@ -24,14 +24,14 @@ use xpcom::{
     RefPtr, ThreadBoundRefPtr, XpCom,
 };
 
-type XULStoreData = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
+type XULStoreCache = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
 lazy_static! {
     pub(crate) static ref PROFILE_DIR: RwLock<Option<PathBuf>> = {
         observe_profile_change();
         RwLock::new(get_profile_dir().ok())
     };
-    pub(crate) static ref CACHE: RwLock<Option<XULStoreData>> = { RwLock::new(cache_data().ok()) };
+    pub(crate) static ref CACHE: RwLock<Option<XULStoreCache>> = { RwLock::new(cache_data().ok()) };
     pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
         let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
             Ok(thread) => thread,
@@ -204,7 +204,7 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
     }
 }
 
-fn cache_data() -> XULStoreResult<XULStoreData> {
+fn cache_data() -> XULStoreResult<XULStoreCache> {
     let db = get_database()?;
     let reader = db.env.read()?;
     let mut all = BTreeMap::new();
