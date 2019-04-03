@@ -2,11 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use nserror::{
-    nsresult, NS_ERROR_FAILURE, NS_ERROR_ILLEGAL_VALUE, NS_ERROR_NOT_AVAILABLE,
-    NS_ERROR_UNEXPECTED, NS_OK,
-};
-use nsstring::nsCString;
+use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_ILLEGAL_VALUE, NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED};
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
 use std::{
@@ -14,10 +10,6 @@ use std::{
 };
 
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
-
-// This newtype enables us to implement From<XULStoreResult> for nsresult.
-#[repr(transparent)]
-pub struct XULStoreNsResult(pub nsresult);
 
 #[derive(Debug, Fail)]
 pub enum XULStoreError {
@@ -80,15 +72,6 @@ impl From<XULStoreError> for nsresult {
             XULStoreError::Unavailable => NS_ERROR_NOT_AVAILABLE,
             XULStoreError::UnexpectedKey(_) => NS_ERROR_UNEXPECTED,
             XULStoreError::UnexpectedValue => NS_ERROR_UNEXPECTED,
-        }
-    }
-}
-
-impl<T> From<XULStoreResult<T>> for XULStoreNsResult {
-    fn from(result: XULStoreResult<T>) -> XULStoreNsResult {
-        match result {
-            Ok(_) => XULStoreNsResult(NS_OK),
-            Err(err) => XULStoreNsResult(err.into()),
         }
     }
 }

@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use crate::{
-    error::XULStoreNsResult, iter::XULStoreIterator, statics::update_profile_dir, XULStore,
+    iter::XULStoreIterator, statics::update_profile_dir, XULStore,
 };
 use libc::{c_char, c_void};
 use nserror::{nsresult, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION, NS_OK};
@@ -235,7 +235,7 @@ pub unsafe extern "C" fn xulstore_set_value(
     id: &nsAString,
     attr: &nsAString,
     value: &nsAString,
-) -> XULStoreNsResult {
+) -> nsresult {
     XULStore::set_value(doc, id, attr, value).into()
 }
 
@@ -245,13 +245,13 @@ pub unsafe extern "C" fn xulstore_has_value(
     id: &nsAString,
     attr: &nsAString,
     has_value: *mut bool,
-) -> XULStoreNsResult {
+) -> nsresult {
     match XULStore::has_value(doc, id, attr) {
         Ok(val) => {
             *has_value = val;
-            XULStoreNsResult(NS_OK)
+            NS_OK
         }
-        Err(err) => XULStoreNsResult(err.into()),
+        Err(err) => err.into(),
     }
 }
 
@@ -261,13 +261,13 @@ pub unsafe extern "C" fn xulstore_get_value(
     id: &nsAString,
     attr: &nsAString,
     value: *mut nsAString,
-) -> XULStoreNsResult {
+) -> nsresult {
     match XULStore::get_value(doc, id, attr) {
         Ok(val) => {
             (*value).assign(&nsString::from(&val));
-            XULStoreNsResult(NS_OK)
+            NS_OK
         }
-        Err(err) => XULStoreNsResult(err.into()),
+        Err(err) => err.into(),
     }
 }
 
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn xulstore_remove_value(
     doc: &nsAString,
     id: &nsAString,
     attr: &nsAString,
-) -> XULStoreNsResult {
+) -> nsresult {
     XULStore::remove_value(doc, id, attr).into()
 }
 
@@ -324,13 +324,13 @@ pub unsafe extern "C" fn xulstore_iter_has_more(iter: &XULStoreIterator) -> bool
 pub unsafe extern "C" fn xulstore_iter_get_next(
     iter: &mut XULStoreIterator,
     value: *mut nsAString,
-) -> XULStoreNsResult {
+) -> nsresult {
     match iter.get_next() {
         Ok(val) => {
             (*value).assign(&nsString::from(&val));
-            XULStoreNsResult(NS_OK)
+            NS_OK
         }
-        Err(err) => XULStoreNsResult(err.into()),
+        Err(err) => err.into(),
     }
 }
 
