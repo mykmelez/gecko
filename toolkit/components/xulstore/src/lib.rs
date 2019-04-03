@@ -35,7 +35,7 @@ use moz_task::{Task, TaskRunnable};
 use nserror::nsresult;
 use nsstring::nsAString;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::{collections::BTreeMap, fmt::Display, str};
+use std::{collections::BTreeMap, fmt::Display};
 
 const SEPARATOR: char = '\u{0009}';
 
@@ -123,8 +123,6 @@ pub(crate) fn get_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XU
         },
         None => Ok("".to_owned()),
     }
-
-    Err(err) => Err(err.into()),
 }
 
 pub(crate) fn remove_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<()> {
