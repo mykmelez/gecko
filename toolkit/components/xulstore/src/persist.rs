@@ -11,16 +11,17 @@ use lmdb::Error as LmdbError;
 use moz_task::{Task, TaskRunnable};
 use nserror::nsresult;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{collections::BTreeMap, mem::replace, sync::Mutex};
 
 lazy_static! {
-    static ref WRITES: Mutex<BTreeMap<String, Option<String>>> = { Mutex::new(BTreeMap::new()) };
+    static ref WRITES: Mutex<Option<BTreeMap<String, Option<String>>>> = { Mutex::new(None) };
 }
 
 pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> {
     let mut writes = WRITES.lock()?;
-    if writes.len() > 0 {
-        writes.insert(key, value);
+
+    if writes.is_none() {
+        *writes = Some(BTreeMap::new());
 
         let task = Box::new(PersistTask::new());
         let thread = THREAD
@@ -29,9 +30,9 @@ pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> 
             .get_ref()
             .ok_or(XULStoreError::Unavailable)?;
         TaskRunnable::new("XULStore::Persist", task)?.dispatch(thread)?;
-    } else {
-        writes.insert(key, value);
     }
+
+    writes.as_mut().unwrap().insert(key, value);
 
     Ok(())
 }
@@ -54,14 +55,16 @@ impl Task for PersistTask {
             let db = get_database()?;
             let mut writer = db.env.write()?;
 
-            let mut guard = WRITES.lock()?;
-            let log = guard.clone();
-            guard.clear();
-            drop(guard);
+            // Get the map of key/value pairs from the mutex, replacing it
+            // with None.
+            let writes = replace(&mut *WRITES.lock()?, None);
 
-            for (key, value) in log.iter() {
-                dbg!(key);
-                dbg!(value);
+            // The Option should be a Some(BTreeMap) (otherwise the task
+            // shouldn't have been scheduled in the first place).  If it's None,
+            // then we return an early Err result.
+            let writes = writes.ok_or(XULStoreError::Unavailable)?;
+
+            for (key, value) in writes.iter() {
                 match value {
                     Some(val) => db.store.put(&mut writer, &key, &Value::Str(val))?,
                     None => {
