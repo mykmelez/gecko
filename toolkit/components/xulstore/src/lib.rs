@@ -22,19 +22,16 @@ extern crate xpcom;
 mod error;
 mod ffi;
 mod iter;
+mod persist;
 mod statics;
 
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{get_database, CACHE, THREAD},
+    statics::{CACHE},
+    persist::persist,
 };
-use crossbeam_utils::atomic::AtomicCell;
-use lmdb::Error as LmdbError;
-use moz_task::{Task, TaskRunnable};
-use nserror::nsresult;
 use nsstring::nsAString;
-use rkv::{StoreError as RkvStoreError, Value};
 use std::{collections::BTreeMap, fmt::Display};
 
 const SEPARATOR: char = '\u{0009}';
@@ -56,7 +53,6 @@ pub(crate) fn set_value(
         return Err(XULStoreError::IdAttrNameTooLong);
     }
 
-    let key = make_key(doc, id, attr);
     let value = if value.len() > 4096 {
         warn!("XULStore: truncating long attribute value");
         String::from_utf16(&value[0..4096])?
@@ -75,13 +71,7 @@ pub(crate) fn set_value(
         .or_insert_with(BTreeMap::new)
         .insert(attr.to_string(), value.clone());
 
-    let task = Box::new(SetValueTask::new(key, value));
-    let thread = THREAD
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .get_ref()
-        .ok_or(XULStoreError::Unavailable)?;
-    TaskRunnable::new("XULStore::SetValue", task)?.dispatch(thread)?;
+    persist(make_key(doc, id, attr), Some(value))?;
 
     Ok(())
 }
@@ -162,14 +152,7 @@ pub(crate) fn remove_value(
         data.remove(&doc.to_string());
     }
 
-    let key = make_key(doc, id, attr);
-    let task = Box::new(RemoveValueTask::new(key));
-    let thread = THREAD
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .get_ref()
-        .ok_or(XULStoreError::Unavailable)?;
-    TaskRunnable::new("XULStore::RemoveValue", task)?.dispatch(thread)?;
+    persist(make_key(doc, id, attr), None)?;
 
     Ok(())
 }
@@ -183,28 +166,17 @@ pub(crate) fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
         None => return Ok(()),
     };
 
-    let mut keys_to_remove: Vec<String> = Vec::new();
     let doc = doc.to_string();
 
-    // Build a list of keys to remove from the store.
     if let Some(ids) = data.get(&doc) {
         for (id, attrs) in ids {
             for attr in attrs.keys() {
-                keys_to_remove.push(make_key(&doc, id, attr));
+                persist(make_key(&doc, id, attr), None)?;
             }
         }
     };
 
-    // We can remove the document from the data cache in one fell swoop.
     data.remove(&doc);
-
-    let task = Box::new(RemoveDocumentTask::new(keys_to_remove));
-    let thread = THREAD
-        .as_ref()
-        .ok_or(XULStoreError::Unavailable)?
-        .get_ref()
-        .ok_or(XULStoreError::Unavailable)?;
-    TaskRunnable::new("XULStore::RemoveDocument", task)?.dispatch(thread)?;
 
     Ok(())
 }
@@ -245,154 +217,5 @@ pub(crate) fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULSt
             None => Ok(XULStoreIterator::new(vec![].into_iter())),
         },
         None => Ok(XULStoreIterator::new(vec![].into_iter())),
-    }
-}
-
-pub struct SetValueTask {
-    key: String,
-    value: String,
-    result: AtomicCell<Option<Result<(), XULStoreError>>>,
-}
-
-impl SetValueTask {
-    pub fn new(key: String, value: String) -> SetValueTask {
-        SetValueTask {
-            key,
-            value,
-            result: AtomicCell::default(),
-        }
-    }
-}
-
-impl Task for SetValueTask {
-    fn run(&self) {
-        self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = get_database()?;
-            let mut writer = db.env.write()?;
-            db.store
-                .put(&mut writer, &self.key, &Value::Str(&self.value))?;
-            writer.commit()?;
-
-            Ok(())
-        }()));
-    }
-
-    fn done(&self) -> Result<(), nsresult> {
-        match self.result.swap(None) {
-            Some(Ok(())) => (),
-            Some(Err(err)) => error!("error setting value: {}", err),
-            None => error!("error setting value: unexpected result"),
-        };
-
-        Ok(())
-    }
-}
-
-pub struct RemoveValueTask {
-    key: String,
-    result: AtomicCell<Option<Result<(), XULStoreError>>>,
-}
-
-impl RemoveValueTask {
-    pub fn new(key: String) -> RemoveValueTask {
-        RemoveValueTask {
-            key,
-            result: AtomicCell::default(),
-        }
-    }
-}
-
-impl Task for RemoveValueTask {
-    fn run(&self) {
-        self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = get_database()?;
-            let mut writer = db.env.write()?;
-
-            match db.store.delete(&mut writer, &self.key) {
-                Ok(_) => {
-                    writer.commit()?;
-
-                    Ok(())
-                }
-
-                // The XULStore API doesn't care if a consumer tries
-                // to remove a value that doesn't exist in the store,
-                // so we ignore the error, although in this case the key
-                // should exist since it was in the cache!
-                Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
-                    warn!("tried to remove key that isn't in the store");
-                    Ok(())
-                }
-
-                Err(err) => Err(err.into()),
-            }
-        }()));
-    }
-
-    fn done(&self) -> Result<(), nsresult> {
-        match self.result.swap(None) {
-            Some(Ok(())) => (),
-            Some(Err(err)) => error!("error removing value: {}", err),
-            None => error!("error removing value: unexpected result"),
-        };
-
-        Ok(())
-    }
-}
-
-pub struct RemoveDocumentTask {
-    keys_to_remove: Vec<String>,
-    result: AtomicCell<Option<Result<(), XULStoreError>>>,
-}
-
-impl RemoveDocumentTask {
-    pub fn new(keys_to_remove: Vec<String>) -> RemoveDocumentTask {
-        RemoveDocumentTask {
-            keys_to_remove,
-            result: AtomicCell::default(),
-        }
-    }
-}
-
-impl Task for RemoveDocumentTask {
-    fn run(&self) {
-        self.result.store(Some(|| -> Result<(), XULStoreError> {
-            let db = get_database()?;
-            let mut writer = db.env.write()?;
-
-            // Removing the document from the store requires iterating the keys
-            // to remove.
-            self.keys_to_remove
-                .iter()
-                .map(|key| match db.store.delete(&mut writer, &key) {
-                    Ok(_) => Ok(()),
-
-                    // The XULStore API doesn't care if a consumer tries
-                    // to remove a value that doesn't exist in the store,
-                    // so we ignore the error, although in this case the key
-                    // should exist since it was in the cache!
-                    Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
-                        warn!("tried to remove key that isn't in the store");
-                        Ok(())
-                    }
-
-                    Err(err) => Err(err.into()),
-                })
-                .collect::<Result<Vec<()>, XULStoreError>>()?;
-
-            writer.commit()?;
-
-            Ok(())
-        }()));
-    }
-
-    fn done(&self) -> Result<(), nsresult> {
-        match self.result.swap(None) {
-            Some(Ok(())) => (),
-            Some(Err(err)) => error!("removeDocument error: {}", err),
-            None => error!("removeDocument error: unexpected result"),
-        };
-
-        Ok(())
     }
 }
