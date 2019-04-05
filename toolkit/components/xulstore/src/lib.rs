@@ -28,7 +28,7 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::{CACHE},
+    statics::DATA_CACHE,
     persist::persist,
 };
 use nsstring::nsAString;
@@ -60,7 +60,7 @@ pub(crate) fn set_value(
         String::from_utf16(value)?
     };
 
-    let mut cache_guard = CACHE.lock()?;
+    let mut cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_mut() {
         Some(data) => data,
         None => return Ok(()),
@@ -79,7 +79,7 @@ pub(crate) fn set_value(
 pub(crate) fn has_value(doc: &nsAString, id: &nsAString, attr: &nsAString) -> XULStoreResult<bool> {
     debug!("XULStore has value: {} {} {}", doc, id, attr);
 
-    let cache_guard = CACHE.lock()?;
+    let cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_ref() {
         Some(data) => data,
         None => return Ok(false),
@@ -101,7 +101,7 @@ pub(crate) fn get_value(
 ) -> XULStoreResult<String> {
     debug!("XULStore get value {} {} {}", doc, id, attr);
 
-    let cache_guard = CACHE.lock()?;
+    let cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_ref() {
         Some(data) => data,
         None => return Ok("".to_owned()),
@@ -126,7 +126,7 @@ pub(crate) fn remove_value(
 ) -> XULStoreResult<()> {
     debug!("XULStore remove value {} {} {}", doc, id, attr);
 
-    let mut cache_guard = CACHE.lock()?;
+    let mut cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_mut() {
         Some(data) => data,
         None => return Ok(()),
@@ -160,7 +160,7 @@ pub(crate) fn remove_value(
 pub(crate) fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
     debug!("XULStore remove document {}", doc);
 
-    let mut cache_guard = CACHE.lock()?;
+    let mut cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_mut() {
         Some(data) => data,
         None => return Ok(()),
@@ -184,7 +184,7 @@ pub(crate) fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
 pub(crate) fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
     debug!("XULStore get IDs for {}", doc);
 
-    let cache_guard = CACHE.lock()?;
+    let cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_ref() {
         Some(data) => data,
         None => return Ok(XULStoreIterator::new(vec![].into_iter())),
@@ -202,7 +202,7 @@ pub(crate) fn get_ids(doc: &nsAString) -> XULStoreResult<XULStoreIterator> {
 pub(crate) fn get_attrs(doc: &nsAString, id: &nsAString) -> XULStoreResult<XULStoreIterator> {
     debug!("XULStore get attrs for doc, ID: {} {}", doc, id);
 
-    let cache_guard = CACHE.lock()?;
+    let cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_ref() {
         Some(data) => data,
         None => return Ok(XULStoreIterator::new(vec![].into_iter())),

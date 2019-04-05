@@ -4,14 +4,18 @@
 
 use crate::{
     error::{XULStoreError, XULStoreResult},
-    statics::{get_database, THREAD},
+    statics::get_database,
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
-use moz_task::{Task, TaskRunnable};
+use moz_task::{Task, TaskRunnable, create_thread};
 use nserror::nsresult;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::{collections::HashMap, mem::replace, sync::Mutex, thread::sleep, time::Duration};
+use xpcom::{
+    interfaces::nsIThread,
+    RefPtr, ThreadBoundRefPtr,
+};
 
 /// The XULStore API is synchronous for both C++ and JS consumers and accessed
 /// on the main thread, so we persist its data to disk on a background thread
@@ -43,6 +47,18 @@ lazy_static! {
     /// since each task opens the database, and we need to ensure there is only
     /// one open database handle for the database at any given time.
     static ref PERSIST: Mutex<()> = { Mutex::new(()) };
+
+    static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
+        let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
+            Ok(thread) => thread,
+            Err(err) => {
+                error!("error creating XULStore thread: {}", err);
+                return None;
+            }
+        };
+
+        Some(ThreadBoundRefPtr::new(thread))
+    };
 }
 
 pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> {

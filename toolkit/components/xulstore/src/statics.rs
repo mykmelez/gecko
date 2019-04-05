@@ -7,7 +7,6 @@ use crate::{
     ffi::ProfileChangeObserver,
     make_key, SEPARATOR,
 };
-use moz_task::create_thread;
 use nsstring::nsString;
 use rkv::{Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -20,8 +19,8 @@ use std::{
     sync::Mutex,
 };
 use xpcom::{
-    interfaces::{nsIFile, nsIThread},
-    RefPtr, ThreadBoundRefPtr, XpCom,
+    interfaces::nsIFile,
+    XpCom,
 };
 
 type XULStoreCache = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
@@ -38,22 +37,11 @@ impl Database {
 }
 
 lazy_static! {
-    pub(crate) static ref PROFILE_DIR: Mutex<Option<PathBuf>> = {
+    static ref PROFILE_DIR: Mutex<Option<PathBuf>> = {
         observe_profile_change();
         Mutex::new(get_profile_dir().ok())
     };
-    pub(crate) static ref CACHE: Mutex<Option<XULStoreCache>> = { Mutex::new(cache_data().ok()) };
-    pub(crate) static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
-        let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
-            Ok(thread) => thread,
-            Err(err) => {
-                error!("error creating XULStore thread: {}", err);
-                return None;
-            }
-        };
-
-        Some(ThreadBoundRefPtr::new(thread))
-    };
+    pub(crate) static ref DATA_CACHE: Mutex<Option<XULStoreCache>> = { Mutex::new(cache_data().ok()) };
 }
 
 pub(crate) fn get_database() -> XULStoreResult<Database> {
@@ -74,7 +62,7 @@ pub(crate) fn update_profile_dir() {
             *profile_dir_guard = get_profile_dir().ok();
         }
 
-        let mut cache_guard = CACHE.lock()?;
+        let mut cache_guard = DATA_CACHE.lock()?;
         *cache_guard = cache_data().ok();
 
         Ok(())
