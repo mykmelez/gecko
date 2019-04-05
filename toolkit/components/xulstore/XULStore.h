@@ -59,8 +59,8 @@ class XULStoreIterator final {
 
 template <>
 class DefaultDelete<XULStoreIterator> {
-public:
-void operator()(XULStoreIterator* ptr) const { xulstore_iter_free(ptr); }
+ public:
+  void operator()(XULStoreIterator* ptr) const { xulstore_iter_free(ptr); }
 };
 
 class XULStore final {
