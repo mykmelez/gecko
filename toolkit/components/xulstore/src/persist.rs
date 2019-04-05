@@ -11,18 +11,48 @@ use lmdb::Error as LmdbError;
 use moz_task::{Task, TaskRunnable};
 use nserror::nsresult;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::{collections::BTreeMap, mem::replace, sync::Mutex};
+use std::{collections::HashMap, mem::replace, sync::Mutex, thread::sleep, time::Duration};
+
+/// The XULStore API is synchronous for both C++ and JS consumers and accessed
+/// on the main thread, so we persist its data to disk on a background thread
+/// to avoid janking the UI.
+///
+/// We also re-open the database each time we write to it in order to conserve
+/// heap memory, since holding a database connection open would consume at least
+/// 3MB of heap memory in perpetuity.
+///
+/// Since re-opening the database repeatedly to write individual changes can be
+/// expensive when there are many of them in quick succession, we batch changes
+/// and write them in batches.
 
 lazy_static! {
-    static ref WRITES: Mutex<Option<BTreeMap<String, Option<String>>>> = { Mutex::new(None) };
+    /// A map of key/value pairs to persist.  Values are Options so we can
+    /// use the same structure for both puts and deletes, with a `None` value
+    /// identifying a key that should be deleted from the database.
+    ///
+    /// This is a map rather than a sequence in order to merge consecutive
+    /// changes to the same key, i.e. when a consumer sets *foo* to `bar`
+    /// and then sets it again to `baz` before we persist the first change.
+    ///
+    /// In that case, there's no point in setting *foo* to `bar` before we set
+    /// it to `baz`, and the map ensures we only ever persist the latest value
+    /// for any given key.
+    static ref CHANGES: Mutex<Option<HashMap<String, Option<String>>>> = { Mutex::new(None) };
+
+    /// A Mutex that prevents two PersistTasks from running at the same time,
+    /// since each task opens the database, and we need to ensure there is only
+    /// one open database handle for the database at any given time.
+    static ref PERSIST: Mutex<()> = { Mutex::new(()) };
 }
 
 pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> {
-    let mut writes = WRITES.lock()?;
+    let mut changes = CHANGES.lock()?;
 
-    if writes.is_none() {
-        *writes = Some(BTreeMap::new());
+    if changes.is_none() {
+        *changes = Some(HashMap::new());
 
+        // If *changes* was `None`, then this is the first change since
+        // the last time we persisted, so dispatch a new PersistTask.
         let task = Box::new(PersistTask::new());
         let thread = THREAD
             .as_ref()
@@ -32,7 +62,10 @@ pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> 
         TaskRunnable::new("XULStore::Persist", task)?.dispatch(thread)?;
     }
 
-    writes.as_mut().unwrap().insert(key, value);
+    // Now insert the key/value pair into the map.  The unwrap() call here
+    // should never panic, since the code above sets `writes` to a Some(HashMap)
+    // if it's None.
+    changes.as_mut().unwrap().insert(key, value);
 
     Ok(())
 }
@@ -52,16 +85,27 @@ impl PersistTask {
 impl Task for PersistTask {
     fn run(&self) {
         self.result.store(Some(|| -> Result<(), XULStoreError> {
+            // Avoid persisting too often.  We might want to adjust this value
+            // in the future to trade durability for performance.
+            sleep(Duration::from_millis(200));
+
+            // Prevent another PersistTask from running until this one finishes.
+            // We do this before getting the database to ensure that there is
+            // only ever one open database handle at a given time.
+            let _ = PERSIST.lock()?;
+
             let db = get_database()?;
             let mut writer = db.env.write()?;
 
             // Get the map of key/value pairs from the mutex, replacing it
-            // with None.
-            let writes = replace(&mut *WRITES.lock()?, None);
+            // with None.  To avoid janking the main thread (if it decides
+            // to makes more changes while we're persisting to disk), we only
+            // lock the map long enough to move it out of the Mutex.
+            let writes = replace(&mut *CHANGES.lock()?, None);
 
-            // The Option should be a Some(BTreeMap) (otherwise the task
+            // The Option should be a Some(HashMap) (otherwise the task
             // shouldn't have been scheduled in the first place).  If it's None,
-            // then we return an early Err result.
+            // unexpectedly, then we return an error early.
             let writes = writes.ok_or(XULStoreError::Unavailable)?;
 
             for (key, value) in writes.iter() {
