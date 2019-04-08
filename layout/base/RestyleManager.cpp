@@ -15,6 +15,7 @@
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/layers/AnimationInfo.h"
 #include "mozilla/layout/ScrollAnchorContainer.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/Unused.h"
@@ -1038,7 +1039,7 @@ static void DoApplyRenderingChangeToTree(nsIFrame* aFrame,
       aFrame->InvalidateFrameSubtree();
       if ((aChange & nsChangeHint_UpdateEffects) &&
           aFrame->IsFrameOfType(nsIFrame::eSVG) &&
-          !(aFrame->GetStateBits() & NS_STATE_IS_OUTER_SVG)) {
+          !aFrame->IsSVGOuterSVGFrame()) {
         // Need to update our overflow rects:
         nsSVGUtils::ScheduleReflowSVG(aFrame);
       }
@@ -1666,7 +1667,7 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
       if ((hint & nsChangeHint_InvalidateRenderingObservers) ||
           ((hint & nsChangeHint_UpdateOpacityLayer) &&
            frame->IsFrameOfType(nsIFrame::eSVG) &&
-           !(frame->GetStateBits() & NS_STATE_IS_OUTER_SVG))) {
+           !frame->IsSVGOuterSVGFrame())) {
         SVGObserverUtils::InvalidateRenderingObservers(frame);
         frame->SchedulePaint();
       }
@@ -1983,6 +1984,7 @@ void RestyleManager::AnimationsWithDestroyedFrame ::
   StopAnimationsWithoutFrame(mContents, PseudoStyleType::NotPseudo);
   StopAnimationsWithoutFrame(mBeforeContents, PseudoStyleType::before);
   StopAnimationsWithoutFrame(mAfterContents, PseudoStyleType::after);
+  StopAnimationsWithoutFrame(mAfterContents, PseudoStyleType::marker);
 }
 
 void RestyleManager::AnimationsWithDestroyedFrame ::StopAnimationsWithoutFrame(
@@ -2002,6 +2004,10 @@ void RestyleManager::AnimationsWithDestroyedFrame ::StopAnimationsWithoutFrame(
       }
     } else if (aPseudoType == PseudoStyleType::after) {
       if (nsLayoutUtils::GetAfterFrame(content)) {
+        continue;
+      }
+    } else if (aPseudoType == PseudoStyleType::marker) {
+      if (nsLayoutUtils::GetMarkerFrame(content)) {
         continue;
       }
     }
@@ -2048,10 +2054,6 @@ static const nsIFrame* ExpectedOwnerForChild(const nsIFrame* aFrame) {
     }
     return parent->IsViewportFrame() ? nullptr
                                      : FirstContinuationOrPartOfIBSplit(parent);
-  }
-
-  if (aFrame->IsBulletFrame()) {
-    return FirstContinuationOrPartOfIBSplit(parent);
   }
 
   if (aFrame->IsLineFrame()) {
@@ -2565,7 +2567,8 @@ static void UpdateOneAdditionalComputedStyle(nsIFrame* aFrame, uint32_t aIndex,
   uint32_t equalStructs;  // Not used, actually.
   nsChangeHint childHint =
       aOldContext.CalcStyleDifference(*newStyle, &equalStructs);
-  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+  if (!aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+      !aFrame->IsColumnSpanInMulticolSubtree()) {
     childHint = NS_RemoveSubsumedHints(childHint,
                                        aRestyleState.ChangesHandledFor(aFrame));
   }
@@ -2663,7 +2666,7 @@ static ServoPostTraversalFlags SendA11yNotifications(
   }
 
   if (needsNotify) {
-    nsIPresShell* presShell = aPresContext->PresShell();
+    PresShell* presShell = aPresContext->PresShell();
     if (isVisible) {
       accService->ContentRangeInserted(presShell, aElement,
                                        aElement->GetNextSibling());
@@ -2707,6 +2710,10 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   nsChangeHint changeHint =
       static_cast<nsChangeHint>(Servo_TakeChangeHint(aElement, &wasRestyled));
 
+  RefPtr<ComputedStyle> upToDateStyleIfRestyled =
+      wasRestyled ? aRestyleState.StyleSet().ResolveServoStyle(*aElement)
+                  : nullptr;
+
   // We should really fix the weird primary frame mapping for image maps
   // (bug 135040)...
   if (styleFrame && styleFrame->GetContent() != aElement) {
@@ -2742,6 +2749,21 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
         maybeAnonBoxChild->ParentIsWrapperAnonBox()) {
       aRestyleState.AddPendingWrapperRestyle(
           ServoRestyleState::TableAwareParentFor(maybeAnonBoxChild));
+    }
+
+    // If we don't have a ::marker pseudo-element, but need it, then
+    // reconstruct the frame.  (The opposite situation implies 'display'
+    // changes so doesn't need to be handled explicitly here.)
+    if (wasRestyled &&
+        styleFrame->StyleDisplay()->mDisplay == StyleDisplay::ListItem &&
+        styleFrame->IsBlockFrameOrSubclass() &&
+        !nsLayoutUtils::GetMarkerPseudo(aElement)) {
+      RefPtr<ComputedStyle> pseudoStyle =
+          aRestyleState.StyleSet().ProbePseudoElementStyle(
+              *aElement, PseudoStyleType::marker, upToDateStyleIfRestyled);
+      if (pseudoStyle) {
+        changeHint |= nsChangeHint_ReconstructFrame;
+      }
     }
   }
 
@@ -2799,9 +2821,8 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   ServoRestyleState& childrenRestyleState =
       thisFrameRestyleState ? *thisFrameRestyleState : aRestyleState;
 
-  RefPtr<ComputedStyle> upToDateContext =
-      wasRestyled ? aRestyleState.StyleSet().ResolveServoStyle(*aElement)
-                  : oldOrDisplayContentsStyle;
+  ComputedStyle* upToDateStyle =
+      wasRestyled ? upToDateStyleIfRestyled : oldOrDisplayContentsStyle;
 
   ServoPostTraversalFlags childrenFlags =
       wasRestyled ? ServoPostTraversalFlags::ParentWasRestyled
@@ -2822,7 +2843,7 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
     // initial continuations; ::first-line fixes that up after the fact.
     for (nsIFrame* f = styleFrame; f; f = f->GetNextContinuation()) {
       MOZ_ASSERT_IF(f != styleFrame, !f->GetAdditionalComputedStyle(0));
-      f->SetComputedStyle(upToDateContext);
+      f->SetComputedStyle(upToDateStyle);
     }
 
     if (styleFrame) {
@@ -2853,7 +2874,7 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
 
     childrenFlags |=
         SendA11yNotifications(mPresContext, aElement, oldOrDisplayContentsStyle,
-                              upToDateContext, aFlags);
+                              upToDateStyle, aFlags);
   }
 
   const bool traverseElementChildren =
@@ -2863,14 +2884,13 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   bool recreatedAnyContext = wasRestyled;
   if (traverseElementChildren || traverseTextChildren) {
     StyleChildrenIterator it(aElement);
-    TextPostTraversalState textState(*aElement, upToDateContext,
+    TextPostTraversalState textState(*aElement, upToDateStyle,
                                      isDisplayContents && wasRestyled,
                                      childrenRestyleState);
     for (nsIContent* n = it.GetNextChild(); n; n = it.GetNextChild()) {
       if (traverseElementChildren && n->IsElement()) {
-        recreatedAnyContext |=
-            ProcessPostTraversal(n->AsElement(), upToDateContext,
-                                 childrenRestyleState, childrenFlags);
+        recreatedAnyContext |= ProcessPostTraversal(
+            n->AsElement(), upToDateStyle, childrenRestyleState, childrenFlags);
       } else if (traverseTextChildren && n->IsText()) {
         recreatedAnyContext |= ProcessPostTraversalForText(
             n, textState, childrenRestyleState, childrenFlags);
@@ -3000,7 +3020,7 @@ ServoElementSnapshot& RestyleManager::SnapshotFor(Element& aElement) {
 
 void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
   nsPresContext* presContext = PresContext();
-  nsIPresShell* shell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
 
   MOZ_ASSERT(presContext->Document(), "No document?  Pshaw!");
   // FIXME(emilio): In the "flush animations" case, ideally, we should only
@@ -3014,7 +3034,7 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
   MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript(), "Missing a script blocker!");
   MOZ_RELEASE_ASSERT(!mInStyleRefresh, "Reentrant call?");
 
-  if (MOZ_UNLIKELY(!shell->DidInitialize())) {
+  if (MOZ_UNLIKELY(!presShell->DidInitialize())) {
     // PresShell::FlushPendingNotifications doesn't early-return in the case
     // where the PresShell hasn't yet been initialized (and therefore we haven't
     // yet done the initial style traversal of the DOM tree). We should arguably
@@ -3024,7 +3044,7 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
   }
 
   // It'd be bad!
-  nsIPresShell::AutoAssertNoFlush noReentrantFlush(*shell);
+  nsIPresShell::AutoAssertNoFlush noReentrantFlush(*presShell);
 
   // Create a AnimationsWithDestroyedFrame during restyling process to
   // stop animations and transitions on elements that have no frame at the end

@@ -17,8 +17,8 @@
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIContentInlines.h"
 #include "mozilla/dom/Document.h"
-#include "nsIPresShell.h"
 #include "nsIDOMWindow.h"
+#include "nsIPresShellInlines.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
 #include "nsIMutableArray.h"
@@ -28,6 +28,7 @@
 #include "mozilla/EventStateManager.h"
 #include "nsAtom.h"
 #include "nsRange.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/Element.h"
@@ -58,7 +59,7 @@ void InspectorUtils::GetAllStyleSheets(GlobalObject& aGlobalObject,
                                        Document& aDocument, bool aDocumentOnly,
                                        nsTArray<RefPtr<StyleSheet>>& aResult) {
   // Get the agent, then user and finally xbl sheets in the style set.
-  nsIPresShell* presShell = aDocument.GetShell();
+  PresShell* presShell = aDocument.GetPresShell();
 
   if (presShell) {
     ServoStyleSet* styleSet = presShell->StyleSet();
@@ -168,8 +169,8 @@ void InspectorUtils::GetCSSStyleRules(
   }
 
   Document* doc = aElement.OwnerDoc();
-  nsIPresShell* shell = doc->GetShell();
-  if (!shell) {
+  PresShell* presShell = doc->GetPresShell();
+  if (!presShell) {
     return;
   }
 
@@ -178,7 +179,7 @@ void InspectorUtils::GetCSSStyleRules(
 
   AutoTArray<ServoStyleRuleMap*, 1> maps;
   {
-    ServoStyleSet* styleSet = shell->StyleSet();
+    ServoStyleSet* styleSet = presShell->StyleSet();
     ServoStyleRuleMap* map = styleSet->StyleRuleMap();
     maps.AppendElement(map);
   }
@@ -547,12 +548,12 @@ bool InspectorUtils::SetContentState(GlobalObject& aGlobalObject,
                                      ErrorResult& aRv) {
   RefPtr<EventStateManager> esm =
       inLayoutUtils::GetEventStateManagerFor(aElement);
-  if (!esm) {
+  EventStates state(aState);
+  if (!esm || !EventStateManager::ManagesState(state)) {
     aRv.Throw(NS_ERROR_INVALID_ARG);
     return false;
   }
-
-  return esm->SetContentState(&aElement, EventStates(aState));
+  return esm->SetContentState(&aElement, state);
 }
 
 /* static */
@@ -562,14 +563,15 @@ bool InspectorUtils::RemoveContentState(GlobalObject& aGlobalObject,
                                         ErrorResult& aRv) {
   RefPtr<EventStateManager> esm =
       inLayoutUtils::GetEventStateManagerFor(aElement);
-  if (!esm) {
+  EventStates state(aState);
+  if (!esm || !EventStateManager::ManagesState(state)) {
     aRv.Throw(NS_ERROR_INVALID_ARG);
     return false;
   }
 
-  bool result = esm->SetContentState(nullptr, EventStates(aState));
+  bool result = esm->SetContentState(nullptr, state);
 
-  if (aClearActiveDocument && EventStates(aState) == NS_EVENT_STATE_ACTIVE) {
+  if (aClearActiveDocument && state == NS_EVENT_STATE_ACTIVE) {
     EventStateManager* activeESM = static_cast<EventStateManager*>(
         EventStateManager::GetActiveEventStateManager());
     if (activeESM == esm) {
@@ -598,7 +600,7 @@ already_AddRefed<ComputedStyle> InspectorUtils::GetCleanComputedStyleForElement(
     return nullptr;
   }
 
-  nsIPresShell* presShell = doc->GetShell();
+  PresShell* presShell = doc->GetPresShell();
   if (!presShell) {
     return nullptr;
   }

@@ -9,7 +9,7 @@ import { shallow } from "enzyme";
 import { showMenu } from "devtools-contextmenu";
 
 import SourcesTree from "../SourcesTree";
-import { makeMockSource } from "../../../utils/test-mockup";
+import { makeMockSource, mockcx } from "../../../utils/test-mockup";
 import { copyToTheClipboard } from "../../../utils/clipboard";
 
 jest.mock("devtools-contextmenu", () => ({ showMenu: jest.fn() }));
@@ -25,6 +25,14 @@ describe("SourcesTree", () => {
 
   it("Should show the tree with nothing expanded", async () => {
     const { component } = render();
+    expect(component).toMatchSnapshot();
+  });
+
+  it("Should show a 'No Sources' message if there are no sources", async () => {
+    const { component, defaultState } = render();
+    const sourceTree = defaultState.sourceTree;
+    sourceTree.contents = [];
+    component.setState({ sourceTree: sourceTree });
     expect(component).toMatchSnapshot();
   });
 
@@ -186,6 +194,7 @@ describe("SourcesTree", () => {
       instance.onActivate(item);
       expect(spy).toHaveBeenCalledWith(item);
       expect(props.selectSource).toHaveBeenCalledWith(
+        mockcx,
         "server1.conn13.child1/39"
       );
     });
@@ -196,6 +205,7 @@ describe("SourcesTree", () => {
       const { instance, props } = render();
       instance.selectItem(createMockItem());
       expect(props.selectSource).toHaveBeenCalledWith(
+        mockcx,
         "server1.conn13.child1/39"
       );
     });
@@ -349,6 +359,7 @@ function generateDefaults(overrides: Object) {
     )
   };
   return {
+    cx: mockcx,
     thread: "FakeThread",
     autoExpandAll: true,
     selectSource: jest.fn(),

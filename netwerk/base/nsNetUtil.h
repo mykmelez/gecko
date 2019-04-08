@@ -913,8 +913,7 @@ nsresult NS_ShouldSecureUpgrade(
     nsIURI *aURI, nsILoadInfo *aLoadInfo, nsIPrincipal *aChannelResultPrincipal,
     bool aPrivateBrowsing, bool aAllowSTS,
     const mozilla::OriginAttributes &aOriginAttributes, bool &aShouldUpgrade,
-    std::function<void(bool, nsresult)> &&aResultCallback,
-    bool &aWillCallback);
+    std::function<void(bool, nsresult)> &&aResultCallback, bool &aWillCallback);
 
 /**
  * Returns an https URI for channels that need to go through secure upgrades.
@@ -936,6 +935,11 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel);
 uint32_t NS_GetDefaultReferrerPolicy(nsIHttpChannel *aChannel = nullptr,
                                      nsIURI *aURI = nullptr,
                                      bool privateBrowsing = false);
+
+/**
+ * Return true if this channel should be classified by the URL classifier.
+ */
+bool NS_ShouldClassifyChannel(nsIChannel *aChannel);
 
 namespace mozilla {
 namespace net {

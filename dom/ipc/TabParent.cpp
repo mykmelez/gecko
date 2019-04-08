@@ -18,10 +18,13 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DataTransferItemList.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/FrameCrashedEvent.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/PaymentRequestParent.h"
 #include "mozilla/dom/BrowserBridgeParent.h"
+#include "mozilla/dom/RemoteWebProgress.h"
+#include "mozilla/dom/RemoteWebProgressRequest.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
@@ -91,6 +94,7 @@
 #include "nsAuthInformationHolder.h"
 #include "nsICancelable.h"
 #include "gfxPrefs.h"
+#include "gfxUtils.h"
 #include "nsILoginManagerPrompter.h"
 #include "nsPIWindowRoot.h"
 #include "nsIAuthPrompt2.h"
@@ -148,8 +152,16 @@ namespace dom {
 
 TabParent::LayerToTabParentTable* TabParent::sLayerToTabParentTable = nullptr;
 
-NS_IMPL_ISUPPORTS(TabParent, nsITabParent, nsIAuthPromptProvider,
-                  nsISupportsWeakReference)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabParent)
+  NS_INTERFACE_MAP_ENTRY(nsITabParent)
+  NS_INTERFACE_MAP_ENTRY(nsIAuthPromptProvider)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITabParent)
+NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION(TabParent, mFrameElement, mBrowserDOMWindow,
+                         mLoadContext, mFrameLoader, mBrowsingContext)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(TabParent)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(TabParent)
 
 TabParent::TabParent(ContentParent* aManager, const TabId& aTabId,
                      const TabContext& aContext,
@@ -356,7 +368,6 @@ void TabParent::RemoveWindowListeners() {
 
 void TabParent::DestroyInternal() {
   PopFocus(this);
-  IMEStateManager::OnTabParentDestroying(this);
 
   RemoveWindowListeners();
 
@@ -431,7 +442,7 @@ void TabParent::ActorDestroy(ActorDestroyReason why) {
 
   // Even though TabParent::Destroy calls this, we need to do it here too in
   // case of a crash.
-  IMEStateManager::OnTabParentDestroying(this);
+  TabParent::PopFocus(this);
 
   // Prevent executing ContentParent::NotifyTabDestroying in
   // TabParent::Destroy() called by frameLoader->DestroyComplete() below
@@ -467,18 +478,25 @@ void TabParent::ActorDestroy(ActorDestroyReason why) {
         // and created a new frameloader. If so, we don't fire the event,
         // since the frameloader owner has clearly moved on.
         if (currentFrameLoader == frameLoader) {
+          nsString eventName;
           MessageChannel* channel = GetIPCChannel();
           if (channel && !channel->DoBuildIDsMatch()) {
-            nsContentUtils::DispatchTrustedEvent(
-                frameElement->OwnerDoc(), frameElement,
-                NS_LITERAL_STRING("oop-browser-buildid-mismatch"),
-                CanBubble::eYes, Cancelable::eYes);
+            eventName = NS_LITERAL_STRING("oop-browser-buildid-mismatch");
           } else {
-            nsContentUtils::DispatchTrustedEvent(
-                frameElement->OwnerDoc(), frameElement,
-                NS_LITERAL_STRING("oop-browser-crashed"), CanBubble::eYes,
-                Cancelable::eYes);
+            eventName = NS_LITERAL_STRING("oop-browser-crashed");
           }
+
+          dom::FrameCrashedEventInit init;
+          init.mBubbles = true;
+          init.mCancelable = true;
+          init.mBrowsingContextId = mBrowsingContext->Id();
+
+          RefPtr<dom::FrameCrashedEvent> event =
+              dom::FrameCrashedEvent::Constructor(frameElement->OwnerDoc(),
+                                                  eventName, init);
+          event->SetTrusted(true);
+          EventDispatcher::DispatchDOMEvent(frameElement, nullptr, event,
+                                            nullptr, nullptr);
         }
       }
     }
@@ -969,42 +987,35 @@ bool TabParent::DeallocPFilePickerParent(PFilePickerParent* actor) {
   return true;
 }
 
-auto TabParent::AllocPIndexedDBPermissionRequestParent(
-    const Principal& aPrincipal) -> PIndexedDBPermissionRequestParent* {
+IPCResult TabParent::RecvIndexedDBPermissionRequest(
+    const Principal& aPrincipal,
+    IndexedDBPermissionRequestResolver&& aResolve) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIPrincipal> principal(aPrincipal);
   if (!principal) {
-    return nullptr;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   if (NS_WARN_IF(!mFrameElement)) {
-    return nullptr;
-  }
-
-  return mozilla::dom::indexedDB::AllocPIndexedDBPermissionRequestParent(
-      mFrameElement, principal);
-}
-
-mozilla::ipc::IPCResult TabParent::RecvPIndexedDBPermissionRequestConstructor(
-    PIndexedDBPermissionRequestParent* aActor, const Principal& aPrincipal) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  if (!mozilla::dom::indexedDB::RecvPIndexedDBPermissionRequestConstructor(
-          aActor)) {
     return IPC_FAIL_NO_REASON(this);
   }
+
+  RefPtr<indexedDB::PermissionRequestHelper> actor =
+      new indexedDB::PermissionRequestHelper(mFrameElement, principal,
+                                             aResolve);
+
+  indexedDB::PermissionRequestBase::PermissionValue permission;
+  nsresult rv = actor->PromptIfNeeded(&permission);
+  if (NS_FAILED(rv)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  if (permission != indexedDB::PermissionRequestBase::kPermissionPrompt) {
+    aResolve(permission);
+  }
+
   return IPC_OK();
-}
-
-bool TabParent::DeallocPIndexedDBPermissionRequestParent(
-    PIndexedDBPermissionRequestParent* aActor) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  return mozilla::dom::indexedDB::DeallocPIndexedDBPermissionRequestParent(
-      aActor);
 }
 
 IPCResult TabParent::RecvPWindowGlobalConstructor(
@@ -1941,7 +1952,7 @@ mozilla::ipc::IPCResult TabParent::RecvRequestFocus(const bool& aCanRaise) {
   uint32_t flags = nsIFocusManager::FLAG_NOSCROLL;
   if (aCanRaise) flags |= nsIFocusManager::FLAG_RAISE;
 
-  RefPtr<Element> element = mFrameElement;
+  nsCOMPtr<Element> element = mFrameElement;
   fm->SetFocus(element, flags);
   return IPC_OK();
 }
@@ -2177,7 +2188,7 @@ mozilla::ipc::IPCResult TabParent::RecvAccessKeyNotHandled(
   // Here we convert the WidgetEvent that we received to an Event
   // to be able to dispatch it to the <browser> element as the target element.
   Document* doc = mFrameElement->OwnerDoc();
-  nsIPresShell* presShell = doc->GetShell();
+  PresShell* presShell = doc->GetPresShell();
   NS_ENSURE_TRUE(presShell, IPC_OK());
 
   if (presShell->CanDispatchEvent()) {
@@ -2209,29 +2220,122 @@ mozilla::ipc::IPCResult TabParent::RecvRegisterProtocolHandler(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult TabParent::RecvOnProgressChange(
+    const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, const int32_t aCurSelfProgress,
+    const int32_t aMaxSelfProgress, const int32_t aCurTotalProgress,
+    const int32_t aMaxTotalProgress) {
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
+
+  if (!browser) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> manager;
+  nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+  nsCOMPtr<nsIWebProgressListener> managerAsListener =
+      do_QueryInterface(manager);
+
+  if (!managerAsListener) {
+    // We are no longer remote, so we cannot propagate this message.
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   webProgress, request);
+
+  Unused << managerAsListener->OnProgressChange(
+      webProgress, request, aCurSelfProgress, aMaxSelfProgress,
+      aCurTotalProgress, aMaxTotalProgress);
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult TabParent::RecvOnStatusChange(
+    const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, const nsresult aStatus,
+    const nsString& aMessage) {
+  nsCOMPtr<nsIBrowser> browser =
+      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
+
+  if (!browser) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> manager;
+  nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+  nsCOMPtr<nsIWebProgressListener> managerAsListener =
+      do_QueryInterface(manager);
+
+  if (!managerAsListener) {
+    // We are no longer remote, so we cannot propagate this message.
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   webProgress, request);
+
+  Unused << managerAsListener->OnStatusChange(webProgress, request, aStatus,
+                                              aMessage.get());
+
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult TabParent::RecvOnContentBlockingEvent(
     const Maybe<WebProgressData>& aWebProgressData,
     const RequestData& aRequestData, const uint32_t& aEvent) {
   nsCOMPtr<nsIBrowser> browser =
       mFrameElement ? mFrameElement->AsBrowser() : nullptr;
   if (browser) {
-    if (aWebProgressData.isNothing()) {
-      Unused << browser->CallWebProgressContentBlockingEventListeners(
-          false, false, false, 0, 0, aRequestData.requestURI(),
-          aRequestData.originalRequestURI(), aRequestData.matchedList(),
-          aEvent);
-    } else {
-      Unused << browser->CallWebProgressContentBlockingEventListeners(
-          true, aWebProgressData.ref().isTopLevel(),
-          aWebProgressData.ref().isLoadingDocument(),
-          aWebProgressData.ref().loadType(),
-          aWebProgressData.ref().DOMWindowID(), aRequestData.requestURI(),
-          aRequestData.originalRequestURI(), aRequestData.matchedList(),
-          aEvent);
+    nsCOMPtr<nsIWebProgress> manager;
+    nsresult rv = browser->GetRemoteWebProgressManager(getter_AddRefs(manager));
+    NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+    nsCOMPtr<nsIWebProgressListener> managerAsListener =
+        do_QueryInterface(manager);
+    if (!managerAsListener) {
+      // We are no longer remote, so we cannot propagate this message.
+      return IPC_OK();
     }
+
+    nsCOMPtr<nsIWebProgress> webProgress;
+    nsCOMPtr<nsIRequest> request;
+    ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                     webProgress, request);
+
+    Unused << managerAsListener->OnContentBlockingEvent(webProgress, request,
+                                                        aEvent);
   }
 
   return IPC_OK();
+}
+
+void TabParent::ReconstructWebProgressAndRequest(
+    nsIWebProgress* aManager, const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, nsCOMPtr<nsIWebProgress>& aOutWebProgress,
+    nsCOMPtr<nsIRequest>& aOutRequest) {
+  if (aWebProgressData) {
+    aOutWebProgress = MakeAndAddRef<RemoteWebProgress>(
+        aManager, aWebProgressData->outerDOMWindowID(),
+        aWebProgressData->innerDOMWindowID(), aWebProgressData->loadType(),
+        aWebProgressData->isLoadingDocument(), aWebProgressData->isTopLevel());
+  } else {
+    aOutWebProgress =
+        MakeAndAddRef<RemoteWebProgress>(aManager, 0, 0, 0, false, false);
+  }
+
+  aOutRequest = MakeAndAddRef<RemoteWebProgressRequest>(
+      aRequestData.requestURI(), aRequestData.originalRequestURI(),
+      aRequestData.matchedList());
 }
 
 bool TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent) {
@@ -2544,9 +2648,9 @@ mozilla::ipc::IPCResult TabParent::RecvSetInputContext(
 already_AddRefed<nsIWidget> TabParent::GetTopLevelWidget() {
   nsCOMPtr<nsIContent> content = mFrameElement;
   if (content) {
-    nsIPresShell* shell = content->OwnerDoc()->GetShell();
-    if (shell) {
-      nsViewManager* vm = shell->GetViewManager();
+    PresShell* presShell = content->OwnerDoc()->GetPresShell();
+    if (presShell) {
+      nsViewManager* vm = presShell->GetViewManager();
       nsCOMPtr<nsIWidget> widget;
       vm->GetRootWidget(getter_AddRefs(widget));
       return widget.forget();
@@ -2646,7 +2750,8 @@ already_AddRefed<nsFrameLoader> TabParent::GetFrameLoader(
     RefPtr<nsFrameLoader> fl = mFrameLoader;
     return fl.forget();
   }
-  RefPtr<nsFrameLoaderOwner> frameLoaderOwner = do_QueryObject(mFrameElement);
+  nsCOMPtr<Element> frameElement(mFrameElement);
+  RefPtr<nsFrameLoaderOwner> frameLoaderOwner = do_QueryObject(frameElement);
   return frameLoaderOwner ? frameLoaderOwner->GetFrameLoader() : nullptr;
 }
 
@@ -2943,18 +3048,19 @@ TabParent::GetContentBlockingLog(Promise** aPromise) {
   copy.forget(aPromise);
 
   auto cblPromise = SendGetContentBlockingLog();
-  cblPromise->Then(GetMainThreadSerialEventTarget(), __func__,
-                   [jsPromise](Tuple<nsCString, bool>&& aResult) {
-                     if (Get<1>(aResult)) {
-                       NS_ConvertUTF8toUTF16 utf16(Get<0>(aResult));
-                       jsPromise->MaybeResolve(std::move(utf16));
-                     } else {
-                       jsPromise->MaybeRejectWithUndefined();
-                     }
-                   },
-                   [jsPromise](ResponseRejectReason&& aReason) {
-                     jsPromise->MaybeRejectWithUndefined();
-                   });
+  cblPromise->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [jsPromise](Tuple<nsCString, bool>&& aResult) {
+        if (Get<1>(aResult)) {
+          NS_ConvertUTF8toUTF16 utf16(Get<0>(aResult));
+          jsPromise->MaybeResolve(std::move(utf16));
+        } else {
+          jsPromise->MaybeRejectWithUndefined();
+        }
+      },
+      [jsPromise](ResponseRejectReason&& aReason) {
+        jsPromise->MaybeRejectWithUndefined();
+      });
 
   return NS_OK;
 }
@@ -3054,13 +3160,14 @@ void TabParent::RequestRootPaint(gfx::CrossProcessPaint* aPaint, IntRect aRect,
 
   RefPtr<gfx::CrossProcessPaint> paint(aPaint);
   TabId tabId(GetTabId());
-  promise->Then(GetMainThreadSerialEventTarget(), __func__,
-                [paint, tabId](PaintFragment&& aFragment) {
-                  paint->ReceiveFragment(tabId, std::move(aFragment));
-                },
-                [paint, tabId](ResponseRejectReason&& aReason) {
-                  paint->LostFragment(tabId);
-                });
+  promise->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [paint, tabId](PaintFragment&& aFragment) {
+        paint->ReceiveFragment(tabId, std::move(aFragment));
+      },
+      [paint, tabId](ResponseRejectReason&& aReason) {
+        paint->LostFragment(tabId);
+      });
 }
 
 void TabParent::RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale,
@@ -3069,13 +3176,14 @@ void TabParent::RequestSubPaint(gfx::CrossProcessPaint* aPaint, float aScale,
 
   RefPtr<gfx::CrossProcessPaint> paint(aPaint);
   TabId tabId(GetTabId());
-  promise->Then(GetMainThreadSerialEventTarget(), __func__,
-                [paint, tabId](PaintFragment&& aFragment) {
-                  paint->ReceiveFragment(tabId, std::move(aFragment));
-                },
-                [paint, tabId](ResponseRejectReason&& aReason) {
-                  paint->LostFragment(tabId);
-                });
+  promise->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [paint, tabId](PaintFragment&& aFragment) {
+        paint->ReceiveFragment(tabId, std::move(aFragment));
+      },
+      [paint, tabId](ResponseRejectReason&& aReason) {
+        paint->LostFragment(tabId);
+      });
 }
 
 mozilla::ipc::IPCResult TabParent::RecvPaintWhileInterruptingJSNoOp(
@@ -3303,8 +3411,8 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
     const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
     const IPC::Principal& aPrincipal) {
   mInitialDataTransferItems.Clear();
-  nsIPresShell* shell = mFrameElement->OwnerDoc()->GetShell();
-  if (!shell) {
+  PresShell* presShell = mFrameElement->OwnerDoc()->GetPresShell();
+  if (!presShell) {
     Unused << Manager()->SendEndDragSession(true, true, LayoutDeviceIntPoint(),
                                             0);
     // Continue sending input events with input priority when stopping the dnd
@@ -3313,7 +3421,7 @@ mozilla::ipc::IPCResult TabParent::RecvInvokeDragSession(
     return IPC_OK();
   }
 
-  EventStateManager* esm = shell->GetPresContext()->EventStateManager();
+  EventStateManager* esm = presShell->GetPresContext()->EventStateManager();
   for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
     mInitialDataTransferItems.AppendElement(std::move(aTransfers[i].items()));
   }
@@ -3439,7 +3547,8 @@ TabParent::StartApzAutoscroll(float aAnchorX, float aAnchorY,
   if (mRenderFrame.IsInitialized()) {
     layers::LayersId layersId = mRenderFrame.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
-      ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
+      SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
+                               gfxUtils::GetContentRenderRoot());
 
       // The anchor coordinates that are passed in are relative to the origin
       // of the screen, but we are sending them to APZ which only knows about
@@ -3468,7 +3577,9 @@ TabParent::StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId) {
   if (mRenderFrame.IsInitialized()) {
     layers::LayersId layersId = mRenderFrame.GetLayersId();
     if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
-      ScrollableLayerGuid guid{layersId, aPresShellId, aScrollId};
+      SLGuidAndRenderRoot guid(layersId, aPresShellId, aScrollId,
+                               gfxUtils::GetContentRenderRoot());
+
       widget->StopAsyncAutoscroll(guid);
     }
   }

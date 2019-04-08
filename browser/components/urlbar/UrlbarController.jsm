@@ -115,7 +115,8 @@ class UrlbarController {
    *   The reason the query was cancelled.
    */
   cancelQuery(reason) {
-    if (!this._lastQueryContext) {
+    if (!this._lastQueryContext ||
+        this._lastQueryContext._cancelled) {
       return;
     }
 
@@ -123,8 +124,8 @@ class UrlbarController {
     TelemetryStopwatch.cancel(TELEMETRY_6_FIRST_RESULTS, this._lastQueryContext);
 
     this.manager.cancelQuery(this._lastQueryContext);
+    this._lastQueryContext._cancelled = true;
     this._notify("onQueryCancelled", this._lastQueryContext);
-    delete this._lastQueryContext;
 
     if (reason == UrlbarUtils.CANCEL_REASON.BLUR &&
         ExtensionSearchHandler.hasActiveInputSession()) {
@@ -303,6 +304,12 @@ class UrlbarController {
           this.input.startQuery();
         }
         event.preventDefault();
+        break;
+      case KeyEvent.DOM_VK_LEFT:
+      case KeyEvent.DOM_VK_RIGHT:
+      case KeyEvent.DOM_VK_HOME:
+      case KeyEvent.DOM_VK_END:
+        this.view.removeAccessibleFocus();
         break;
       case KeyEvent.DOM_VK_DELETE:
       case KeyEvent.DOM_VK_BACK_SPACE:

@@ -16,7 +16,6 @@
 #include "nsDocShell.h"
 #include "nsIDOMMozBrowserFrame.h"
 #include "nsIDOMWindow.h"
-#include "nsIPresShell.h"
 #include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "mozilla/dom/Document.h"
@@ -31,6 +30,7 @@
 #include "nsContentUtils.h"
 #include "nsIXPConnect.h"
 #include "nsUnicharUtils.h"
+#include "nsIPresShellInlines.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIScrollable.h"
@@ -78,6 +78,7 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Unused.h"
 #include "mozilla/dom/ChromeMessageSender.h"
 #include "mozilla/dom/Element.h"
@@ -86,6 +87,7 @@
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layout/RenderFrame.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
 #include "nsGenericHTMLFrameElement.h"
@@ -152,7 +154,7 @@ typedef ScrollableLayerGuid::ViewID ViewID;
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsFrameLoader, mDocShell, mMessageManager,
                                       mChildMessageManager, mOpener,
-                                      mParentSHistory)
+                                      mParentSHistory, mRemoteBrowser)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameLoader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameLoader)
 
@@ -963,8 +965,8 @@ void nsFrameLoader::ForceLayoutIfNecessary() {
   // Only force the layout flush if the frameloader hasn't ever been
   // run through layout.
   if (frame->GetStateBits() & NS_FRAME_FIRST_REFLOW) {
-    if (nsCOMPtr<nsIPresShell> shell = presContext->GetPresShell()) {
-      shell->FlushPendingNotifications(FlushType::Layout);
+    if (RefPtr<PresShell> presShell = presContext->GetPresShell()) {
+      presShell->FlushPendingNotifications(FlushType::Layout);
     }
   }
 }
@@ -1005,9 +1007,9 @@ nsresult nsFrameLoader::SwapWithOtherRemoteLoader(
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
-  nsIPresShell* ourShell = ourDoc->GetShell();
-  nsIPresShell* otherShell = otherDoc->GetShell();
-  if (!ourShell || !otherShell) {
+  PresShell* ourPresShell = ourDoc->GetPresShell();
+  PresShell* otherPresShell = otherDoc->GetPresShell();
+  if (!ourPresShell || !otherPresShell) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -1153,8 +1155,8 @@ nsresult nsFrameLoader::SwapWithOtherRemoteLoader(
 
   ourFrameFrame->EndSwapDocShells(otherFrame);
 
-  ourShell->BackingScaleFactorChanged();
-  otherShell->BackingScaleFactorChanged();
+  ourPresShell->BackingScaleFactorChanged();
+  otherPresShell->BackingScaleFactorChanged();
 
   // Initialize browser API if needed now that owner content has changed.
   InitializeBrowserAPI();
@@ -1417,9 +1419,9 @@ nsresult nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   NS_ASSERTION(ourDoc == ourParentDocument, "Unexpected parent document");
   NS_ASSERTION(otherDoc == otherParentDocument, "Unexpected parent document");
 
-  nsIPresShell* ourShell = ourDoc->GetShell();
-  nsIPresShell* otherShell = otherDoc->GetShell();
-  if (!ourShell || !otherShell) {
+  PresShell* ourPresShell = ourDoc->GetPresShell();
+  PresShell* otherPresShell = otherDoc->GetPresShell();
+  if (!ourPresShell || !otherPresShell) {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
@@ -1576,8 +1578,8 @@ nsresult nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   // hi-dpi and low-dpi screens), it will have style data that is based on
   // the wrong appUnitsPerDevPixel value. So we tell the PresShells that their
   // backing scale factor may have changed. (Bug 822266)
-  ourShell->BackingScaleFactorChanged();
-  otherShell->BackingScaleFactorChanged();
+  ourPresShell->BackingScaleFactorChanged();
+  otherPresShell->BackingScaleFactorChanged();
 
   // Initialize browser API if needed now that owner content has changed
   InitializeBrowserAPI();
@@ -3097,7 +3099,7 @@ already_AddRefed<mozilla::dom::Promise> nsFrameLoader::DrawSnapshot(
     aRv = NS_ERROR_FAILURE;
     return nullptr;
   }
-  nsIPresShell* presShell = document->GetShell();
+  PresShell* presShell = document->GetPresShell();
   if (NS_WARN_IF(!presShell)) {
     aRv = NS_ERROR_FAILURE;
     return nullptr;

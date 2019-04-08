@@ -13,6 +13,7 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/FlushType.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/StyleSheet.h"
@@ -271,7 +272,7 @@ class nsIPresShell : public nsStubDocumentObserver {
   }
 #endif
 
-  mozilla::ServoStyleSet* StyleSet() const { return mStyleSet.get(); }
+  inline mozilla::ServoStyleSet* StyleSet() const;
 
   nsCSSFrameConstructor* FrameConstructor() const {
     return mFrameConstructor.get();
@@ -1399,6 +1400,11 @@ class nsIPresShell : public nsStubDocumentObserver {
   void SetResolutionUpdated(bool aUpdated) { mResolutionUpdated = aUpdated; }
 
   /**
+   * Returns true if the resolution has ever been changed by APZ.
+   */
+  bool IsResolutionUpdatedByApz() const { return mResolutionUpdatedByApz; }
+
+  /**
    * Calculate the cumulative scale resolution from this document up to
    * but not including the root document.
    */
@@ -1694,13 +1700,14 @@ class nsIPresShell : public nsStubDocumentObserver {
   // Use this sparingly, as it will clobber JS-driven scrolling that happens
   // in the same frame. This is mostly intended to be used in special
   // situations like "first paint" or session restore.
+  // If scrolling "far away", i.e. not just within the existing layout
+  // viewport, it's recommended to use both nsIScrollableFrame.ScrollTo*()
+  // (via window.scrollTo if calling from JS) *and* this function; otherwise,
+  // temporary checkerboarding may result.
   // Please request APZ review if adding a new call site.
-  void SetPendingVisualScrollUpdate(
-      const nsPoint& aVisualViewportOffset,
-      FrameMetrics::ScrollOffsetUpdateType aUpdateType) {
-    mPendingVisualScrollUpdate =
-        mozilla::Some(VisualScrollUpdate{aVisualViewportOffset, aUpdateType});
-  }
+  void ScrollToVisual(const nsPoint& aVisualViewportOffset,
+                      FrameMetrics::ScrollOffsetUpdateType aUpdateType,
+                      mozilla::ScrollMode aMode);
   void ClearPendingVisualScrollUpdate() {
     mPendingVisualScrollUpdate = mozilla::Nothing();
   }
@@ -1766,9 +1773,11 @@ class nsIPresShell : public nsStubDocumentObserver {
   void CancelPostedReflowCallbacks();
   void FlushPendingScrollAnchorAdjustments();
 
+  void SetPendingVisualScrollUpdate(
+      const nsPoint& aVisualViewportOffset,
+      FrameMetrics::ScrollOffsetUpdateType aUpdateType);
+
 #ifdef DEBUG
-  mozilla::UniquePtr<mozilla::ServoStyleSet> CloneStyleSet(
-      mozilla::ServoStyleSet*);
   bool VerifyIncrementalReflow();
   void DoVerifyReflow();
   void VerifyHasDirtyRootAncestor(nsIFrame* aFrame);
@@ -1846,9 +1855,8 @@ class nsIPresShell : public nsStubDocumentObserver {
   // we must share ownership.
   RefPtr<Document> mDocument;
   RefPtr<nsPresContext> mPresContext;
-  // mStyleSet owns it but we maintain a ref, may be null
+  // The document's style set owns it but we maintain a ref, may be null.
   RefPtr<mozilla::StyleSheet> mPrefStyleSheet;
-  mozilla::UniquePtr<mozilla::ServoStyleSet> mStyleSet;
   mozilla::UniquePtr<nsCSSFrameConstructor> mFrameConstructor;
   nsViewManager* mViewManager;  // [WEAK] docViewer owns it so I don't have to
   nsPresArena<8192> mFrameArena;
@@ -2054,6 +2062,9 @@ class nsIPresShell : public nsStubDocumentObserver {
   // Whether the most recent change to the pres shell resolution was
   // originated by the main thread.
   bool mResolutionUpdated : 1;
+
+  // True if the resolution has been ever changed by APZ.
+  bool mResolutionUpdatedByApz : 1;
 
   uint32_t mPresShellId;
 

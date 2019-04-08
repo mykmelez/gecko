@@ -23,8 +23,10 @@ UNIFIED_SOURCES += [
     'TestAudioTrackEncoder.cpp',
     'TestBitWriter.cpp',
     'TestBlankVideoDataCreator.cpp',
+    'TestBufferReader.cpp',
     'TestCDMStorage.cpp',
     'TestDataMutex.cpp',
+    'TestDriftCompensation.cpp',
     'TestGMPCrossOrigin.cpp',
     'TestGMPRemoveAndDelete.cpp',
     'TestGMPUtils.cpp',
@@ -48,11 +50,16 @@ if CONFIG['MOZ_WEBM_ENCODER']:
     UNIFIED_SOURCES += [
         'TestVideoTrackEncoder.cpp',
         'TestWebMWriter.cpp',
+        'YUVBufferGenerator.cpp',
+    ]
+    LOCAL_INCLUDES += [
+        '/gfx/2d/',
     ]
 
 if CONFIG['MOZ_WEBRTC']:
     UNIFIED_SOURCES += [
         'TestAudioDeviceEnumerator.cpp',
+        'TestVideoFrameConverter.cpp',
     ]
 
 TEST_HARNESS_FILES.gtest += [
@@ -73,6 +80,7 @@ TEST_HARNESS_FILES.gtest += [
     'test_case_1224361.vp8.ivf',
     'test_case_1224363.vp8.ivf',
     'test_case_1224369.vp8.ivf',
+    'test_vbri.mp3',
 ]
 
 TEST_DIRS += [

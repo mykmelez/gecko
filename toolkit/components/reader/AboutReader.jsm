@@ -39,6 +39,7 @@ var AboutReader = function(mm, win, articlePromise) {
   this._mm.addMessageListener("Reader:GetStoredArticleData", this);
   this._mm.addMessageListener("Reader:ZoomIn", this);
   this._mm.addMessageListener("Reader:ZoomOut", this);
+  this._mm.addMessageListener("Reader:ResetZoom", this);
 
   this._docRef = Cu.getWeakReference(doc);
   this._winRef = Cu.getWeakReference(win);
@@ -67,6 +68,7 @@ var AboutReader = function(mm, win, articlePromise) {
 
   doc.addEventListener("mousedown", this);
   doc.addEventListener("click", this);
+  doc.addEventListener("touchstart", this);
 
   win.addEventListener("pagehide", this);
   win.addEventListener("mozvisualscroll", this, { mozSystemGroup: true });
@@ -268,6 +270,10 @@ AboutReader.prototype = {
         this._changeFontSize(-1);
         break;
       }
+      case "Reader:ResetZoom": {
+        this._resetFontSize();
+        break;
+      }
     }
   },
 
@@ -277,6 +283,8 @@ AboutReader.prototype = {
 
     let target = aEvent.target;
     switch (aEvent.type) {
+      case "touchstart":
+      /* fall through */
       case "mousedown":
         if (!target.closest(".dropdown-popup")) {
           this._closeDropdowns();
@@ -288,13 +296,23 @@ AboutReader.prototype = {
         }
         break;
       case "mozvisualscroll":
-        this._closeDropdowns(true);
         const vv = aEvent.originalTarget; // VisualViewport
-        if (!gIsFirefoxDesktop && this._scrollOffset != vv.pageTop) {
+
+        if (gIsFirefoxDesktop) {
+          this._closeDropdowns(true);
+        } else if (this._scrollOffset != vv.pageTop) {
+          // hide the system UI and the "reader-toolbar" only if the dropdown is not opened
+          let selector = ".dropdown.open";
+          let openDropdowns = this._doc.querySelectorAll(selector);
+          if (openDropdowns.length) {
+            break;
+          }
+
           let isScrollingUp = this._scrollOffset > vv.pageTop;
           this._setSystemUIVisibility(isScrollingUp);
           this._setToolbarVisibility(isScrollingUp);
         }
+
         this._scrollOffset = vv.pageTop;
         break;
       case "resize":
@@ -326,6 +344,7 @@ AboutReader.prototype = {
         this._mm.removeMessageListener("Reader:GetStoredArticleData", this);
         this._mm.removeMessageListener("Reader:ZoomIn", this);
         this._mm.removeMessageListener("Reader:ZoomOut", this);
+        this._mm.removeMessageListener("Reader:ResetZoom", this);
         this._windowUnloaded = true;
         break;
     }
@@ -346,6 +365,12 @@ AboutReader.prototype = {
 
   _onReaderClose() {
     ReaderMode.leaveReaderMode(this._mm.docShell, this._win);
+  },
+
+  async _resetFontSize() {
+    await AsyncPrefs.reset("reader.font_size");
+    let currentSize = Services.prefs.getIntPref("reader.font_size");
+    this._setFontSize(currentSize);
   },
 
   _setFontSize(newFontSize) {

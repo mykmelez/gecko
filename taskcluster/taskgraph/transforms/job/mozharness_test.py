@@ -21,6 +21,7 @@ import os
 
 VARIANTS = [
     'nightly',
+    'shippable',
     'devedition',
     'pgo',
     'asan',
@@ -53,7 +54,8 @@ def test_packages_url(taskdesc):
                                     'target.test_packages.json'))
     # for android nightly we need to add 'en-US' to the artifact url
     test = taskdesc['run']['test']
-    if get_variant(test['test-platform']) == "nightly" and 'android' in test['test-platform']:
+    if 'android' in test['test-platform'] and (
+            get_variant(test['test-platform']) in ("nightly", 'shippable')):
         head, tail = os.path.split(artifact_url)
         artifact_url = os.path.join(head, 'en-US', tail)
     return artifact_url
@@ -83,7 +85,11 @@ def mozharness_test_on_docker(config, job, taskdesc):
         ("public/test_info/", "{workdir}/workspace/build/blobber_upload_dir/".format(**run)),
     ]
 
-    installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
+    if 'installer-url' in mozharness:
+        installer_url = mozharness['installer-url']
+    else:
+        installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
+
     mozharness_url = get_artifact_url('<build>',
                                       get_artifact_path(taskdesc, 'mozharness.zip'))
 
@@ -201,8 +207,11 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
             'type': 'directory'
         })
 
-    upstream_task = '<build-signing>' if mozharness['requires-signed-builds'] else '<build>'
-    installer_url = get_artifact_url(upstream_task, mozharness['build-artifact-name'])
+    if 'installer-url' in mozharness:
+        installer_url = mozharness['installer-url']
+    else:
+        upstream_task = '<build-signing>' if mozharness['requires-signed-builds'] else '<build>'
+        installer_url = get_artifact_url(upstream_task, mozharness['build-artifact-name'])
 
     worker['os-groups'] = test['os-groups']
 
@@ -325,7 +334,10 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
     if worker['os'] != 'linux':
         raise Exception('os: {} not supported on script-engine-autophone'.format(worker['os']))
 
-    installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
+    if 'installer-url' in mozharness:
+        installer_url = mozharness['installer-url']
+    else:
+        installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
     mozharness_url = get_artifact_url('<build>',
                                       'public/build/mozharness.zip')
 

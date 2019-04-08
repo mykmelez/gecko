@@ -11,6 +11,7 @@
 #include "gfxContext.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
 #include "mozilla/gfx/Matrix.h"
 #include "ActiveLayerTracker.h"
@@ -152,6 +153,23 @@ static bool IsEffectEndMarker(DisplayItemEntryType aType) {
 enum class MarkerType { StartMarker, EndMarker };
 
 /**
+ * Returns true if the given nsDisplayOpacity |aItem| has had opacity applied
+ * to its children and can be flattened away.
+ */
+static bool IsOpacityAppliedToChildren(nsDisplayItem* aItem) {
+  MOZ_ASSERT(aItem->GetType() == DisplayItemType::TYPE_OPACITY);
+  return static_cast<nsDisplayOpacity*>(aItem)->OpacityAppliedToChildren();
+}
+
+/**
+ * Returns true if the given display item type supports flattening with markers.
+ */
+static bool SupportsFlatteningWithMarkers(const DisplayItemType& aType) {
+  return aType == DisplayItemType::TYPE_OPACITY ||
+         aType == DisplayItemType::TYPE_TRANSFORM;
+}
+
+/**
  * Adds the effect marker to |aMarkers| based on the type of |aItem| and whether
  * |markerType| is a start or end marker.
  */
@@ -159,8 +177,7 @@ template <MarkerType markerType>
 static bool AddMarkerIfNeeded(nsDisplayItem* aItem,
                               std::deque<DisplayItemEntry>& aMarkers) {
   const DisplayItemType type = aItem->GetType();
-  if (type != DisplayItemType::TYPE_OPACITY &&
-      type != DisplayItemType::TYPE_TRANSFORM) {
+  if (!SupportsFlatteningWithMarkers(type)) {
     return false;
   }
 
@@ -176,6 +193,14 @@ static bool AddMarkerIfNeeded(nsDisplayItem* aItem,
 
   switch (type) {
     case DisplayItemType::TYPE_OPACITY:
+      if (IsOpacityAppliedToChildren(aItem)) {
+        // TODO(miko): I am not a fan of this. The more correct solution would
+        // be to return an enum from nsDisplayItem::ShouldFlattenAway(), so that
+        // we could distinguish between different flattening methods and avoid
+        // entering this function when markers are not needed.
+        return false;
+      }
+
       marker = GET_MARKER(DisplayItemEntryType::PUSH_OPACITY,
                           DisplayItemEntryType::POP_OPACITY);
       break;
@@ -1216,25 +1241,16 @@ class ContainerState {
     return aRect.ScaleToNearestPixels(mParameters.mXScale, mParameters.mYScale,
                                       mAppUnitsPerDevPixel);
   }
-  nsIntRegion ScaleRegionToNearestPixels(const nsRegion& aRegion) const {
-    return aRegion.ScaleToNearestPixels(
-        mParameters.mXScale, mParameters.mYScale, mAppUnitsPerDevPixel);
-  }
   nsIntRect ScaleToOutsidePixels(const nsRect& aRect,
                                  bool aSnap = false) const {
+    if (aRect.IsEmpty()) {
+      return nsIntRect();
+    }
     if (aSnap && mSnappingEnabled) {
       return ScaleToNearestPixels(aRect);
     }
     return aRect.ScaleToOutsidePixels(mParameters.mXScale, mParameters.mYScale,
                                       mAppUnitsPerDevPixel);
-  }
-  nsIntRegion ScaleToOutsidePixels(const nsRegion& aRegion,
-                                   bool aSnap = false) const {
-    if (aSnap && mSnappingEnabled) {
-      return ScaleRegionToNearestPixels(aRegion);
-    }
-    return aRegion.ScaleToOutsidePixels(
-        mParameters.mXScale, mParameters.mYScale, mAppUnitsPerDevPixel);
   }
   nsIntRect ScaleToInsidePixels(const nsRect& aRect, bool aSnap = false) const {
     if (aSnap && mSnappingEnabled) {
@@ -1243,7 +1259,10 @@ class ContainerState {
     return aRect.ScaleToInsidePixels(mParameters.mXScale, mParameters.mYScale,
                                      mAppUnitsPerDevPixel);
   }
-
+  nsIntRegion ScaleRegionToNearestPixels(const nsRegion& aRegion) const {
+    return aRegion.ScaleToNearestPixels(
+        mParameters.mXScale, mParameters.mYScale, mAppUnitsPerDevPixel);
+  }
   nsIntRegion ScaleRegionToInsidePixels(const nsRegion& aRegion,
                                         bool aSnap = false) const {
     if (aSnap && mSnappingEnabled) {
@@ -1255,6 +1274,9 @@ class ContainerState {
 
   nsIntRegion ScaleRegionToOutsidePixels(const nsRegion& aRegion,
                                          bool aSnap = false) const {
+    if (aRegion.IsEmpty()) {
+      return nsIntRegion();
+    }
     if (aSnap && mSnappingEnabled) {
       return ScaleRegionToNearestPixels(aRegion);
     }
@@ -1309,7 +1331,7 @@ class ContainerState {
 
  protected:
   friend class PaintedLayerData;
-  friend class FLBDisplayItemIterator;
+  friend class FLBDisplayListIterator;
 
   LayerManager::PaintedLayerCreationHint GetLayerCreationHint(
       AnimatedGeometryRoot* aAnimatedGeometryRoot);
@@ -1581,27 +1603,19 @@ class ContainerState {
   CachedScrollMetadata mCachedScrollMetadata;
 };
 
-class FLBDisplayItemIterator : protected FlattenedDisplayItemIterator {
+class FLBDisplayListIterator : public FlattenedDisplayListIterator {
  public:
-  FLBDisplayItemIterator(nsDisplayListBuilder* aBuilder, nsDisplayList* aList,
+  FLBDisplayListIterator(nsDisplayListBuilder* aBuilder, nsDisplayList* aList,
                          ContainerState* aState)
-      : FlattenedDisplayItemIterator(aBuilder, aList, false),
-        mState(aState),
-        mAddingEffectMarker(false) {
+      : FlattenedDisplayListIterator(aBuilder, aList, false), mState(aState) {
     MOZ_ASSERT(mState);
 
-    if (aState->mContainerItem) {
+    if (mState->mContainerItem) {
       // Add container item hit test information for processing, if needed.
-      AddHitTestMarker(aState->mContainerItem);
+      AddHitTestMarkerIfNeeded(mState->mContainerItem);
     }
 
     ResolveFlattening();
-  }
-
-  void AddHitTestMarker(nsDisplayItem* aItem) {
-    if (aItem->HasHitTestInfo()) {
-      mMarkers.emplace_back(aItem, DisplayItemEntryType::HIT_TEST_INFO);
-    }
   }
 
   DisplayItemEntry GetNextEntry() {
@@ -1611,141 +1625,81 @@ class FLBDisplayItemIterator : protected FlattenedDisplayItemIterator {
       return entry;
     }
 
-    nsDisplayItem* next = GetNext();
-    return DisplayItemEntry{next, DisplayItemEntryType::ITEM};
+    return DisplayItemEntry{GetNextItem(), DisplayItemEntryType::ITEM};
   }
 
-  nsDisplayItem* GetNext() {
-    // This function is only supposed to be called if there are no markers set.
-    // Breaking this invariant can potentially break effect flattening and/or
-    // display item merging.
-    MOZ_ASSERT(mMarkers.empty());
-
-    nsDisplayItem* next = mNext;
-
-    // Advance mNext to the following item
-    if (next) {
-      nsDisplayItem* peek = next->GetAbove();
-
-      // Peek ahead to the next item and see if it can be merged with the
-      // current item.
-      if (peek && next->CanMerge(peek)) {
-        // Create a list of consecutive items that can be merged together.
-        AutoTArray<nsDisplayItem*, 2> mergedItems{next, peek};
-        while ((peek = peek->GetAbove())) {
-          if (!next->CanMerge(peek)) {
-            break;
-          }
-
-          mergedItems.AppendElement(peek);
-        }
-
-        // We have items that can be merged together.
-        // Merge them into a temporary item and process that item immediately.
-        MOZ_ASSERT(mergedItems.Length() > 1);
-        next = mState->mBuilder->MergeItems(mergedItems);
-      }
-
-      // |mNext| is either the first item that could not be merged with |next|,
-      // or a nullptr.
-      mNext = peek;
-
-      ResolveFlattening();
-    }
-
-    return next;
+  bool HasNext() const override {
+    return FlattenedDisplayListIterator::HasNext() || !mMarkers.empty();
   }
-
-  bool HasNext() const {
-    return FlattenedDisplayItemIterator::HasNext() || !mMarkers.empty();
-  }
-
-  nsDisplayItem* PeekNext() { return mNext; }
 
  private:
+  void AddHitTestMarkerIfNeeded(nsDisplayItem* aItem) {
+    if (aItem->HasHitTestInfo()) {
+      mMarkers.emplace_back(aItem, DisplayItemEntryType::HIT_TEST_INFO);
+    }
+  }
+
   bool ShouldFlattenNextItem() override {
-    if (!mNext) {
+    if (!FlattenedDisplayListIterator::ShouldFlattenNextItem()) {
       return false;
     }
 
-    if (!mNext->ShouldFlattenAway(mBuilder)) {
-      return false;
-    }
-
-    const DisplayItemType type = mNext->GetType();
+    nsDisplayItem* next = PeekNext();
+    const DisplayItemType type = next->GetType();
 
     if (type == DisplayItemType::TYPE_SVG_WRAPPER) {
       // We mark SetContainsSVG for the CONTENT_FRAME_TIME_WITH_SVG metric
-      if (RefPtr<LayerManager> lm = mBuilder->GetWidgetLayerManager()) {
+      if (RefPtr<LayerManager> lm = mState->mBuilder->GetWidgetLayerManager()) {
         lm->SetContainsSVG(true);
       }
     }
 
-    if (type != DisplayItemType::TYPE_OPACITY &&
-        type != DisplayItemType::TYPE_TRANSFORM) {
+    if (!SupportsFlatteningWithMarkers(type)) {
       return true;
     }
 
-    if (type == DisplayItemType::TYPE_OPACITY) {
-      nsDisplayOpacity* opacity = static_cast<nsDisplayOpacity*>(mNext);
-
-      if (opacity->OpacityAppliedToChildren()) {
-        // This is the previous opacity flattening path, where the opacity has
-        // been applied to children.
-        return true;
-      }
+    if (type == DisplayItemType::TYPE_OPACITY &&
+        IsOpacityAppliedToChildren(next)) {
+      // This is the previous opacity flattening path, where the opacity has
+      // been applied to children.
+      return true;
     }
 
-    if (mState->IsInInactiveLayer() || !NextItemWantsInactiveLayer()) {
+    if (mState->IsInInactiveLayer() || !ItemWantsInactiveLayer(next)) {
       // Do not flatten nested inactive display items, or display items that
       // want an active layer.
       return false;
     }
 
-    // Flatten inactive nsDisplayOpacity and nsDisplayTransform.
-    mAddingEffectMarker = true;
+    // If we reach here, we will emit an effect start marker for
+    // nsDisplayTransform or nsDisplayOpacity.
+    MOZ_ASSERT(type == DisplayItemType::TYPE_TRANSFORM ||
+               !IsOpacityAppliedToChildren(next));
     return true;
   }
 
-  void EnterChildList(nsDisplayItem* aItem) override {
-    if (!mAddingEffectMarker) {
-      // A container item will be flattened but no effect marker is needed.
-      AddHitTestMarker(aItem);
-      return;
-    }
-
-    if (AddMarkerIfNeeded<MarkerType::StartMarker>(aItem, mMarkers)) {
-      mActiveMarkers.AppendElement(aItem);
-    }
-
-    // Place the hit test marker between the effect markers.
-    AddHitTestMarker(aItem);
-
-    mAddingEffectMarker = false;
+  void EnterChildList(nsDisplayItem* aContainerItem) override {
+    mFlattenedLists.AppendElement(aContainerItem);
+    AddMarkerIfNeeded<MarkerType::StartMarker>(aContainerItem, mMarkers);
+    AddHitTestMarkerIfNeeded(aContainerItem);
   }
 
-  void ExitChildList(nsDisplayItem* aItem) override {
-    if (mActiveMarkers.IsEmpty() || mActiveMarkers.LastElement() != aItem) {
-      // Do not emit an end marker if this item did not emit a start marker.
-      return;
-    }
-
-    if (AddMarkerIfNeeded<MarkerType::EndMarker>(aItem, mMarkers)) {
-      mActiveMarkers.RemoveLastElement();
-    }
+  void ExitChildList() override {
+    MOZ_ASSERT(!mFlattenedLists.IsEmpty());
+    nsDisplayItem* aContainerItem = mFlattenedLists.PopLastElement();
+    AddMarkerIfNeeded<MarkerType::EndMarker>(aContainerItem, mMarkers);
   }
 
-  bool NextItemWantsInactiveLayer() {
-    LayerState layerState = mNext->GetLayerState(
+  bool ItemWantsInactiveLayer(nsDisplayItem* aItem) {
+    const LayerState layerState = aItem->GetLayerState(
         mState->mBuilder, mState->mManager, mState->mParameters);
 
     return layerState == LayerState::LAYER_INACTIVE;
   }
 
   std::deque<DisplayItemEntry> mMarkers;
-  AutoTArray<nsDisplayItem*, 4> mActiveMarkers;
+  AutoTArray<nsDisplayItem*, 16> mFlattenedLists;
   ContainerState* mState;
-  bool mAddingEffectMarker;
 };
 
 class PaintedDisplayItemLayerUserData : public LayerUserData {
@@ -4441,7 +4395,7 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
     return selectedLayer && opacityIndices.Length() > 0;
   };
 
-  FLBDisplayItemIterator iter(mBuilder, aList, this);
+  FLBDisplayListIterator iter(mBuilder, aList, this);
   while (iter.HasNext()) {
     DisplayItemEntry e = iter.GetNextEntry();
     DisplayItemEntryType marker = e.mType;
@@ -4462,13 +4416,6 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
 
     if (mBuilder->NeedToForceTransparentSurfaceForItem(item)) {
       aList->SetNeedsTransparentSurface();
-    }
-
-    if (mParameters.mForEventsAndPluginsOnly &&
-        (marker != DisplayItemEntryType::HIT_TEST_INFO &&
-         itemType != DisplayItemType::TYPE_PLUGIN)) {
-      // Only process hit test info items or plugin items.
-      continue;
     }
 
     LayerState layerState = LAYER_NONE;
@@ -4671,15 +4618,6 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
       DisplayItemData* oldData = mLayerBuilder->GetOldLayerForFrame(
           item->Frame(), item->GetPerFrameKey());
       InvalidateForLayerChange(item, nullptr, oldData);
-
-      // If the item would have its own layer but is invisible, just hide it.
-      // Note that items without their own layers can't be skipped this
-      // way, since their PaintedLayer may decide it wants to draw them
-      // into its buffer even if they're currently covered.
-      if (itemVisibleRect.IsEmpty() &&
-          !item->ShouldBuildLayerEvenIfInvisible(mBuilder)) {
-        continue;
-      }
 
       // 3D-transformed layers don't necessarily draw in the order in which
       // they're added to their parent container layer.
@@ -4912,7 +4850,7 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
                                    DisplayItemType::TYPE_SCROLL_INFO_LAYER) {
           // Since we do build a layer for mask, there is no need for this
           // scroll info layer anymore.
-          iter.GetNext();
+          iter.GetNextItem();
         }
       }
 
@@ -4921,7 +4859,8 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
       nsIntRegion itemVisibleRegion = itemVisibleRect;
       nsRegion tightBounds = item->GetTightBounds(mBuilder, &snap);
       if (!tightBounds.IsEmpty()) {
-        itemVisibleRegion.AndWith(ScaleToOutsidePixels(tightBounds, snap));
+        itemVisibleRegion.AndWith(
+            ScaleRegionToOutsidePixels(tightBounds, snap));
       }
 
       ContainerLayer* oldContainer = ownLayer->GetParent();
@@ -5925,8 +5864,7 @@ void ContainerState::Finish(uint32_t* aTextContentFlags,
                             nsDisplayList* aChildItems) {
   mPaintedLayerDataTree.Finish();
 
-  if (!mParameters.mForEventsAndPluginsOnly &&
-      !gfxPrefs::LayoutUseContainersForRootFrames()) {
+  if (!gfxPrefs::LayoutUseContainersForRootFrames()) {
     // Bug 1336544 tracks re-enabling this assertion in the
     // gfxPrefs::LayoutUseContainersForRootFrames() case.
     NS_ASSERTION(mContainerBounds.IsEqualInterior(mAccumulatedChildBounds),

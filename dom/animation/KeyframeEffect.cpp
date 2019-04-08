@@ -20,6 +20,7 @@
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/LookAndFeel.h"  // For LookAndFeel::GetInt
 #include "mozilla/KeyframeUtils.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/TypeTraits.h"
@@ -31,11 +32,28 @@
 #include "nsCSSPseudoElements.h"    // For PseudoStyleType
 #include "nsDOMMutationObserver.h"  // For nsAutoAnimationMutationBatch
 #include "nsIFrame.h"
-#include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 #include "nsIScriptError.h"
+#include "nsPresContextInlines.h"
 #include "nsRefreshDriver.h"
 
 namespace mozilla {
+
+void AnimationProperty::SetPerformanceWarning(
+    const AnimationPerformanceWarning& aWarning, const Element* aElement) {
+  if (mPerformanceWarning && *mPerformanceWarning == aWarning) {
+    return;
+  }
+
+  mPerformanceWarning = Some(aWarning);
+
+  nsAutoString localizedString;
+  if (nsLayoutUtils::IsAnimationLoggingEnabled() &&
+      mPerformanceWarning->ToLocalizedString(localizedString)) {
+    nsAutoCString logMessage = NS_ConvertUTF16toUTF8(localizedString);
+    AnimationUtils::LogAsyncAnimationFailure(logMessage, aElement);
+  }
+}
 
 bool PropertyValuePair::operator==(const PropertyValuePair& aOther) const {
   if (mProperty != aOther.mProperty) {
@@ -495,7 +513,9 @@ void KeyframeEffect::ComposeStyleRule(
     const AnimationProperty& aProperty,
     const AnimationPropertySegment& aSegment,
     const ComputedTiming& aComputedTiming) {
-  Servo_AnimationCompose(&aAnimationValues, &mBaseValues, aProperty.mProperty,
+  auto* opaqueTable =
+      reinterpret_cast<RawServoAnimationValueTable*>(&mBaseValues);
+  Servo_AnimationCompose(&aAnimationValues, opaqueTable, aProperty.mProperty,
                          &aSegment, &aProperty.mSegments.LastElement(),
                          &aComputedTiming, mEffectOptions.mIterationComposite);
 }
@@ -924,6 +944,7 @@ void KeyframeEffect::GetTarget(
   switch (mTarget->mPseudoType) {
     case PseudoStyleType::before:
     case PseudoStyleType::after:
+    case PseudoStyleType::marker:
       aRv.SetValue().SetAsCSSPseudoElement() =
           CSSPseudoElement::GetCSSPseudoElement(mTarget->mElement,
                                                 mTarget->mPseudoType);
@@ -1187,7 +1208,7 @@ bool KeyframeEffect::CanThrottleIfNotVisible(nsIFrame& aFrame) const {
     return false;
   }
 
-  nsIPresShell* presShell = GetPresShell();
+  PresShell* presShell = GetPresShell();
   if (presShell && !presShell->IsActive()) {
     return true;
   }
@@ -1371,6 +1392,8 @@ nsIFrame* KeyframeEffect::GetPrimaryFrame() const {
     frame = nsLayoutUtils::GetBeforeFrame(mTarget->mElement);
   } else if (mTarget->mPseudoType == PseudoStyleType::after) {
     frame = nsLayoutUtils::GetAfterFrame(mTarget->mElement);
+  } else if (mTarget->mPseudoType == PseudoStyleType::marker) {
+    frame = nsLayoutUtils::GetMarkerFrame(mTarget->mElement);
   } else {
     frame = mTarget->mElement->GetPrimaryFrame();
     MOZ_ASSERT(mTarget->mPseudoType == PseudoStyleType::NotPseudo,
@@ -1387,12 +1410,12 @@ Document* KeyframeEffect::GetRenderedDocument() const {
   return mTarget->mElement->GetComposedDoc();
 }
 
-nsIPresShell* KeyframeEffect::GetPresShell() const {
+PresShell* KeyframeEffect::GetPresShell() const {
   Document* doc = GetRenderedDocument();
   if (!doc) {
     return nullptr;
   }
-  return doc->GetShell();
+  return doc->GetPresShell();
 }
 
 /* static */
@@ -1512,19 +1535,16 @@ bool KeyframeEffect::HasGeometricProperties() const {
 }
 
 void KeyframeEffect::SetPerformanceWarning(
-    nsCSSPropertyID aProperty, const AnimationPerformanceWarning& aWarning) {
+    const nsCSSPropertyIDSet& aPropertySet,
+    const AnimationPerformanceWarning& aWarning) {
+  nsCSSPropertyIDSet curr = aPropertySet;
   for (AnimationProperty& property : mProperties) {
-    if (property.mProperty == aProperty &&
-        (!property.mPerformanceWarning ||
-         *property.mPerformanceWarning != aWarning)) {
-      property.mPerformanceWarning = Some(aWarning);
-
-      nsAutoString localizedString;
-      if (nsLayoutUtils::IsAnimationLoggingEnabled() &&
-          property.mPerformanceWarning->ToLocalizedString(localizedString)) {
-        nsAutoCString logMessage = NS_ConvertUTF16toUTF8(localizedString);
-        AnimationUtils::LogAsyncAnimationFailure(logMessage, mTarget->mElement);
-      }
+    if (!curr.HasProperty(property.mProperty)) {
+      continue;
+    }
+    property.SetPerformanceWarning(aWarning, mTarget->mElement);
+    curr.RemoveProperty(property.mProperty);
+    if (curr.IsEmpty()) {
       return;
     }
   }

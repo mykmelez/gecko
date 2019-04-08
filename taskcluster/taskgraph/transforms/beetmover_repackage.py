@@ -12,11 +12,15 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.partials import (get_balrog_platform_name,
-                                     get_partials_artifacts,
-                                     get_partials_artifact_map)
-from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
+                                     get_partials_artifacts_from_params,
+                                     get_partials_info_from_params)
+from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
+                                         generate_beetmover_upstream_artifacts,
+                                         generate_beetmover_partials_artifact_map,
+                                         get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
-                                         get_worker_type_for_scope)
+                                         get_worker_type_for_scope,
+                                         should_use_artifact_map)
 from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.util.treeherder import replace_group
 from taskgraph.transforms.task import task_description_schema
@@ -75,7 +79,7 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_UNSIGNED_PATHS = _compile_regex_mapping({
-    r'^(linux(|64)|macosx64)(|-devedition)-nightly$':
+    r'^(linux(|64)|macosx64)(|-devedition)-(nightly|shippable)$':
         _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
             'host/bin/mar',
             'host/bin/mbsdiff',
@@ -92,12 +96,12 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = _compile_regex_mapping({
                     "host/bin/mar.exe",
                     "host/bin/mbsdiff.exe",
                 ]),
-    r'^win(32|64(|-aarch64))(|-devedition)-nightly$':
+    r'^win(32|64(|-aarch64))(|-devedition)-(nightly|shippable)$':
         _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
             'host/bin/mar.exe',
             'host/bin/mbsdiff.exe',
         ],
-    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$':
+    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-(nightly|shippable)-l10n$':
         _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
 })
 
@@ -106,9 +110,10 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = _compile_regex_mapping({
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_PATHS = _compile_regex_mapping({
-    r'^linux(|64)(|-devedition|-asan-reporter)-nightly(|-l10n)$':
+    r'^linux(|64)(|-devedition|-asan-reporter)-(nightly|shippable)(|-l10n)$':
         ['target.tar.bz2', 'target.tar.bz2.asc'],
-    r'^win(32|64)(|-aarch64)(|-devedition|-asan-reporter)-nightly(|-l10n)$': ['target.zip'],
+    r'^win(32|64)(|-aarch64)(|-devedition|-asan-reporter)-(nightly|shippable)(|-l10n)$':
+        ['target.zip'],
 })
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -353,16 +358,25 @@ def make_task_worker(config, jobs):
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
 
-        upstream_artifacts = generate_upstream_artifacts(
-            config, job, job['dependencies'], platform, locale,
-            project=config.params['project']
-        )
+        if should_use_artifact_map(platform, config.params['project']):
+            upstream_artifacts = generate_beetmover_upstream_artifacts(
+                config, job, platform, locale)
+        else:
+            upstream_artifacts = generate_upstream_artifacts(
+                config, job, job['dependencies'], platform, locale,
+                project=config.params['project']
+            )
 
         worker = {
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': upstream_artifacts,
         }
+
+        if should_use_artifact_map(platform, config.params['project']):
+            worker['artifact-map'] = generate_beetmover_artifact_map(
+                config, job, platform=platform, locale=locale)
+
         if locale:
             worker["locale"] = locale
         job["worker"] = worker
@@ -377,9 +391,6 @@ def make_partials_artifacts(config, jobs):
         if not locale:
             locale = 'en-US'
 
-        # Remove when proved reliable
-        # job['treeherder']['tier'] = 3
-
         platform = job["attributes"]["build_platform"]
 
         if 'partials-signing' not in job['dependencies']:
@@ -387,8 +398,8 @@ def make_partials_artifacts(config, jobs):
             continue
 
         balrog_platform = get_balrog_platform_name(platform)
-        artifacts = get_partials_artifacts(config.params.get('release_history'),
-                                           balrog_platform, locale)
+        artifacts = get_partials_artifacts_from_params(config.params.get('release_history'),
+                                                       balrog_platform, locale)
 
         upstream_artifacts = generate_partials_upstream_artifacts(
             job, artifacts, balrog_platform, locale
@@ -398,18 +409,24 @@ def make_partials_artifacts(config, jobs):
 
         extra = list()
 
-        artifact_map = get_partials_artifact_map(
+        partials_info = get_partials_info_from_params(
             config.params.get('release_history'), balrog_platform, locale)
-        for artifact in artifact_map:
+
+        if should_use_artifact_map(platform, config.params['project']):
+            job['worker']['artifact-map'].extend(
+                generate_beetmover_partials_artifact_map(
+                    config, job, partials_info, platform=platform, locale=locale))
+
+        for artifact in partials_info:
             artifact_extra = {
                 'locale': locale,
                 'artifact_name': artifact,
-                'buildid': artifact_map[artifact]['buildid'],
+                'buildid': partials_info[artifact]['buildid'],
                 'platform': balrog_platform,
             }
             for rel_attr in ('previousBuildNumber', 'previousVersion'):
-                if artifact_map[artifact].get(rel_attr):
-                    artifact_extra[rel_attr] = artifact_map[artifact][rel_attr]
+                if partials_info[artifact].get(rel_attr):
+                    artifact_extra[rel_attr] = partials_info[artifact][rel_attr]
             extra.append(artifact_extra)
 
         job.setdefault('extra', {})

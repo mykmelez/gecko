@@ -15,8 +15,6 @@ with Files('docs/**'):
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['win32']
-    if CONFIG['WIN64_CARGO_LINKER']:
-        CONFIGURE_SUBST_FILES += ['win64/cargo-linker.bat']
 else:
     DIRS += ['unix']
 
@@ -116,6 +114,7 @@ OBJDIR_FILES += ['/.gdbinit']
 # directories as the current working directory.  The .lldbinit file will
 # load $(topsrcdir)/.lldbinit, which is where the actual debugging commands are.
 DEFINES['topsrcdir'] = TOPSRCDIR
+DEFINES['topobjdir'] = TOPOBJDIR
 FINAL_TARGET_PP_FILES += ['.lldbinit.in']
 OBJDIR_FILES += ['!/dist/bin/.lldbinit']
 

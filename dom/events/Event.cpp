@@ -7,8 +7,6 @@
 #include "AccessCheck.h"
 #include "base/basictypes.h"
 #include "ipc/IPCMessageUtils.h"
-#include "mozilla/dom/Event.h"
-#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -19,8 +17,13 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/Event.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "nsContentUtils.h"
 #include "nsCOMPtr.h"
 #include "nsDeviceContext.h"
@@ -29,8 +32,6 @@
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
-#include "mozilla/dom/Document.h"
-#include "nsIPresShell.h"
 #include "nsIScrollableFrame.h"
 #include "nsJSEnvironment.h"
 #include "nsLayoutUtils.h"
@@ -532,8 +533,9 @@ CSSIntPoint Event::GetScreenCoords(nsPresContext* aPresContext,
       aPoint,
       aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
-  if (nsIPresShell* ps = aPresContext->GetPresShell()) {
-    pt = pt.RemoveResolution(nsLayoutUtils::GetCurrentAPZResolutionScale(ps));
+  if (PresShell* presShell = aPresContext->GetPresShell()) {
+    pt = pt.RemoveResolution(
+        nsLayoutUtils::GetCurrentAPZResolutionScale(presShell));
   }
 
   pt += LayoutDevicePixel::ToAppUnits(
@@ -553,8 +555,9 @@ CSSIntPoint Event::GetPageCoords(nsPresContext* aPresContext,
 
   // If there is some scrolling, add scroll info to client point.
   if (aPresContext && aPresContext->GetPresShell()) {
-    nsIPresShell* shell = aPresContext->GetPresShell();
-    nsIScrollableFrame* scrollframe = shell->GetRootScrollFrameAsScrollable();
+    PresShell* presShell = aPresContext->PresShell();
+    nsIScrollableFrame* scrollframe =
+        presShell->GetRootScrollFrameAsScrollable();
     if (scrollframe) {
       pagePoint +=
           CSSIntPoint::FromAppUnitsRounded(scrollframe->GetScrollPosition());
@@ -611,16 +614,16 @@ CSSIntPoint Event::GetOffsetCoords(nsPresContext* aPresContext,
   if (!content || !aPresContext) {
     return CSSIntPoint(0, 0);
   }
-  nsCOMPtr<nsIPresShell> shell = aPresContext->GetPresShell();
-  if (!shell) {
+  RefPtr<PresShell> presShell = aPresContext->GetPresShell();
+  if (!presShell) {
     return CSSIntPoint(0, 0);
   }
-  shell->FlushPendingNotifications(FlushType::Layout);
+  presShell->FlushPendingNotifications(FlushType::Layout);
   nsIFrame* frame = content->GetPrimaryFrame();
   if (!frame) {
     return CSSIntPoint(0, 0);
   }
-  nsIFrame* rootFrame = shell->GetRootFrame();
+  nsIFrame* rootFrame = presShell->GetRootFrame();
   if (!rootFrame) {
     return CSSIntPoint(0, 0);
   }

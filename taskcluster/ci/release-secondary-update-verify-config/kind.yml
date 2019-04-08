@@ -46,7 +46,10 @@ job-defaults:
             staging: dep
             production: null
       include-version: beta
-      last-watershed: "56.0b3"
+      last-watershed:
+         by-platform:
+            win64-aarch64.*: "67.0b2"
+            default: "56.0b3"
       mar-channel-id-override: beta
       channel: "beta-localtest"
 
@@ -58,7 +61,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-nightly
+         build_platform: linux-shippable
       extra:
          platform: linux-i686
          updater-platform: linux-x86_64
@@ -70,7 +73,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-nightly
+         build_platform: linux64-shippable
       extra:
          platform: linux-x86_64
          updater-platform: linux-x86_64
@@ -82,7 +85,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-nightly
+         build_platform: macosx64-shippable
       extra:
          platform: mac
          updater-platform: linux-x86_64
@@ -94,7 +97,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-nightly
+         build_platform: win32-shippable
       extra:
          platform: win32
          updater-platform: linux-x86_64
@@ -106,7 +109,19 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-nightly
+         build_platform: win64-shippable
       extra:
          platform: win64
+         updater-platform: linux-x86_64
+
+   firefox-secondary-win64-aarch64:
+      treeherder:
+         symbol: UVCS
+         platform: win64-aarch64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win64-aarch64-shippable
+      extra:
+         platform: win64-aarch64
          updater-platform: linux-x86_64

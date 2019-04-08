@@ -125,6 +125,7 @@
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "nsIWebNavigation.h"
+#include "HttpTrafficAnalyzer.h"
 
 #ifdef MOZ_TASK_TRACER
 #  include "GeckoTaskTracer.h"
@@ -371,6 +372,7 @@ void nsHttpChannel::ReleaseMainThreadOnlyReferences() {
   arrayToRelease.AppendElement(mRedirectURI.forget());
   arrayToRelease.AppendElement(mRedirectChannel.forget());
   arrayToRelease.AppendElement(mPreflightChannel.forget());
+  arrayToRelease.AppendElement(mDNSPrefetch.forget());
 
   NS_DispatchToMainThread(new ProxyReleaseRunnable(std::move(arrayToRelease)));
 }
@@ -546,9 +548,14 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   bool shouldUpgrade = mUpgradeToSecure;
   if (isHttp) {
     if (!shouldUpgrade) {
-      RefPtr<nsHttpChannel> self = this;
-      auto resultCallback = [self{std::move(self)}](bool aResult,
-                                                    nsresult aStatus) {
+      // Make sure http channel is released on main thread.
+      // See bug 1539148 for details.
+      nsMainThreadPtrHandle<nsHttpChannel> self(
+          new nsMainThreadPtrHolder<nsHttpChannel>(
+              "nsHttpChannel::OnBeforeConnect::self", this));
+      auto resultCallback = [self(self)](bool aResult, nsresult aStatus) {
+        MOZ_ASSERT(NS_IsMainThread());
+
         nsresult rv = self->ContinueOnBeforeConnect(aResult, aStatus);
         if (NS_FAILED(rv)) {
           self->CloseCacheEntry(false);
@@ -1089,10 +1096,9 @@ nsresult nsHttpChannel::SetupTransaction() {
     }
 
     if (mIgnoreCacheEntry) {
-      if (!mAvailableCachedAltDataType.IsEmpty()) {
-        mAvailableCachedAltDataType.Truncate();
-        mAltDataLength = 0;
-      }
+      mAvailableCachedAltDataType.Truncate();
+      mDeliveringAltData = false;
+      mAltDataLength = -1;
       mCacheInputStream.CloseAndRelease();
     }
   }
@@ -1277,11 +1283,13 @@ nsresult nsHttpChannel::SetupTransaction() {
 
   EnsureTopLevelOuterContentWindowId();
 
+  HttpTrafficCategory category = CreateTrafficCategory();
+
   nsCOMPtr<nsIAsyncInputStream> responseStream;
   rv = mTransaction->Init(
       mCaps, mConnectionInfo, &mRequestHead, mUploadStream, mReqContentLength,
       mUploadStreamHasHeaders, GetCurrentThreadEventTarget(), callbacks, this,
-      mTopLevelOuterContentWindowId, getter_AddRefs(responseStream));
+      mTopLevelOuterContentWindowId, category, getter_AddRefs(responseStream));
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
@@ -1295,6 +1303,51 @@ nsresult nsHttpChannel::SetupTransaction() {
   rv = nsInputStreamPump::Create(getter_AddRefs(mTransactionPump),
                                  responseStream);
   return rv;
+}
+
+HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
+  MOZ_ASSERT(!mFirstPartyClassificationFlags ||
+             !mThirdPartyClassificationFlags);
+
+  if (!StaticPrefs::network_traffic_analyzer_enabled()) {
+    return HttpTrafficCategory::eInvalid;
+  }
+
+  HttpTrafficAnalyzer::ClassOfService cos;
+  {
+    if (mClassOfService & nsIClassOfService::Leader &&
+        mLoadInfo->GetExternalContentPolicyType() ==
+            nsIContentPolicy::TYPE_SCRIPT) {
+      cos = HttpTrafficAnalyzer::ClassOfService::eLeader;
+    } else if (mLoadFlags & nsIRequest::LOAD_BACKGROUND) {
+      cos = HttpTrafficAnalyzer::ClassOfService::eBackground;
+    } else {
+      cos = HttpTrafficAnalyzer::ClassOfService::eOther;
+    }
+  }
+
+  bool isThirdParty = !!mThirdPartyClassificationFlags;
+  HttpTrafficAnalyzer::TrackingClassification tc;
+  {
+    uint32_t flags = isThirdParty ? mThirdPartyClassificationFlags
+                                  : mFirstPartyClassificationFlags;
+
+    using CF = nsIHttpChannel::ClassificationFlags;
+    using TC = HttpTrafficAnalyzer::TrackingClassification;
+
+    if (flags & CF::CLASSIFIED_TRACKING_CONTENT) {
+      tc = TC::eContent;
+    } else if (flags & CF::CLASSIFIED_FINGERPRINTING) {
+      tc = TC::eFingerprinting;
+    } else if (flags & CF::CLASSIFIED_ANY_BASIC_TRACKING) {
+      tc = TC::eBasic;
+    } else {
+      tc = TC::eNone;
+    }
+  }
+
+  return HttpTrafficAnalyzer::CreateTrafficCategory(NS_UsePrivateBrowsing(this),
+                                                    isThirdParty, cos, tc);
 }
 
 enum class Report { Error, Warning };
@@ -1630,6 +1683,36 @@ void WarnWrongMIMEOfScript(nsHttpChannel *aChannel, nsIURI *aURI,
   }
 }
 
+void nsHttpChannel::SetCachedContentType() {
+  if (!mResponseHead) {
+    return;
+  }
+
+  nsAutoCString contentTypeStr;
+  mResponseHead->ContentType(contentTypeStr);
+
+  uint8_t contentType = nsICacheEntry::CONTENT_TYPE_OTHER;
+  if (nsContentUtils::IsJavascriptMIMEType(
+          NS_ConvertUTF8toUTF16(contentTypeStr))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_JAVASCRIPT;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("text/css")) ||
+             mLoadInfo->GetExternalContentPolicyType() ==
+                 nsIContentPolicy::TYPE_STYLESHEET) {
+    contentType = nsICacheEntry::CONTENT_TYPE_STYLESHEET;
+  } else if (StringBeginsWith(contentTypeStr,
+                              NS_LITERAL_CSTRING("application/wasm"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_WASM;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("image/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_IMAGE;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("video/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_MEDIA;
+  } else if (StringBeginsWith(contentTypeStr, NS_LITERAL_CSTRING("audio/"))) {
+    contentType = nsICacheEntry::CONTENT_TYPE_MEDIA;
+  }
+
+  mCacheEntry->SetContentType(contentType);
+}
+
 nsresult nsHttpChannel::CallOnStartRequest() {
   LOG(("nsHttpChannel::CallOnStartRequest [this=%p]", this));
 
@@ -1725,6 +1808,10 @@ nsresult nsHttpChannel::CallOnStartRequest() {
 
   if (mResponseHead && !mResponseHead->HasContentCharset())
     mResponseHead->SetContentCharset(mContentCharsetHint);
+
+  if (mCacheEntry && mCacheEntryIsWriteOnly) {
+    SetCachedContentType();
+  }
 
   LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this,
        mListener.get()));
@@ -2241,6 +2328,16 @@ void nsHttpChannel::ProcessSSLInformation() {
         Unused << AddSecurityMessage(consoleErrorTag, consoleErrorMessage);
       }
     }
+  }
+
+  uint16_t tlsVersion;
+  nsresult rv = securityInfo->GetProtocolVersion(&tlsVersion);
+  if (NS_SUCCEEDED(rv) &&
+      tlsVersion != nsITransportSecurityInfo::TLS_VERSION_1_2 &&
+      tlsVersion != nsITransportSecurityInfo::TLS_VERSION_1_3) {
+    nsString consoleErrorTag = NS_LITERAL_STRING("DeprecatedTLSVersion");
+    nsString consoleErrorCategory = NS_LITERAL_STRING("TLS");
+    Unused << AddSecurityMessage(consoleErrorTag, consoleErrorCategory);
   }
 }
 
@@ -4968,12 +5065,14 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry *cacheEntry,
       LOG(("Opened alt-data input stream type=%s", altDataType.get()));
       // We have succeeded.
       mAvailableCachedAltDataType = altDataType;
+      mDeliveringAltData = deliverAltData;
+
+      // Set the correct data size on the channel.
+      Unused << cacheEntry->GetAltDataSize(&altDataSize);
+      mAltDataLength = altDataSize;
 
       if (deliverAltData) {
-        // Set the correct data size on the channel.
-        Unused << cacheEntry->GetAltDataSize(&altDataSize);
         stream = altData;
-        mAltDataLength = altDataSize;
       }
     }
   }
@@ -5295,6 +5394,7 @@ nsresult nsHttpChannel::InitCacheEntry() {
          "recreating cache entry\n"));
     // clean the altData cache and reset this to avoid wrong content length
     mAvailableCachedAltDataType.Truncate();
+    mDeliveringAltData = false;
 
     nsCOMPtr<nsICacheEntry> currentEntry;
     currentEntry.swap(mCacheEntry);
@@ -6599,7 +6699,7 @@ nsresult nsHttpChannel::BeginConnect() {
     return mStatus;
   }
 
-  if (!(mLoadFlags & LOAD_CLASSIFY_URI)) {
+  if (!NS_ShouldClassifyChannel(this)) {
     MaybeStartDNSPrefetch();
     return ContinueBeginConnectWithResult();
   }
@@ -6611,14 +6711,35 @@ nsresult nsHttpChannel::BeginConnect() {
   RefPtr<nsHttpChannel> self = this;
   bool willCallback = NS_SUCCEEDED(
       AsyncUrlChannelClassifier::CheckChannel(this, [self]() -> void {
-        nsresult rv = self->BeginConnectActual();
-        if (NS_FAILED(rv)) {
-          // Since this error is thrown asynchronously so that the caller
-          // of BeginConnect() will not do clean up for us. We have to do
-          // it on our own.
-          self->CloseCacheEntry(false);
-          Unused << self->AsyncAbort(rv);
+        auto nextFunc = [self]() -> void {
+          nsresult rv = self->BeginConnectActual();
+          if (NS_FAILED(rv)) {
+            // Since this error is thrown asynchronously so that the caller
+            // of BeginConnect() will not do clean up for us. We have to do
+            // it on our own.
+            self->CloseCacheEntry(false);
+            Unused << self->AsyncAbort(rv);
+          }
+        };
+
+        uint32_t delayMillisec = StaticPrefs::network_delay_tracking_load();
+        if (self->IsThirdPartyTrackingResource() && delayMillisec) {
+          nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
+              "nsHttpChannel::BeginConnect-delayed", nextFunc);
+          nsresult rv = NS_DelayedDispatchToCurrentThread(runnable.forget(),
+                                                          delayMillisec);
+          if (NS_SUCCEEDED(rv)) {
+            LOG(
+                ("nsHttpChannel::BeginConnect delaying 3rd-party tracking "
+                 "resource for %u ms [this=%p]",
+                 delayMillisec, self.get()));
+            return;
+          }
+          LOG(("nsHttpChannel::BeginConnect unable to delay loading. [this=%p]",
+               self.get()));
         }
+
+        nextFunc();
       }));
 
   if (!willCallback) {
@@ -7477,6 +7598,7 @@ nsHttpChannel::OnStartRequest(nsIRequest *request) {
         }
       }
       mAvailableCachedAltDataType.Truncate();
+      mDeliveringAltData = false;
     } else if (WRONG_RACING_RESPONSE_SOURCE(request)) {
       LOG(("  Early return when racing. This response not needed."));
       return NS_OK;
@@ -7805,7 +7927,6 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsresult status) {
       mTransactionTimings.domainLookupStart = mDNSPrefetch->StartTimestamp();
       mTransactionTimings.domainLookupEnd = mDNSPrefetch->EndTimestamp();
     }
-    mDNSPrefetch = nullptr;
 
     // handle auth retry...
     if (authRetry) {
@@ -8061,6 +8182,9 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     mListener->OnStopRequest(this, aStatus);
     mOnStopRequestCalled = true;
   }
+
+  // The prefetch needs to be released on the main thread
+  mDNSPrefetch = nullptr;
 
   // notify "http-on-stop-connect" observers
   gHttpHandler->OnStopRequest(this);

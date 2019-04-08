@@ -525,8 +525,7 @@ nsresult FetchDriver::HttpFetch(
   MOZ_ASSERT(mLoadGroup);
   nsCOMPtr<nsIChannel> chan;
 
-  nsLoadFlags loadFlags =
-      nsIRequest::LOAD_BACKGROUND | bypassFlag | nsIChannel::LOAD_CLASSIFY_URI;
+  nsLoadFlags loadFlags = nsIRequest::LOAD_BACKGROUND | bypassFlag;
   if (mDocument) {
     MOZ_ASSERT(mDocument->NodePrincipal() == mPrincipal);
     MOZ_ASSERT(mDocument->CookieSettings() == mCookieSettings);
@@ -1049,7 +1048,7 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest) {
     // Fail to generate a paddingInfo for opaque response.
     MOZ_DIAGNOSTIC_ASSERT(mResponse->Type() == ResponseType::Opaque);
     FailWithNetworkError(NS_ERROR_UNEXPECTED);
-    return rv;
+    return NS_ERROR_UNEXPECTED;
   }
 
   // From "Main Fetch" step 19: SRI-part1.

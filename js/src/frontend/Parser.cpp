@@ -42,6 +42,7 @@
 #include "frontend/ParseNode.h"
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
+#include "js/RegExpFlags.h"  // JS::RegExpFlags
 #include "vm/BytecodeUtil.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -70,6 +71,7 @@ using mozilla::Utf8Unit;
 
 using JS::AutoGCRooter;
 using JS::ReadOnlyCompileOptions;
+using JS::RegExpFlags;
 
 namespace js {
 namespace frontend {
@@ -4695,7 +4697,7 @@ bool Parser<FullParseHandler, Unit>::checkExportedNamesForObjectBinding(
 
   for (ParseNode* node : obj->contents()) {
     MOZ_ASSERT(node->isKind(ParseNodeKind::MutateProto) ||
-               node->isKind(ParseNodeKind::Colon) ||
+               node->isKind(ParseNodeKind::PropertyDefinition) ||
                node->isKind(ParseNodeKind::Shorthand) ||
                node->isKind(ParseNodeKind::Spread));
 
@@ -5810,8 +5812,6 @@ bool GeneralParser<ParseHandler, Unit>::forHeadStart(
         return false;
       }
     }
-
-    handler_.adjustGetToSet(*forInitialPart);
   } else if (handler_.isPropertyAccess(*forInitialPart)) {
     // Permitted: no additional testing/fixup needed.
   } else if (handler_.isFunctionCall(*forInitialPart)) {
@@ -8423,8 +8423,6 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::assignExpr(
         return null();
       }
     }
-
-    handler_.adjustGetToSet(lhs);
   } else if (handler_.isPropertyAccess(lhs)) {
     // Permitted: no additional testing/fixup needed.
   } else if (handler_.isFunctionCall(lhs)) {
@@ -8837,13 +8835,9 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
         return null();
       }
 
-      lhs = handler_.newNewExpression(newBegin, ctorExpr, args);
+      lhs = handler_.newNewExpression(newBegin, ctorExpr, args, isSpread);
       if (!lhs) {
         return null();
-      }
-
-      if (isSpread) {
-        handler_.setOp(lhs, JSOP_SPREADNEW);
       }
     }
   } else if (tt == TokenKind::Super) {
@@ -8947,14 +8941,12 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
           return null();
         }
 
-        nextMember = handler_.newSuperCall(lhs, args);
-        if (!nextMember) {
+        CallNodeType superCall = handler_.newSuperCall(lhs, args, isSpread);
+        if (!superCall) {
           return null();
         }
 
-        if (isSpread) {
-          handler_.setOp(nextMember, JSOP_SPREADSUPERCALL);
-        }
+        nextMember = superCall;
 
         NameNodeType thisName = newThisName();
         if (!thisName) {
@@ -9033,7 +9025,7 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             }
           }
 
-          nextMember = handler_.newCall(lhs, args);
+          nextMember = handler_.newCall(lhs, args, op);
           if (!nextMember) {
             return null();
           }
@@ -9047,12 +9039,11 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             return null();
           }
 
-          nextMember = handler_.newTaggedTemplate(lhs, args);
+          nextMember = handler_.newTaggedTemplate(lhs, args, op);
           if (!nextMember) {
             return null();
           }
         }
-        handler_.setOp(nextMember, op);
       }
     } else {
       anyChars.ungetToken();
@@ -9268,7 +9259,7 @@ RegExpLiteral* Parser<FullParseHandler, Unit>::newRegExp() {
 
   // Create the regexp and check its syntax.
   const auto& chars = tokenStream.getCharBuffer();
-  RegExpFlag flags = anyChars.currentToken().regExpFlags();
+  RegExpFlags flags = anyChars.currentToken().regExpFlags();
 
   Rooted<RegExpObject*> reobj(cx_);
   reobj = RegExpObject::create(cx_, chars.begin(), chars.length(), flags,
@@ -9287,13 +9278,13 @@ Parser<SyntaxParseHandler, Unit>::newRegExp() {
 
   // Only check the regexp's syntax, but don't create a regexp object.
   const auto& chars = tokenStream.getCharBuffer();
-  RegExpFlag flags = anyChars.currentToken().regExpFlags();
+  RegExpFlags flags = anyChars.currentToken().regExpFlags();
 
   mozilla::Range<const char16_t> source(chars.begin(), chars.length());
   {
     LifoAllocScope scopeAlloc(&alloc_);
     if (!js::irregexp::ParsePatternSyntax(anyChars, scopeAlloc.alloc(), source,
-                                          flags & UnicodeFlag)) {
+                                          flags.unicode())) {
       return null();
     }
   }

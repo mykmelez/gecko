@@ -220,14 +220,14 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // can limit the path.  E.g., "example.com/foo" means "example.com/foo*".  So,
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
-pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "");
+pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys", "www.icloud.com");
 
 // Blacklist of domains of web apps which handle keyCode and charCode of
 // keypress events with a path only for Firefox (i.e., broken if we set
 // non-zero keyCode or charCode value to the other).  The format is exactly
 // same as "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys". So,
 // check its explanation for the detail.
-pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "");
+pref("dom.keyboardevent.keypress.hack.use_legacy_keycode_and_charcode", "*.collabserv.com,*.gov.online.office365.us,*.officeapps-df.live.com,*.officeapps.live.com,*.online.office.de,*.partner.officewebapps.cn,*.scniris.com");
 
 // Whether InputEvent.data is enabled.
 pref("dom.inputevent.data.enabled", true);
@@ -427,6 +427,7 @@ pref("media.decoder-doctor.verbose", false);
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
 #ifdef MOZ_WEBRTC
+pref("media.navigator.enabled", true);
 pref("media.navigator.video.enabled", true);
 pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.use_remb", true);
@@ -444,6 +445,11 @@ pref("media.peerconnection.sdp.rust.enabled", false);
 pref("media.peerconnection.sdp.rust.compare", false);
 #endif
 
+pref("media.videocontrols.picture-in-picture.enabled", false);
+pref("media.videocontrols.picture-in-picture.video-toggle.enabled", false);
+pref("media.videocontrols.picture-in-picture.video-toggle.flyout-enabled", false);
+pref("media.videocontrols.picture-in-picture.video-toggle.flyout-wait-ms", 5000);
+
 pref("media.webrtc.debug.trace_mask", 0);
 pref("media.webrtc.debug.multi_log", false);
 pref("media.webrtc.debug.log_file", "");
@@ -451,6 +457,7 @@ pref("media.webrtc.debug.aec_dump_max_size", 4194304); // 4MB
 
 pref("media.navigator.video.default_width",0);  // adaptive default
 pref("media.navigator.video.default_height",0); // adaptive default
+pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 12288); // Enough for 2048x1536
 pref("media.navigator.video.max_fr", 60);
@@ -524,19 +531,8 @@ pref("media.getusermedia.aec_extended_filter", true);
 pref("media.getusermedia.noise", 1); // kModerate
 pref("media.getusermedia.agc_enabled", true);
 pref("media.getusermedia.agc", 1); // kAdaptiveDigital
-// capture_delay: Adjustments for OS-specific input delay (lower bound)
-// playout_delay: Adjustments for OS-specific AudioStream+cubeb+output delay (lower bound)
 // full_duplex: enable cubeb full-duplex capture/playback
 pref("media.navigator.audio.full_duplex", true);
-#if defined(XP_MACOSX)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(XP_WIN)
-pref("media.peerconnection.capture_delay", 50);
-#elif defined(ANDROID)
-pref("media.peerconnection.capture_delay", 100);
-#else
-pref("media.peerconnection.capture_delay", 70);
-#endif
 #endif
 
 pref("dom.webaudio.enabled", true);
@@ -645,7 +641,7 @@ pref("media.video_stats.enabled", true);
 pref("media.cubeb.logging_level", "");
 
 // Cubeb sandbox (remoting) control
-#ifdef XP_LINUX
+#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
 pref("media.cubeb.sandbox", true);
 pref("media.audioipc.pool_size", 2);
 // 64 * 4 kB stack per pool thread.
@@ -661,7 +657,7 @@ pref("media.av1.use-dav1d", true);
 #elif defined(XP_MACOSX)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
-#elif defined(XP_UNIX)
+#elif defined(XP_UNIX) && !defined(MOZ_WIDGET_ANDROID)
 pref("media.av1.enabled", true);
 pref("media.av1.use-dav1d", true);
 #else
@@ -972,14 +968,7 @@ pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.dl.dump-parent", false);
 pref("gfx.webrender.dl.dump-content", false);
 pref("gfx.webrender.picture-caching", true);
-
-#ifdef NIGHTLY_BUILD
-pref("performance.adjust_to_machine", true);
-#else
-pref("performance.adjust_to_machine", false);
-#endif
-
-pref("performance.low_end_machine", false);
+pref("gfx.webrender.split-render-roots", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -1116,6 +1105,8 @@ pref("toolkit.asyncshutdown.crash_timeout", 180000); // 3 minutes
 #endif // MOZ_ASAN
 // Extra logging for AsyncShutdown barriers and phases
 pref("toolkit.asyncshutdown.log", false);
+
+pref("toolkit.content-background-hang-monitor.disabled", false);
 
 // Enable JS dump() function.
 // IMPORTANT: Keep this in condition in sync with StaticPrefList.h. The value
@@ -1425,8 +1416,10 @@ pref("privacy.popups.maxReported", 100);
 // send "do not track" HTTP header, disabled by default
 pref("privacy.donottrackheader.enabled",    false);
 // Enforce tracking protection in all modes
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 pref("privacy.trackingprotection.enabled",  false);
 // Enforce tracking protection in Private Browsing mode
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 pref("privacy.trackingprotection.pbmode.enabled",  true);
 // First Party Isolation (double keying), disabled by default
 pref("privacy.firstparty.isolate",                        false);
@@ -1453,7 +1446,6 @@ pref("privacy.resistFingerprinting.reduceTimerPrecision.microseconds", 1000);
 pref("privacy.resistFingerprinting.reduceTimerPrecision.jitter", true);
 
 pref("dom.event.contextmenu.enabled",       true);
-pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.coalesce_mouse_move",       true);
 
 pref("javascript.enabled",                  true);
@@ -1468,6 +1460,7 @@ pref("javascript.options.baselinejit.threshold", 10);
 pref("javascript.options.ion",              true);
 //Duplicated in JitOptions - ensure both match.
 pref("javascript.options.ion.threshold",    1000);
+pref("javascript.options.ion.full.threshold", 100000);
 //Duplicated in JitOptions - ensure both match.
 pref("javascript.options.ion.frequent_bailout_threshold", 10);
 pref("javascript.options.asmjs",            true);
@@ -1599,9 +1592,15 @@ pref("javascript.options.spectre.jit_to_C++_calls", true);
 pref("javascript.options.streams", true);
 
 // BigInt API
+#ifdef NIGHTLY_BUILD
+pref("javascript.options.bigint", true);
+#else
 pref("javascript.options.bigint", false);
+#endif
 
 pref("javascript.options.experimental.fields", false);
+
+pref("javascript.options.experimental.await_fix", false);
 
 // Dynamic module import.
 pref("javascript.options.dynamicImport", true);
@@ -1766,7 +1765,12 @@ pref("network.http.referer.defaultPolicy", 3);
 // default cookie policy is set to reject third-party trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
+#ifdef NIGHTLY_BUILD
+// On Nightly, trim referrers from trackers to origins.
+pref("network.http.referer.defaultPolicy.trackers", 2);
+#else
 pref("network.http.referer.defaultPolicy.trackers", 3);
+#endif
 // Set the Private Browsing Default Referrer Policy;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
@@ -1776,6 +1780,8 @@ pref("network.http.referer.defaultPolicy.pbmode", 2);
 // trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
+// No need to change this pref for Nightly only since in private windows we
+// already trim all referrers to origin only.
 pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
 // false=real referer, true=spoof referer (use target URI as referer)
 pref("network.http.referer.spoofSource", false);
@@ -2695,7 +2701,7 @@ pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
 // assertion flag will be set to false after fixing Bug 1473549
 pref("security.allow_eval_with_system_principal", false);
-pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,content-task.js,tree.xml,dialog.xml,preferencesbindings.js,wizard.xml,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,updates.js,setup,jsol.js,parent_utils.js,chrometask_chromescript");
+pref("security.uris_using_eval_with_system_principal", "autocomplete.xml,redux.js,react-redux.js,content-task.js,content-task.js,tree.xml,preferencesbindings.js,lodash.js,jszip.js,sinon-7.2.7.js,ajv-4.1.1.js,updates.js,setup,jsol.js,parent_utils.js,chrometask_chromescript");
 #endif
 
 // Default Content Security Policy to apply to signed contents.
@@ -3204,7 +3210,8 @@ pref("layout.display-list.dump-parent", false);
 pref("layout.display-list.retain", true);
 pref("layout.display-list.retain.chrome", false);
 #else
-pref("layout.display-list.retain", false);
+pref("layout.display-list.retain", true);
+pref("layout.display-list.retain.chrome", true);
 #endif
 
 // Set the maximum amount of modified frames allowed before doing a full
@@ -3441,149 +3448,149 @@ pref("svg.context-properties.content.enabled", false);
 pref("font.default.ar", "sans-serif");
 pref("font.minimum-size.ar", 0);
 pref("font.size.variable.ar", 16);
-pref("font.size.fixed.ar", 13);
+pref("font.size.monospace.ar", 13);
 
 pref("font.default.el", "serif");
 pref("font.minimum-size.el", 0);
 pref("font.size.variable.el", 16);
-pref("font.size.fixed.el", 13);
+pref("font.size.monospace.el", 13);
 
 pref("font.default.he", "sans-serif");
 pref("font.minimum-size.he", 0);
 pref("font.size.variable.he", 16);
-pref("font.size.fixed.he", 13);
+pref("font.size.monospace.he", 13);
 
 pref("font.default.ja", "sans-serif");
 pref("font.minimum-size.ja", 0);
 pref("font.size.variable.ja", 16);
-pref("font.size.fixed.ja", 16);
+pref("font.size.monospace.ja", 16);
 
 pref("font.default.ko", "sans-serif");
 pref("font.minimum-size.ko", 0);
 pref("font.size.variable.ko", 16);
-pref("font.size.fixed.ko", 16);
+pref("font.size.monospace.ko", 16);
 
 pref("font.default.th", "sans-serif");
 pref("font.minimum-size.th", 0);
 pref("font.size.variable.th", 16);
-pref("font.size.fixed.th", 13);
+pref("font.size.monospace.th", 13);
 
 pref("font.default.x-cyrillic", "serif");
 pref("font.minimum-size.x-cyrillic", 0);
 pref("font.size.variable.x-cyrillic", 16);
-pref("font.size.fixed.x-cyrillic", 13);
+pref("font.size.monospace.x-cyrillic", 13);
 
 pref("font.default.x-devanagari", "serif");
 pref("font.minimum-size.x-devanagari", 0);
 pref("font.size.variable.x-devanagari", 16);
-pref("font.size.fixed.x-devanagari", 13);
+pref("font.size.monospace.x-devanagari", 13);
 
 pref("font.default.x-tamil", "serif");
 pref("font.minimum-size.x-tamil", 0);
 pref("font.size.variable.x-tamil", 16);
-pref("font.size.fixed.x-tamil", 13);
+pref("font.size.monospace.x-tamil", 13);
 
 pref("font.default.x-armn", "serif");
 pref("font.minimum-size.x-armn", 0);
 pref("font.size.variable.x-armn", 16);
-pref("font.size.fixed.x-armn", 13);
+pref("font.size.monospace.x-armn", 13);
 
 pref("font.default.x-beng", "serif");
 pref("font.minimum-size.x-beng", 0);
 pref("font.size.variable.x-beng", 16);
-pref("font.size.fixed.x-beng", 13);
+pref("font.size.monospace.x-beng", 13);
 
 pref("font.default.x-cans", "serif");
 pref("font.minimum-size.x-cans", 0);
 pref("font.size.variable.x-cans", 16);
-pref("font.size.fixed.x-cans", 13);
+pref("font.size.monospace.x-cans", 13);
 
 pref("font.default.x-ethi", "serif");
 pref("font.minimum-size.x-ethi", 0);
 pref("font.size.variable.x-ethi", 16);
-pref("font.size.fixed.x-ethi", 13);
+pref("font.size.monospace.x-ethi", 13);
 
 pref("font.default.x-geor", "serif");
 pref("font.minimum-size.x-geor", 0);
 pref("font.size.variable.x-geor", 16);
-pref("font.size.fixed.x-geor", 13);
+pref("font.size.monospace.x-geor", 13);
 
 pref("font.default.x-gujr", "serif");
 pref("font.minimum-size.x-gujr", 0);
 pref("font.size.variable.x-gujr", 16);
-pref("font.size.fixed.x-gujr", 13);
+pref("font.size.monospace.x-gujr", 13);
 
 pref("font.default.x-guru", "serif");
 pref("font.minimum-size.x-guru", 0);
 pref("font.size.variable.x-guru", 16);
-pref("font.size.fixed.x-guru", 13);
+pref("font.size.monospace.x-guru", 13);
 
 pref("font.default.x-khmr", "serif");
 pref("font.minimum-size.x-khmr", 0);
 pref("font.size.variable.x-khmr", 16);
-pref("font.size.fixed.x-khmr", 13);
+pref("font.size.monospace.x-khmr", 13);
 
 pref("font.default.x-mlym", "serif");
 pref("font.minimum-size.x-mlym", 0);
 pref("font.size.variable.x-mlym", 16);
-pref("font.size.fixed.x-mlym", 13);
+pref("font.size.monospace.x-mlym", 13);
 
 pref("font.default.x-orya", "serif");
 pref("font.minimum-size.x-orya", 0);
 pref("font.size.variable.x-orya", 16);
-pref("font.size.fixed.x-orya", 13);
+pref("font.size.monospace.x-orya", 13);
 
 pref("font.default.x-telu", "serif");
 pref("font.minimum-size.x-telu", 0);
 pref("font.size.variable.x-telu", 16);
-pref("font.size.fixed.x-telu", 13);
+pref("font.size.monospace.x-telu", 13);
 
 pref("font.default.x-knda", "serif");
 pref("font.minimum-size.x-knda", 0);
 pref("font.size.variable.x-knda", 16);
-pref("font.size.fixed.x-knda", 13);
+pref("font.size.monospace.x-knda", 13);
 
 pref("font.default.x-sinh", "serif");
 pref("font.minimum-size.x-sinh", 0);
 pref("font.size.variable.x-sinh", 16);
-pref("font.size.fixed.x-sinh", 13);
+pref("font.size.monospace.x-sinh", 13);
 
 pref("font.default.x-tibt", "serif");
 pref("font.minimum-size.x-tibt", 0);
 pref("font.size.variable.x-tibt", 16);
-pref("font.size.fixed.x-tibt", 13);
+pref("font.size.monospace.x-tibt", 13);
 
 pref("font.default.x-unicode", "serif");
 pref("font.minimum-size.x-unicode", 0);
 pref("font.size.variable.x-unicode", 16);
-pref("font.size.fixed.x-unicode", 13);
+pref("font.size.monospace.x-unicode", 13);
 
 pref("font.default.x-western", "serif");
 pref("font.minimum-size.x-western", 0);
 pref("font.size.variable.x-western", 16);
-pref("font.size.fixed.x-western", 13);
+pref("font.size.monospace.x-western", 13);
 
 pref("font.default.zh-CN", "sans-serif");
 pref("font.minimum-size.zh-CN", 0);
 pref("font.size.variable.zh-CN", 16);
-pref("font.size.fixed.zh-CN", 16);
+pref("font.size.monospace.zh-CN", 16);
 
 pref("font.default.zh-HK", "sans-serif");
 pref("font.minimum-size.zh-HK", 0);
 pref("font.size.variable.zh-HK", 16);
-pref("font.size.fixed.zh-HK", 16);
+pref("font.size.monospace.zh-HK", 16);
 
 pref("font.default.zh-TW", "sans-serif");
 pref("font.minimum-size.zh-TW", 0);
 pref("font.size.variable.zh-TW", 16);
-pref("font.size.fixed.zh-TW", 16);
+pref("font.size.monospace.zh-TW", 16);
 
 // mathml.css sets font-size to "inherit" and font-family to "serif" so only
 // font.name.*.x-math and font.minimum-size.x-math are really relevant.
 pref("font.default.x-math", "serif");
 pref("font.minimum-size.x-math", 0);
 pref("font.size.variable.x-math", 16);
-pref("font.size.fixed.x-math", 13);
+pref("font.size.monospace.x-math", 13);
 
 /*
  * A value greater than zero enables font size inflation for
@@ -4421,19 +4428,19 @@ pref("font.name-list.serif.ar", "serif");
 pref("font.name-list.sans-serif.ar", "sans-serif");
 pref("font.name-list.monospace.ar", "monospace");
 pref("font.name-list.cursive.ar", "cursive");
-pref("font.size.fixed.ar", 12);
+pref("font.size.monospace.ar", 12);
 
 pref("font.name-list.serif.el", "serif");
 pref("font.name-list.sans-serif.el", "sans-serif");
 pref("font.name-list.monospace.el", "monospace");
 pref("font.name-list.cursive.el", "cursive");
-pref("font.size.fixed.el", 12);
+pref("font.size.monospace.el", 12);
 
 pref("font.name-list.serif.he", "serif");
 pref("font.name-list.sans-serif.he", "sans-serif");
 pref("font.name-list.monospace.he", "monospace");
 pref("font.name-list.cursive.he", "cursive");
-pref("font.size.fixed.he", 12);
+pref("font.size.monospace.he", 12);
 
 pref("font.name-list.serif.ja", "serif");
 pref("font.name-list.sans-serif.ja", "sans-serif");
@@ -4470,7 +4477,7 @@ pref("font.name-list.serif.x-cyrillic", "serif");
 pref("font.name-list.sans-serif.x-cyrillic", "sans-serif");
 pref("font.name-list.monospace.x-cyrillic", "monospace");
 pref("font.name-list.cursive.x-cyrillic", "cursive");
-pref("font.size.fixed.x-cyrillic", 12);
+pref("font.size.monospace.x-cyrillic", 12);
 
 pref("font.name-list.serif.x-devanagari", "serif");
 pref("font.name-list.sans-serif.x-devanagari", "sans-serif");
@@ -4541,13 +4548,13 @@ pref("font.name-list.serif.x-unicode", "serif");
 pref("font.name-list.sans-serif.x-unicode", "sans-serif");
 pref("font.name-list.monospace.x-unicode", "monospace");
 pref("font.name-list.cursive.x-unicode", "cursive");
-pref("font.size.fixed.x-unicode", 12);
+pref("font.size.monospace.x-unicode", 12);
 
 pref("font.name-list.serif.x-western", "serif");
 pref("font.name-list.sans-serif.x-western", "sans-serif");
 pref("font.name-list.monospace.x-western", "monospace");
 pref("font.name-list.cursive.x-western", "cursive");
-pref("font.size.fixed.x-western", 12);
+pref("font.size.monospace.x-western", 12);
 
 pref("font.name-list.serif.zh-CN", "serif");
 pref("font.name-list.sans-serif.zh-CN", "sans-serif");
@@ -4601,21 +4608,21 @@ pref("gfx.font_rendering.fontconfig.max_generic_substitutions", 3);
 
 #if defined(ANDROID)
 
-pref("font.size.fixed.ar", 12);
+pref("font.size.monospace.ar", 12);
 
 pref("font.default.el", "sans-serif");
-pref("font.size.fixed.el", 12);
+pref("font.size.monospace.el", 12);
 
-pref("font.size.fixed.he", 12);
+pref("font.size.monospace.he", 12);
 
 pref("font.default.x-cyrillic", "sans-serif");
-pref("font.size.fixed.x-cyrillic", 12);
+pref("font.size.monospace.x-cyrillic", 12);
 
 pref("font.default.x-unicode", "sans-serif");
-pref("font.size.fixed.x-unicode", 12);
+pref("font.size.monospace.x-unicode", 12);
 
 pref("font.default.x-western", "sans-serif");
-pref("font.size.fixed.x-western", 12);
+pref("font.size.monospace.x-western", 12);
 
 # ANDROID
 #endif
@@ -5189,7 +5196,7 @@ pref("extensions.webextensions.keepStorageOnUninstall", false);
 pref("extensions.webextensions.keepUuidOnUninstall", false);
 // Redirect basedomain used by identity api
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
-pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,input.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
+pref("extensions.webextensions.restrictedDomains", "accounts-static.cdn.mozilla.net,accounts.firefox.com,addons.cdn.mozilla.net,addons.mozilla.org,api.accounts.firefox.com,content.cdn.mozilla.net,discovery.addons.mozilla.org,install.mozilla.org,oauth.accounts.firefox.com,profile.accounts.firefox.com,support.mozilla.org,sync.services.mozilla.com");
 // Whether or not webextension icon theming is supported.
 pref("extensions.webextensions.themes.icons.enabled", false);
 pref("extensions.webextensions.remote", false);
@@ -5579,7 +5586,7 @@ pref("network.trr.custom_uri", "");
 // On Android, the captive portal is handled by the OS itself
 pref("network.trr.wait-for-portal", false);
 #else
-pref("network.trr.wait-for-portal", true);
+pref("network.trr.wait-for-portal", false);
 #endif
 // Allow RFC1918 address in responses?
 pref("network.trr.allow-rfc1918", false);
@@ -5602,6 +5609,8 @@ pref("network.trr.early-AAAA", false);
 pref("network.trr.disable-ECS", true);
 // After this many failed TRR requests in a row, consider TRR borked
 pref("network.trr.max-fails", 5);
+// Comma separated list of domains that we should not use TRR for
+pref("network.trr.excluded-domains", "localhost,local");
 
 pref("captivedetect.canonicalURL", "http://detectportal.firefox.com/success.txt");
 pref("captivedetect.canonicalContent", "success\n");
@@ -5636,12 +5645,7 @@ pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");
 
 // Tables for anti-tracking features
-#ifdef EARLY_BETA_OR_EARLIER
-// Use the strict list for the default cookie restrictions in Nightly and early betas
-pref("urlclassifier.trackingAnnotationTable", "test-track-simple,base-track-digest256,content-track-digest256");
-#else
-pref("urlclassifier.trackingAnnotationTable", "test-track-simple,base-track-digest256");
-#endif
+pref("urlclassifier.trackingAnnotationTable", "test-track-simple,ads-track-digest256,social-track-digest256,analytics-track-digest256,content-track-digest256");
 pref("urlclassifier.trackingAnnotationWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 pref("urlclassifier.trackingTable", "test-track-simple,base-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
@@ -5976,8 +5980,10 @@ pref("browser.sanitizer.loglevel", "Warn");
 // When a user cancels this number of authentication dialogs coming from
 // a single web page in a row, all following authentication dialogs will
 // be blocked (automatically canceled) for that page. The counter resets
-// when the page is reloaded. To turn this feature off, just set the limit to 0.
-pref("prompts.authentication_dialog_abuse_limit", 3);
+// when the page is reloaded.
+// To disable all auth prompting, set the limit to 0.
+// To disable blocking of auth prompts, set the limit to -1.
+pref("prompts.authentication_dialog_abuse_limit", 2);
 
 pref("dom.IntersectionObserver.enabled", true);
 
@@ -6067,8 +6073,8 @@ pref("dom.datatransfer.mozAtAPIs", false);
 pref("dom.datatransfer.mozAtAPIs", true);
 #endif
 
-// Whether or not Prio is supported on this platform.
-pref("prio.enabled", false);
+// Whether or not the Prio Ping is supported on this platform.
+pref("toolkit.telemetry.prioping.enabled", false);
 
 // External.AddSearchProvider is deprecated and it will be removed in the next
 // cycles.

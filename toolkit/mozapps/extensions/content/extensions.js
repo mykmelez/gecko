@@ -783,14 +783,15 @@ var gViewController = {
 
     this.viewObjects.discover = gDiscoverView;
     this.viewObjects.legacy = gLegacyView;
-    this.viewObjects.detail = gDetailView;
     this.viewObjects.updates = gUpdatesView;
     this.viewObjects.shortcuts = gShortcutsView;
 
     if (useHtmlViews) {
       this.viewObjects.list = htmlView("list");
+      this.viewObjects.detail = htmlView("detail");
     } else {
       this.viewObjects.list = gListView;
+      this.viewObjects.detail = gDetailView;
     }
 
     for (let type in this.viewObjects) {
@@ -1272,9 +1273,11 @@ var gViewController = {
         if (aAddon.isWebExtension && !aAddon.seen && WEBEXT_PERMISSION_PROMPTS) {
           let perms = aAddon.userPermissions;
           if (perms.origins.length > 0 || perms.permissions.length > 0) {
+            const target = getBrowserElement();
+
             let subject = {
               wrappedJSObject: {
-                target: getBrowserElement(),
+                target,
                 info: {
                   type: "sideload",
                   addon: aAddon,
@@ -1282,7 +1285,16 @@ var gViewController = {
                   permissions: perms,
                   resolve() {
                     aAddon.markAsSeen();
-                    aAddon.enable();
+                    aAddon.enable().then(() => {
+                      // The user has just enabled a sideloaded extension, if the permission
+                      // can be changed for the extension, show the post-install panel to
+                      // give the user that opportunity.
+                      if (aAddon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS) {
+                        Services.obs.notifyObservers({
+                          addon: aAddon, target,
+                        }, "webextension-install-notify");
+                      }
+                    });
                   },
                   reject() {},
                 },
@@ -1567,6 +1579,17 @@ var gViewController = {
 
   onEvent() {},
 };
+
+async function isAddonAllowedInCurrentWindow(aAddon) {
+  if (allowPrivateBrowsingByDefault ||
+      aAddon.type !== "extension" ||
+      !PrivateBrowsingUtils.isContentWindowPrivate(window)) {
+    return true;
+  }
+
+  const perms = await ExtensionPermissions.get(aAddon.id);
+  return perms.permissions.includes("internal:privateBrowsingAllowed");
+}
 
 function hasInlineOptions(aAddon) {
   return aAddon.optionsType == AddonManager.OPTIONS_TYPE_INLINE_BROWSER ||
@@ -2787,8 +2810,9 @@ var gDetailView = {
       recordSetAddonUpdateTelemetry(this._addon);
     }, true);
 
-    document.getElementById("detail-private-browsing-learnmore-link")
-            .setAttribute("href", SUPPORT_URL + "extensions-pb");
+    for (let el of document.getElementsByClassName("private-learnmore")) {
+      el.setAttribute("href", SUPPORT_URL + "extensions-pb");
+    }
 
     this._privateBrowsing = document.getElementById("detail-privateBrowsing");
     this._privateBrowsing.addEventListener("command", async () => {
@@ -2977,23 +3001,35 @@ var gDetailView = {
     // no code that would be affected by the setting.  The permission is read directly
     // from ExtensionPermissions so we can get it whether or not the extension is
     // currently active.
-    let privateBrowsingRow = document.getElementById("detail-privateBrowsing-row");
-    let privateBrowsingFooterRow = document.getElementById("detail-privateBrowsing-row-footer");
-    if (allowPrivateBrowsingByDefault || aAddon.type != "extension" ||
-        aAddon.incognito == "not_allowed") {
-      this._privateBrowsing.hidden = true;
-      privateBrowsingRow.hidden = true;
-      privateBrowsingFooterRow.hidden = true;
-    } else {
-      let perms = await ExtensionPermissions.get(aAddon.id);
-      this._privateBrowsing.hidden = false;
-      privateBrowsingRow.hidden = false;
-      privateBrowsingFooterRow.hidden = false;
-      this._privateBrowsing.value = perms.permissions.includes("internal:privateBrowsingAllowed") ? "1" : "0";
+    // Ensure that all private browsing rows are hidden by default, we'll then
+    // unhide what we want.
+    for (let el of document.getElementsByClassName("detail-privateBrowsing")) {
+      el.hidden = true;
+    }
+    if (!allowPrivateBrowsingByDefault && aAddon.type === "extension") {
+      if (aAddon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS) {
+        let privateBrowsingRow = document.getElementById("detail-privateBrowsing-row");
+        let privateBrowsingFooterRow = document.getElementById("detail-privateBrowsing-row-footer");
+        let perms = await ExtensionPermissions.get(aAddon.id);
+        this._privateBrowsing.hidden = false;
+        privateBrowsingRow.hidden = false;
+        privateBrowsingFooterRow.hidden = false;
+        this._privateBrowsing.value = perms.permissions.includes("internal:privateBrowsingAllowed") ? "1" : "0";
+      } else if (aAddon.incognito == "spanning") {
+        document.getElementById("detail-privateBrowsing-required").hidden = false;
+        document.getElementById("detail-privateBrowsing-required-footer").hidden = false;
+      } else if (aAddon.incognito == "not_allowed") {
+        document.getElementById("detail-privateBrowsing-disallowed").hidden = false;
+        document.getElementById("detail-privateBrowsing-disallowed-footer").hidden = false;
+      }
     }
 
-    document.getElementById("detail-prefs-btn").hidden = !aIsRemote &&
-      !gViewController.commands.cmd_showItemPreferences.isEnabled(aAddon);
+    // While updating the addon details view, also check if the preferences button should be disabled because
+    // we are in a private window and the addon is not allowed to access it.
+    let hidePreferences = (!aIsRemote &&
+      !gViewController.commands.cmd_showItemPreferences.isEnabled(aAddon)) ||
+      !await isAddonAllowedInCurrentWindow(aAddon);
+    document.getElementById("detail-prefs-btn").hidden = hidePreferences;
 
     var gridRows = document.querySelectorAll("#detail-grid rows row");
     let first = true;
@@ -3272,6 +3308,12 @@ var gDetailView = {
       whenViewLoaded(async () => {
         const addon = this._addon;
         await addon.startupPromise;
+
+        // Do not create the inline addon options if about:addons is opened in a private window
+        // and the addon is not allowed to access it.
+        if (!await isAddonAllowedInCurrentWindow(addon)) {
+          return;
+        }
 
         const browserContainer = await this.createOptionsBrowser(rows);
 
@@ -3843,6 +3885,16 @@ var gBrowser = {
   }, true);
 }
 
+const htmlViewOpts = {
+  loadViewFn(type, param) {
+    let viewId = `addons://${type}`;
+    if (param) {
+      viewId += "/" + encodeURIComponent(param);
+    }
+    gViewController.loadView(viewId);
+  },
+};
+
 // View wrappers for the HTML version of about:addons. These delegate to an
 // HTML browser that renders the actual views.
 let htmlBrowser;
@@ -3855,7 +3907,7 @@ function getHtmlBrowser() {
     });
     htmlBrowserLoaded = new Promise(
       resolve => htmlBrowser.addEventListener("load", resolve, {once: true})
-    ).then(() => htmlBrowser.contentWindow.initialize());
+    ).then(() => htmlBrowser.contentWindow.initialize(htmlViewOpts));
   }
   return htmlBrowser;
 }
@@ -3863,7 +3915,7 @@ function getHtmlBrowser() {
 function htmlView(type) {
   return {
     node: null,
-    isRoot: true,
+    isRoot: type != "detail",
 
     initialize() {
       this.node = getHtmlBrowser();

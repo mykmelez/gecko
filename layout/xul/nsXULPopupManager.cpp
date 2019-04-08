@@ -32,6 +32,7 @@
 #include "nsIObserverService.h"
 #include "XULDocument.h"
 #include "mozilla/AnimationUtils.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"  // for Event
 #include "mozilla/dom/KeyboardEvent.h"
@@ -42,6 +43,7 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Services.h"
 #include "mozilla/widget/nsAutoRollup.h"
 
@@ -537,8 +539,10 @@ nsMenuPopupFrame* nsXULPopupManager::GetPopupFrameForContent(
   if (aShouldFlush) {
     Document* document = aContent->GetUncomposedDoc();
     if (document) {
-      nsCOMPtr<nsIPresShell> presShell = document->GetShell();
-      if (presShell) presShell->FlushPendingNotifications(FlushType::Layout);
+      RefPtr<PresShell> presShell = document->GetPresShell();
+      if (presShell) {
+        presShell->FlushPendingNotifications(FlushType::Layout);
+      }
     }
   }
 
@@ -593,7 +597,7 @@ void nsXULPopupManager::InitTriggerEvent(Event* aEvent, nsIContent* aPopup,
       }
       Document* doc = aPopup->GetUncomposedDoc();
       if (doc) {
-        nsIPresShell* presShell = doc->GetShell();
+        PresShell* presShell = doc->GetPresShell();
         nsPresContext* presContext;
         if (presShell && (presContext = presShell->GetPresContext())) {
           nsPresContext* rootDocPresContext = presContext->GetRootPresContext();
@@ -783,8 +787,10 @@ static void CheckCaretDrawingState() {
     nsCOMPtr<Document> focusedDoc = piWindow->GetDoc();
     if (!focusedDoc) return;
 
-    nsIPresShell* presShell = focusedDoc->GetShell();
-    if (!presShell) return;
+    PresShell* presShell = focusedDoc->GetPresShell();
+    if (!presShell) {
+      return;
+    }
 
     RefPtr<nsCaret> caret = presShell->GetCaret();
     if (!caret) return;
@@ -1287,7 +1293,7 @@ void nsXULPopupManager::FirePopupShowingEvent(nsIContent* aPopup,
   if (!popupFrame) return;
 
   nsPresContext* presContext = popupFrame->PresContext();
-  nsCOMPtr<nsIPresShell> presShell = presContext->PresShell();
+  RefPtr<PresShell> presShell = presContext->PresShell();
   presShell->FrameNeedsReflow(popupFrame, nsIPresShell::eTreeChange,
                               NS_FRAME_HAS_DIRTY_CHILDREN);
 
@@ -1387,7 +1393,7 @@ void nsXULPopupManager::FirePopupHidingEvent(
     nsIContent* aPopup, nsIContent* aNextPopup, nsIContent* aLastPopup,
     nsPresContext* aPresContext, nsPopupType aPopupType, bool aDeselectMenu,
     bool aIsCancel) {
-  nsCOMPtr<nsIPresShell> presShell = aPresContext->PresShell();
+  RefPtr<PresShell> presShell = aPresContext->PresShell();
   mozilla::Unused << presShell;  // This presShell may be keeping things alive
                                  // on non GTK platforms
 
@@ -2656,17 +2662,17 @@ nsXULMenuCommandEvent::Run() {
     }
 
     nsPresContext* presContext = menuFrame->PresContext();
-    nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
-    RefPtr<nsViewManager> kungFuDeathGrip = shell->GetViewManager();
+    RefPtr<PresShell> presShell = presContext->PresShell();
+    RefPtr<nsViewManager> kungFuDeathGrip = presShell->GetViewManager();
     mozilla::Unused
         << kungFuDeathGrip;  // Not referred to directly within this function
 
     // Deselect ourselves.
     if (mCloseMenuMode != CloseMenuMode_None) menuFrame->SelectMenu(false);
 
-    AutoHandlingUserInputStatePusher userInpStatePusher(mUserInput, nullptr,
-                                                        shell->GetDocument());
-    nsContentUtils::DispatchXULCommand(mMenu, mIsTrusted, nullptr, shell,
+    AutoHandlingUserInputStatePusher userInpStatePusher(
+        mUserInput, nullptr, presShell->GetDocument());
+    nsContentUtils::DispatchXULCommand(mMenu, mIsTrusted, nullptr, presShell,
                                        mControl, mAlt, mShift, mMeta);
   }
 

@@ -1012,7 +1012,8 @@ function MockAddon(aId, aName, aType, aOperationsRequiringRestart) {
   this._permissions = AddonManager.PERM_CAN_UNINSTALL |
                       AddonManager.PERM_CAN_ENABLE |
                       AddonManager.PERM_CAN_DISABLE |
-                      AddonManager.PERM_CAN_UPGRADE;
+                      AddonManager.PERM_CAN_UPGRADE |
+                      AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS;
   this.operationsRequiringRestart = (aOperationsRequiringRestart != undefined) ?
     aOperationsRequiringRestart :
     (AddonManager.OP_NEEDS_RESTART_INSTALL |
@@ -1399,12 +1400,12 @@ function promisePopupNotificationShown(name = "addon-webext-permissions") {
   });
 }
 
-function waitAppMenuNotificationShown(id, type, accept = false, win = window) {
+function waitAppMenuNotificationShown(id, addonId, accept = false, win = window) {
   const {AppMenuNotifications} = ChromeUtils.import("resource://gre/modules/AppMenuNotifications.jsm");
   return new Promise(resolve => {
     let {document, PanelUI} = win;
 
-    function popupshown() {
+    async function popupshown() {
       let notification = AppMenuNotifications.activeNotification;
       if (!notification) { return; }
 
@@ -1413,9 +1414,12 @@ function waitAppMenuNotificationShown(id, type, accept = false, win = window) {
 
       PanelUI.notificationPanel.removeEventListener("popupshown", popupshown);
 
-      if (id == "addon-installed" && type) {
-        let hidden = type !== "extension" ||
-                     Services.prefs.getBoolPref("extensions.allowPrivateBrowsingByDefault", true);
+      if (id == "addon-installed" && addonId) {
+        let addon = await AddonManager.getAddonByID(addonId);
+        if (!addon) {
+          ok(false, `Addon with id "${addonId}" not found`);
+        }
+        let hidden = !(addon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS);
         let checkbox = document.getElementById("addon-incognito-checkbox");
         is(checkbox.hidden, hidden, "checkbox visibility is correct");
       }
@@ -1437,13 +1441,13 @@ function waitAppMenuNotificationShown(id, type, accept = false, win = window) {
   });
 }
 
-function acceptAppMenuNotificationWhenShown(id, type) {
-  return waitAppMenuNotificationShown(id, type, true);
+function acceptAppMenuNotificationWhenShown(id, addonId) {
+  return waitAppMenuNotificationShown(id, addonId, true);
 }
 
 function assertTelemetryMatches(events, {filterMethods} = {}) {
   let snapshot = Services.telemetry.snapshotEvents(
-    Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, true);
+    Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS, true);
 
   if (events.length == 0) {
     ok(!snapshot.parent || snapshot.parent.length == 0, "There are no telemetry events");
@@ -1464,6 +1468,25 @@ function assertTelemetryMatches(events, {filterMethods} = {}) {
 }
 
 /* HTML view helpers */
+async function loadInitialView(type) {
+  let managerWindow = await open_manager(null);
+  let categoryUtilities = new CategoryUtilities(managerWindow);
+  await categoryUtilities.openType(type);
+
+  let browser = managerWindow.document.getElementById("html-view-browser");
+  let win = browser.contentWindow;
+  win.managerWindow = managerWindow;
+  return win;
+}
+
+function waitForViewLoad(win) {
+  return wait_for_view_load(win.managerWindow, undefined, true);
+}
+
+function closeView(win) {
+  return close_manager(win.managerWindow);
+}
+
 function mockPromptService() {
   let {prompt} = Services;
   let promptService = {

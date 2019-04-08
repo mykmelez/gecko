@@ -14,7 +14,6 @@ import {
   getTopFrame,
   getBreakpointsList,
   getBreakpointsDisabled,
-  getBreakpointsLoading,
   getExpressions,
   getIsWaitingOnBreak,
   getMapScopes,
@@ -22,7 +21,8 @@ import {
   getShouldPauseOnExceptions,
   getShouldPauseOnCaughtExceptions,
   getWorkers,
-  getCurrentThread
+  getCurrentThread,
+  getThreadContext
 } from "../../selectors";
 
 import AccessibleImage from "../shared/AccessibleImage";
@@ -43,7 +43,7 @@ import Scopes from "./Scopes";
 
 import "./SecondaryPanes.css";
 
-import type { Expression, Frame, WorkerList } from "../../types";
+import type { Expression, Frame, WorkerList, ThreadContext } from "../../types";
 
 type AccordionPaneItem = {
   header: string,
@@ -73,13 +73,13 @@ type State = {
 };
 
 type Props = {
+  cx: ThreadContext,
   expressions: List<Expression>,
   hasFrames: boolean,
   horizontal: boolean,
   breakpoints: Object,
   selectedFrame: ?Frame,
   breakpointsDisabled: boolean,
-  breakpointsLoading: boolean,
   isWaitingOnBreak: boolean,
   shouldMapScopes: boolean,
   shouldPauseOnExceptions: boolean,
@@ -116,10 +116,10 @@ class SecondaryPanes extends Component<Props, State> {
 
   renderBreakpointsToggle() {
     const {
+      cx,
       toggleAllBreakpoints,
       breakpoints,
-      breakpointsDisabled,
-      breakpointsLoading
+      breakpointsDisabled
     } = this.props;
     const isIndeterminate =
       !breakpointsDisabled && breakpoints.some(x => x.disabled);
@@ -134,11 +134,11 @@ class SecondaryPanes extends Component<Props, State> {
         ? L10N.getStr("breakpoints.enable")
         : L10N.getStr("breakpoints.disable"),
       className: "breakpoints-toggle",
-      disabled: breakpointsLoading,
+      disabled: false,
       key: "breakpoints-toggle",
       onChange: e => {
         e.stopPropagation();
-        toggleAllBreakpoints(!breakpointsDisabled);
+        toggleAllBreakpoints(cx, !breakpointsDisabled);
       },
       onClick: e => e.stopPropagation(),
       checked: !breakpointsDisabled && !isIndeterminate,
@@ -165,7 +165,7 @@ class SecondaryPanes extends Component<Props, State> {
         debugBtn(
           evt => {
             evt.stopPropagation();
-            this.props.evaluateExpressions();
+            this.props.evaluateExpressions(this.props.cx);
           },
           "refresh",
           "refresh",
@@ -465,11 +465,11 @@ const mapStateToProps = state => {
   const thread = getCurrentThread(state);
 
   return {
+    cx: getThreadContext(state),
     expressions: getExpressions(state),
     hasFrames: !!getTopFrame(state, thread),
     breakpoints: getBreakpointsList(state),
     breakpointsDisabled: getBreakpointsDisabled(state),
-    breakpointsLoading: getBreakpointsLoading(state),
     isWaitingOnBreak: getIsWaitingOnBreak(state, thread),
     selectedFrame: getSelectedFrame(state, thread),
     shouldMapScopes: getMapScopes(state),

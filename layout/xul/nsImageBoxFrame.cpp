@@ -24,8 +24,8 @@
 #include "nsHTMLParts.h"
 #include "nsString.h"
 #include "nsLeafFrame.h"
-#include "nsIPresShell.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "nsImageMap.h"
 #include "nsILinkHandler.h"
 #include "nsIURL.h"
@@ -50,6 +50,7 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "SVGImageContext.h"
 #include "Units.h"
 #include "mozilla/layers/RenderRootStateManager.h"
@@ -124,6 +125,9 @@ nsIFrame* NS_NewImageBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageBoxFrame)
+NS_QUERYFRAME_HEAD(nsImageBoxFrame)
+  NS_QUERYFRAME_ENTRY(nsImageBoxFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsLeafBoxFrame)
 
 nsresult nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
                                            nsAtom* aAttribute,
@@ -193,6 +197,16 @@ void nsImageBoxFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
   UpdateLoadFlags();
   UpdateImage();
+}
+
+void nsImageBoxFrame::RestartAnimation() { UpdateImage(); }
+
+void nsImageBoxFrame::StopAnimation() {
+  if (mImageRequest && mRequestRegistered) {
+    nsLayoutUtils::DeregisterImageRequest(PresContext(), mImageRequest,
+                                          &mRequestRegistered);
+    mImageRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
+  }
 }
 
 void nsImageBoxFrame::UpdateImage() {
@@ -308,7 +322,7 @@ void nsImageBoxFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       aBuilder, this, clipFlags);
 
   nsDisplayList list;
-  list.AppendToTop(MakeDisplayItem<nsDisplayXULImage>(aBuilder, this));
+  list.AppendNewToTop<nsDisplayXULImage>(aBuilder, this);
 
   CreateOwnLayerIfNeeded(aBuilder, &list);
 

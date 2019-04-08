@@ -88,6 +88,7 @@ raptor-firefox:
     - raptor-tp6-6-firefox
     - raptor-tp6-7-firefox
     - raptor-tp6-8-firefox
+    - raptor-tp6-8-404-firefox
     - raptor-tp6-9-firefox
     - raptor-tp6-10-firefox
     - raptor-tp6-binast-1-firefox
@@ -127,6 +128,7 @@ raptor-chrome:
     - raptor-tp6-6-chrome
     - raptor-tp6-7-chrome
     - raptor-tp6-8-chrome
+    - raptor-tp6-8-404-chrome
     - raptor-tp6-9-chrome
     - raptor-tp6-10-chrome
     - raptor-speedometer-chrome
@@ -162,6 +164,7 @@ raptor-fetch-profiling:
 
 raptor-fetch-geckoview:
     - raptor-unity-webgl-geckoview
+    - raptor-unity-webgl-refbrow
 
 raptor-fetch-chrome:
     - raptor-unity-webgl-chrome
@@ -173,6 +176,7 @@ awsy:
     - awsy-base
     - awsy-dmd
     - awsy-base-dmd
+    - awsy-tp6
 
 awsy-stylo-sequential:
     - awsy-stylo-sequential
@@ -195,6 +199,10 @@ linux-qr-tests:
     - mochitest-webgl1-ext
     - reftest
     - xpcshell
+
+linux-qr-smoketests:
+    - crashtest
+    - reftest
 
 linux-talos-flex:
     - talos-flex
@@ -246,6 +254,27 @@ windows-tests:
     - test-verify-wpt
     - xpcshell
 
+windows-aarch64-tests:
+    - crashtest
+    - jsreftest
+    - marionette
+    - marionette-headless
+    - mochitest
+    - mochitest-browser-chrome
+    - mochitest-chrome
+    - mochitest-clipboard
+    - mochitest-devtools-chrome
+    - mochitest-gpu
+    - mochitest-media
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
+    - mochitest-webgl2-ext
+    - reftest
+    # - web-platform-tests - disabled due to wpt11 experiencing BSoD
+    - web-platform-tests-reftests
+    - xpcshell
+
 windows-talos:
     - talos-bcv
     - talos-chrome
@@ -266,6 +295,9 @@ windows-talos:
 
 marionette-gpu-tests:
     - marionette-gpu
+
+marionette-media-tests:
+    - marionette-media
 
 macosx64-tests:
     - cppunit
@@ -414,6 +446,7 @@ android-hw-aarch64-opt-unittests:
 
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
+    - raptor-speedometer-refbrow
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -423,9 +456,12 @@ android-hw-arm7-raptor:
     - raptor-tp6m-7-geckoview
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
+    - raptor-tp6m-10-geckoview
+    - raptor-tp6m-1-refbrow
 
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
+    - raptor-speedometer-refbrow
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -435,6 +471,9 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-7-geckoview
     - raptor-tp6m-8-geckoview
     - raptor-tp6m-9-geckoview
+    - raptor-tp6m-1-geckoview-cold
+    - raptor-tp6m-10-geckoview
+    - raptor-tp6m-1-refbrow
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power

@@ -54,7 +54,7 @@ from manifest import get_raptor_test_list
 from mozproxy import get_playback
 from results import RaptorResultsHandler
 from gecko_profile import GeckoProfile
-from power import init_geckoview_power_test, finish_geckoview_power_test
+from power import init_android_power_test, finish_android_power_test
 from utils import view_gecko_profile
 
 
@@ -64,7 +64,7 @@ class Raptor(object):
     def __init__(self, app, binary, run_local=False, obj_path=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, is_release_build=False,
-                 debug_mode=False, activity=None):
+                 debug_mode=False, post_startup_delay=None, activity=None):
 
         # Override the magic --host HOST_IP with the value of the environment variable.
         if host == 'HOST_IP':
@@ -90,7 +90,7 @@ class Raptor(object):
         self.benchmark = None
         self.benchmark_port = 0
         self.gecko_profiler = None
-        self.post_startup_delay = 30000
+        self.post_startup_delay = post_startup_delay
         self.device = None
         self.profile_class = app
         self.firefox_android_apps = ['fennec', 'geckoview', 'refbrow', 'fenix']
@@ -100,7 +100,7 @@ class Raptor(object):
 
         # if running debug-mode reduce the pause after browser startup
         if self.debug_mode:
-            self.post_startup_delay = 3000
+            self.post_startup_delay = min(self.post_startup_delay, 3000)
             self.log.info("debug-mode enabled, reducing post-browser startup pause to %d ms"
                           % self.post_startup_delay)
 
@@ -131,7 +131,8 @@ class Raptor(object):
                         self.post_startup_delay,
                         host=self.config['host'],
                         b_port=self.benchmark_port,
-                        debug_mode=1 if self.debug_mode else 0)
+                        debug_mode=1 if self.debug_mode else 0,
+                        browser_cycle=test.get('browser_cycle', 1))
 
         self.install_raptor_webext()
 
@@ -195,6 +196,7 @@ class Raptor(object):
         self.config['playback_tool'] = test.get('playback')
         self.log.info("test uses playback tool: %s " % self.config['playback_tool'])
         platform = self.config['platform']
+        self.config['playback_version'] = test.get('playback_version', "2.0.2")
         self.config['playback_binary_zip'] = test.get('playback_binary_zip_%s' % platform)
         self.config['playback_pageset_zip'] = test.get('playback_pageset_zip_%s' % platform)
         playback_dir = os.path.join(here, 'playback')
@@ -250,28 +252,44 @@ class Raptor(object):
             self.log.info("preferences were configured for the test, \
                           but we do not install them on non Firefox browsers.")
 
+    def get_proxy_command_for_mitm(self, test, version):
+        # Generate Mitmproxy playback args
+        script = os.path.join(here, "playback", "alternate-server-replay-{}.py".format(version))
+        recordings = test.get("playback_recordings")
+        if recordings:
+            recording_paths = []
+            proxy_dir = self.playback.mozproxy_dir
+            for recording in recordings.split():
+                if not recording:
+                    continue
+                recording_paths.append(os.path.join(proxy_dir, recording))
+
+        # this part is platform-specific
+        if mozinfo.os == "win":
+            script = script.replace("\\", "\\\\\\")
+            recording_paths = [recording_path.replace("\\", "\\\\\\")
+                               for recording_path in recording_paths]
+
+        if version == "2.0.2":
+            self.playback.config['playback_tool_args'] = ["--replay-kill-extra",
+                                                          "--script",
+                                                          '""{} {}""'.
+                                                          format(script,
+                                                                 " ".join(recording_paths))]
+        elif version == "4.0.4":
+            self.playback.config['playback_tool_args'] = ["--scripts", script,
+                                                          "--set",
+                                                          "server_replay={}".
+                                                          format(" ".join(recording_paths))]
+        else:
+            raise Exception("Mitmproxy version is unknown!")
+
     def start_playback(self, test):
         # creating the playback tool
         self.get_playback_config(test)
         self.playback = get_playback(self.config, self.device)
 
-        # finish its configuration
-        script = os.path.join(here, "playback", "alternate-server-replay.py")
-        recordings = test.get("playback_recordings")
-        if recordings:
-            script_args = []
-            proxy_dir = self.playback.mozproxy_dir
-            for recording in recordings.split():
-                if not recording:
-                    continue
-                script_args.append(os.path.join(proxy_dir, recording))
-            script = '""%s %s""' % (script, " ".join(script_args))
-
-        # this part is platform-specific
-        if mozinfo.os == "win":
-            script = script.replace("\\", "\\\\\\")
-
-        self.playback.config['playback_tool_args'] = ["-s", script]
+        self.get_proxy_command_for_mitm(test, self.config['playback_version'])
 
         # let's start it!
         self.playback.start()
@@ -305,7 +323,7 @@ class Raptor(object):
 
     def wait_for_test_finish(self, test, timeout):
         # convert timeout to seconds and account for page cycles
-        timeout = int(timeout / 1000) * int(test['page_cycles'])
+        timeout = int(timeout / 1000) * int(test.get('page_cycles', 1))
         # account for the pause the raptor webext runner takes after browser startup
         timeout += (int(self.post_startup_delay / 1000) + 3)
 
@@ -359,10 +377,11 @@ class RaptorDesktop(Raptor):
     def __init__(self, app, binary, run_local=False, obj_path=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, is_release_build=False,
-                 debug_mode=False, activity=None):
+                 debug_mode=False, post_startup_delay=None, activity=None):
         Raptor.__init__(self, app, binary, run_local, obj_path, gecko_profile,
                         gecko_profile_interval, gecko_profile_entries, symbols_path,
-                        host, power_test, is_release_build, debug_mode)
+                        host, power_test, is_release_build, debug_mode,
+                        post_startup_delay)
 
     def create_browser_handler(self):
         # create the desktop browser runner
@@ -425,10 +444,11 @@ class RaptorDesktopFirefox(RaptorDesktop):
     def __init__(self, app, binary, run_local=False, obj_path=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, is_release_build=False,
-                 debug_mode=False, activity=None):
+                 debug_mode=False, post_startup_delay=None, activity=None):
         RaptorDesktop.__init__(self, app, binary, run_local, obj_path, gecko_profile,
                                gecko_profile_interval, gecko_profile_entries, symbols_path,
-                               host, power_test, is_release_build, debug_mode)
+                               host, power_test, is_release_build, debug_mode,
+                               post_startup_delay)
 
     def disable_non_local_connections(self):
         # For Firefox we need to set MOZ_DISABLE_NONLOCAL_CONNECTIONS=1 env var before startup
@@ -469,10 +489,11 @@ class RaptorDesktopChrome(RaptorDesktop):
     def __init__(self, app, binary, run_local=False, obj_path=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, is_release_build=False,
-                 debug_mode=False, activity=None):
+                 debug_mode=False, post_startup_delay=None, activity=None):
         RaptorDesktop.__init__(self, app, binary, run_local, obj_path, gecko_profile,
                                gecko_profile_interval, gecko_profile_entries, symbols_path,
-                               host, power_test, is_release_build, debug_mode)
+                               host, power_test, is_release_build, debug_mode,
+                               post_startup_delay)
 
     def setup_chrome_desktop_for_playback(self):
         # if running a pageload test on google chrome, add the cmd line options
@@ -506,10 +527,10 @@ class RaptorAndroid(Raptor):
     def __init__(self, app, binary, run_local=False, obj_path=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, is_release_build=False,
-                 debug_mode=False, activity=None):
+                 debug_mode=False, post_startup_delay=None, activity=None):
         Raptor.__init__(self, app, binary, run_local, obj_path, gecko_profile,
                         gecko_profile_interval, gecko_profile_entries, symbols_path, host,
-                        power_test, is_release_build, debug_mode)
+                        power_test, is_release_build, debug_mode, post_startup_delay)
 
         # on android, when creating the browser profile, we want to use a 'firefox' type profile
         self.profile_class = "firefox"
@@ -570,7 +591,7 @@ class RaptorAndroid(Raptor):
         proxy_prefs["network.proxy.no_proxies_on"] = self.config['host']
         self.profile.set_preferences(proxy_prefs)
 
-    def launch_firefox_android_app(self):
+    def launch_firefox_android_app(self, test_name):
         self.log.info("starting %s" % self.config['app'])
 
         extra_args = ["-profile", self.device_profile,
@@ -597,16 +618,131 @@ class RaptorAndroid(Raptor):
             self.log.error("Exception launching %s" % self.config['binary'])
             self.log.error("Exception: %s %s" % (type(e).__name__, str(e)))
             if self.config['power_test']:
-                finish_geckoview_power_test(self)
+                finish_android_power_test(self, test_name)
             raise
 
         # give our control server the device and app info
         self.control_server.device = self.device
         self.control_server.app_name = self.config['binary']
 
+    def copy_cert_db(self, source_dir, target_dir):
+        # copy browser cert db (that was previously created via certutil) from source to target
+        cert_db_files = ['pkcs11.txt', 'key4.db', 'cert9.db']
+        for next_file in cert_db_files:
+            _source = os.path.join(source_dir, next_file)
+            _dest = os.path.join(target_dir, next_file)
+            if os.path.exists(_source):
+                self.log.info("copying %s to %s" % (_source, _dest))
+                shutil.copyfile(_source, _dest)
+            else:
+                self.log.critical("unable to find ssl cert db file: %s" % _source)
+
     def run_test(self, test, timeout=None):
+        # tests will be run warm (i.e. NO browser restart between page-cycles)
+        # unless otheriwse specified in the test INI by using 'cold = true'
+        if test.get('cold', False) is True:
+            self.run_test_cold(test, timeout)
+        else:
+            self.run_test_warm(test, timeout)
+
+    def run_test_cold(self, test, timeout=None):
+        '''
+        Run the Raptor test but restart the entire browser app between page-cycles.
+
+        Note: For page-load tests, playback will only be started once - at the beginning of all
+        browser cycles, and then stopped after all cycles are finished. The proxy is set via prefs
+        in the browser profile so those will need to be set again in each new profile/cycle.
+        Note that instead of using the certutil tool each time to create a db and import the
+        mitmproxy SSL cert (it's done in mozbase/mozproxy) we will simply copy the existing
+        cert db from the first cycle's browser profile into the new clean profile; this way
+        we don't have to re-create the cert db on each browser cycle.
+
+        Since we're running in cold-mode, before this point (in manifest.py) the
+        'expected-browser-cycles' value was already set to the initial 'page-cycles' value;
+        and the 'page-cycles' value was set to 1 as we want to perform one page-cycle per
+        browser restart.
+
+        The 'browser-cycle' value is the current overall browser start iteration. The control
+        server will receive the current 'browser-cycle' and the 'expected-browser-cycles' in
+        each results set received; and will pass that on as part of the results so that the
+        results processing will know results for multiple browser cycles are being received.
+
+        The default will be to run in warm mode; unless 'cold = true' is set in the test INI.
+        '''
+        self.log.info("test %s is running in cold mode; browser WILL be restarted between "
+                      "page cycles" % test['name'])
+
         if self.config['power_test']:
-            init_geckoview_power_test(self)
+            init_android_power_test(self)
+
+        for test['browser_cycle'] in range(1, test['expected_browser_cycles'] + 1):
+
+            self.log.info("begin browser cycle %d of %d for test %s"
+                          % (test['browser_cycle'], test['expected_browser_cycles'], test['name']))
+
+            self.run_test_setup(test)
+
+            if test['browser_cycle'] == 1:
+                self.create_raptor_sdcard_folder()
+
+                if test.get('playback', None) is not None:
+                    self.start_playback(test)
+
+                    # an ssl cert db has now been created in the profile; copy it out so we
+                    # can use the same cert db in future test cycles / browser restarts
+                    local_cert_db_dir = tempfile.mkdtemp()
+                    self.log.info("backing up browser ssl cert db that was created via certutil")
+                    self.copy_cert_db(self.config['local_profile_dir'], local_cert_db_dir)
+
+                if self.config['host'] not in ('localhost', '127.0.0.1'):
+                    self.delete_proxy_settings_from_profile()
+
+            else:
+                # double-check to ensure app has been shutdown
+                self.device.stop_application(self.config['binary'])
+
+                # clear the android app data before the next app startup
+                self.clear_app_data()
+
+                # initial browser profile was already created before run_test was called;
+                # now additional browser cycles we want to create a new one each time
+                self.create_browser_profile()
+
+                # get cert db from previous cycle profile and copy into new clean profile
+                # this saves us from having to start playback again / recreate cert db etc.
+                self.log.info("copying existing ssl cert db into new browser profile")
+                self.copy_cert_db(local_cert_db_dir, self.config['local_profile_dir'])
+
+                self.run_test_setup(test)
+
+            if test.get('playback', None) is not None:
+                self.turn_on_android_app_proxy()
+
+            self.copy_profile_onto_device()
+
+            # now start the browser/app under test
+            self.launch_firefox_android_app(test['name'])
+
+            # set our control server flag to indicate we are running the browser/app
+            self.control_server._finished = False
+
+            self.wait_for_test_finish(test, timeout)
+
+            # in debug mode, and running locally, leave the browser running
+            if self.debug_mode and self.config['run_local']:
+                self.log.info("* debug-mode enabled - please shutdown the browser manually...")
+                self.runner.wait(timeout=None)
+
+        if self.config['power_test']:
+            finish_android_power_test(self, test['name'])
+
+        self.run_test_teardown()
+
+    def run_test_warm(self, test, timeout=None):
+        self.log.info("test %s is running in warm mode; browser will NOT be restarted between "
+                      "page cycles" % test['name'])
+        if self.config['power_test']:
+            init_android_power_test(self)
 
         self.run_test_setup(test)
         self.create_raptor_sdcard_folder()
@@ -623,7 +759,7 @@ class RaptorAndroid(Raptor):
         self.copy_profile_onto_device()
 
         # now start the browser/app under test
-        self.launch_firefox_android_app()
+        self.launch_firefox_android_app(test['name'])
 
         # set our control server flag to indicate we are running the browser/app
         self.control_server._finished = False
@@ -631,7 +767,7 @@ class RaptorAndroid(Raptor):
         self.wait_for_test_finish(test, timeout)
 
         if self.config['power_test']:
-            finish_geckoview_power_test(self)
+            finish_android_power_test(self, test['name'])
 
         self.run_test_teardown()
 
@@ -709,6 +845,7 @@ def main(args=sys.argv[1:]):
                           power_test=args.power_test,
                           is_release_build=args.is_release_build,
                           debug_mode=args.debug_mode,
+                          post_startup_delay=args.post_startup_delay,
                           activity=args.activity)
 
     raptor.create_browser_profile()
@@ -733,11 +870,12 @@ def main(args=sys.argv[1:]):
     pages_that_timed_out = raptor.get_page_timeout_list()
     if len(pages_that_timed_out) > 0:
         for _page in pages_that_timed_out:
-            LOG.critical("TEST-UNEXPECTED-FAIL: test '%s' timed out loading test page: %s "
-                         "pending metrics: %s"
-                         % (_page['test_name'],
-                            _page['url'],
-                            _page['pending_metrics']))
+            message = [("TEST-UNEXPECTED-FAIL", "test '%s'" % _page['test_name']),
+                       ("timed out loading test page", _page['url'])]
+            if raptor_test.get("type") == 'pageload':
+                message.append(("pending metrics", _page['pending_metrics']))
+
+            LOG.critical(" ".join("%s: %s" % (subject, msg) for subject, msg in message))
         os.sys.exit(1)
 
     # when running raptor locally with gecko profiling on, use the view-gecko-profile

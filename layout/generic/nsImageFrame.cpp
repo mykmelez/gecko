@@ -25,16 +25,17 @@
 #include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Unused.h"
 
 #include "nsCOMPtr.h"
 #include "nsFontMetrics.h"
 #include "nsIImageLoadingContent.h"
 #include "nsImageLoadingContent.h"
+#include "nsIPresShellInlines.h"
 #include "nsString.h"
 #include "nsPrintfCString.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/Document.h"
 #include "nsContentUtils.h"
@@ -331,6 +332,7 @@ void nsImageFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
     const nsStyleContent* styleContent = StyleContent();
     if (mKind == Kind::ContentPropertyAtIndex) {
       MOZ_RELEASE_ASSERT(
+          aParent->GetContent()->IsGeneratedContentContainerForMarker() ||
           aParent->GetContent()->IsGeneratedContentContainerForAfter() ||
           aParent->GetContent()->IsGeneratedContentContainerForBefore());
       MOZ_RELEASE_ASSERT(
@@ -826,7 +828,7 @@ void nsImageFrame::MaybeDecodeForPredictedSize() {
   }
 
   // OK, we're ready to decode. Compute the scale to the screen...
-  nsIPresShell* presShell = PresContext()->GetPresShell();
+  mozilla::PresShell* presShell = PresContext()->PresShell();
   LayoutDeviceToScreenScale2D resolutionToScreen(
       presShell->GetCumulativeResolution() *
       nsLayoutUtils::GetTransformToAncestorScaleExcludingAnimated(this));
@@ -1057,9 +1059,8 @@ void nsImageFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
   FinishAndStoreOverflow(&aMetrics, aReflowInput.mStyleDisplay);
 
   if ((GetStateBits() & NS_FRAME_FIRST_REFLOW) && !mReflowCallbackPosted) {
-    nsIPresShell* shell = PresShell();
     mReflowCallbackPosted = true;
-    shell->PostReflowCallback(this);
+    PresShell()->PostReflowCallback(this);
   }
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS, ("exit nsImageFrame::Reflow: size=%d,%d",
@@ -1155,7 +1156,7 @@ void nsImageFrame::DisplayAltText(nsPresContext* aPresContext,
                                   const nsString& aAltText,
                                   const nsRect& aRect) {
   // Set font and color
-  aRenderingContext.SetColor(Color::FromABGR(StyleColor()->mColor));
+  aRenderingContext.SetColor(Color::FromABGR(StyleColor()->mColor.ToColor()));
   RefPtr<nsFontMetrics> fm =
       nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
 
@@ -1260,7 +1261,7 @@ struct nsRecessedBorder : public nsStyleBorder {
   nsRecessedBorder(nscoord aBorderWidth, nsPresContext* aPresContext)
       : nsStyleBorder(*aPresContext->Document()) {
     NS_FOR_CSS_SIDES(side) {
-      BorderColorFor(side) = StyleComplexColor::Black();
+      BorderColorFor(side) = StyleColor::Black();
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
       // mComputedBorder
@@ -2058,8 +2059,7 @@ void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     if (!imageOK || !mImage || !SizeIsAvailable(currentRequest)) {
       // No image yet, or image load failed. Draw the alt-text and an icon
       // indicating the status
-      aLists.Content()->AppendToTop(
-          MakeDisplayItem<nsDisplayAltFeedback>(aBuilder, this));
+      aLists.Content()->AppendNewToTop<nsDisplayAltFeedback>(aBuilder, this);
 
       // This image is visible (we are being asked to paint it) but it's not
       // decoded yet. And we are not going to ask the image to draw, so this
@@ -2076,8 +2076,8 @@ void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         }
       }
     } else {
-      aLists.Content()->AppendToTop(
-          MakeDisplayItem<nsDisplayImage>(aBuilder, this, mImage, mPrevImage));
+      aLists.Content()->AppendNewToTop<nsDisplayImage>(aBuilder, this, mImage,
+                                                       mPrevImage);
 
       // If we were previously displaying an icon, we're not anymore
       if (mDisplayingIcon) {
@@ -2087,9 +2087,9 @@ void nsImageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
 #ifdef DEBUG
       if (GetShowFrameBorders() && GetImageMap()) {
-        aLists.Outlines()->AppendToTop(MakeDisplayItem<nsDisplayGeneric>(
+        aLists.Outlines()->AppendNewToTop<nsDisplayGeneric>(
             aBuilder, this, PaintDebugImageMap, "DebugImageMap",
-            DisplayItemType::TYPE_DEBUG_IMAGE_MAP));
+            DisplayItemType::TYPE_DEBUG_IMAGE_MAP);
       }
 #endif
     }
@@ -2454,12 +2454,15 @@ void nsImageFrame::GetLoadGroup(nsPresContext* aPresContext,
 
   MOZ_ASSERT(nullptr != aLoadGroup, "null OUT parameter pointer");
 
-  nsIPresShell* shell = aPresContext->GetPresShell();
+  mozilla::PresShell* presShell = aPresContext->GetPresShell();
+  if (!presShell) {
+    return;
+  }
 
-  if (!shell) return;
-
-  Document* doc = shell->GetDocument();
-  if (!doc) return;
+  Document* doc = presShell->GetDocument();
+  if (!doc) {
+    return;
+  }
 
   *aLoadGroup = doc->GetDocumentLoadGroup().take();
 }
@@ -2545,6 +2548,38 @@ void nsImageFrame::IconLoad::GetPrefs() {
 
   mPrefShowLoadingPlaceholder = Preferences::GetBool(
       "browser.display.show_loading_image_placeholder", true);
+}
+
+nsresult nsImageFrame::RestartAnimation() {
+  nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
+  /*
+   * We cannot count on mContentURLRequestRegistered to make
+   * the deregistration work. So, we are going to force it.
+   */
+  bool deregister = true;
+
+  if (currentRequest && !mContentURLRequestRegistered) {
+    nsLayoutUtils::RegisterImageRequestIfAnimated(PresContext(), currentRequest,
+                                                  &deregister);
+    return currentRequest->StartDecoding(imgIContainer::FLAG_NONE);
+  }
+  return NS_OK;
+}
+
+nsresult nsImageFrame::StopAnimation() {
+  nsCOMPtr<imgIRequest> currentRequest = GetCurrentRequest();
+  /*
+   * We cannot count on mContentURLRequestRegistered to make
+   * the deregistration work. So, we are going to force it.
+   */
+  bool deregister = true;
+
+  if (currentRequest) {
+    nsLayoutUtils::DeregisterImageRequest(PresContext(), currentRequest,
+                                          &deregister);
+    return currentRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP

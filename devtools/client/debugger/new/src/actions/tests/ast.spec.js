@@ -17,12 +17,11 @@ import {
 
 import readFixture from "./helpers/readFixture";
 const {
-  getSource,
   getSymbols,
   getOutOfScopeLocations,
-  getSourceMetaData,
   getInScopeLines,
-  isSymbolsLoading
+  isSymbolsLoading,
+  getFramework
 } = selectors;
 
 import { prefs } from "../../utils/prefs";
@@ -36,7 +35,8 @@ const threadClient = {
   evaluate: async expression => ({ result: evaluationResult[expression] }),
   evaluateExpressions: async expressions =>
     expressions.map(expression => ({ result: evaluationResult[expression] })),
-  getBreakpointPositions: async () => ({})
+  getBreakpointPositions: async () => ({}),
+  onPauseChange() {}
 };
 
 const sourceMaps = {
@@ -63,50 +63,17 @@ const evaluationResult = {
 };
 
 describe("ast", () => {
-  describe("setSourceMetaData", () => {
-    it("should detect react components", async () => {
-      const store = createStore(threadClient, {}, sourceMaps);
-      const { dispatch, getState } = store;
-      const source = makeOriginalSource("reactComponent.js");
-
-      await dispatch(actions.newSource(makeSource("reactComponent.js")));
-
-      await dispatch(actions.newSource(source));
-
-      await dispatch(actions.loadSourceText(getSource(getState(), source.id)));
-      await dispatch(actions.setSourceMetaData(source.id));
-
-      await waitForState(store, state => {
-        const metaData = getSourceMetaData(state, source.id);
-        return metaData && metaData.framework;
-      });
-
-      const sourceMetaData = getSourceMetaData(getState(), source.id);
-      expect(sourceMetaData.framework).toBe("React");
-    });
-
-    it("should not give false positive on non react components", async () => {
-      const store = createStore(threadClient);
-      const { dispatch, getState } = store;
-      const base = makeSource("base.js");
-      await dispatch(actions.newSource(base));
-      await dispatch(actions.loadSourceText(base));
-      await dispatch(actions.setSourceMetaData("base.js"));
-
-      const sourceMetaData = getSourceMetaData(getState(), base.id);
-      expect(sourceMetaData.framework).toBe(undefined);
-    });
-  });
-
   describe("setSymbols", () => {
     describe("when the source is loaded", () => {
       it("should be able to set symbols", async () => {
         const store = createStore(threadClient);
-        const { dispatch, getState } = store;
+        const { dispatch, getState, cx } = store;
         const base = makeSource("base.js");
         await dispatch(actions.newSource(base));
-        await dispatch(actions.loadSourceText(base));
-        await dispatch(actions.setSymbols("base.js"));
+        await dispatch(actions.loadSourceText({ cx, source: base }));
+
+        const loadedSource = selectors.getSourceFromId(getState(), base.id);
+        await dispatch(actions.setSymbols({ cx, source: loadedSource }));
         await waitForState(store, state => !isSymbolsLoading(state, base));
 
         const baseSymbols = getSymbols(getState(), base);
@@ -132,6 +99,35 @@ describe("ast", () => {
         expect(baseSymbols).toEqual(null);
       });
     });
+
+    describe("frameworks", () => {
+      it("should detect react components", async () => {
+        const store = createStore(threadClient, {}, sourceMaps);
+        const { cx, dispatch, getState } = store;
+        const source = makeOriginalSource("reactComponent.js");
+
+        await dispatch(actions.newSource(makeSource("reactComponent.js")));
+
+        await dispatch(actions.newSource(source));
+
+        await dispatch(actions.loadSourceText({ cx, source }));
+        const loadedSource = selectors.getSourceFromId(getState(), source.id);
+        await dispatch(actions.setSymbols({ cx, source: loadedSource }));
+
+        expect(getFramework(getState(), source)).toBe("React");
+      });
+
+      it("should not give false positive on non react components", async () => {
+        const store = createStore(threadClient);
+        const { cx, dispatch, getState } = store;
+        const base = makeSource("base.js");
+        await dispatch(actions.newSource(base));
+        await dispatch(actions.loadSourceText({ cx, source: base }));
+        await dispatch(actions.setSymbols({ cx, source: base }));
+
+        expect(getFramework(getState(), base)).toBe(undefined);
+      });
+    });
   });
 
   describe("getOutOfScopeLocations", () => {
@@ -141,13 +137,19 @@ describe("ast", () => {
 
     it("with selected line", async () => {
       const store = createStore(threadClient);
-      const { dispatch, getState } = store;
+      const { dispatch, getState, cx } = store;
       const source = makeSource("scopes.js");
       await dispatch(actions.newSource(source));
 
       await dispatch(
-        actions.selectLocation({ sourceId: "scopes.js", line: 5 })
+        actions.selectLocation(cx, { sourceId: "scopes.js", line: 5 })
       );
+
+      // Make sure the state has finished updating before pausing.
+      await waitForState(store, state => {
+        const symbols = getSymbols(state, source);
+        return symbols && !symbols.loading && getOutOfScopeLocations(state);
+      });
 
       const frame = makeFrame({ id: "1", sourceId: "scopes.js" });
       await dispatch(
@@ -159,7 +161,8 @@ describe("ast", () => {
         })
       );
 
-      await dispatch(actions.setOutOfScopeLocations());
+      const ncx = selectors.getThreadContext(getState());
+      await dispatch(actions.setOutOfScopeLocations(ncx));
 
       await waitForState(store, state => getOutOfScopeLocations(state));
 
@@ -171,10 +174,10 @@ describe("ast", () => {
     });
 
     it("without a selected line", async () => {
-      const { dispatch, getState } = createStore(threadClient);
+      const { dispatch, getState, cx } = createStore(threadClient);
       const base = makeSource("base.js");
       await dispatch(actions.newSource(base));
-      await dispatch(actions.selectSource("base.js"));
+      await dispatch(actions.selectSource(cx, "base.js"));
 
       const locations = getOutOfScopeLocations(getState());
       // const lines = getInScopeLines(getState());

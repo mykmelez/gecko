@@ -432,15 +432,15 @@ static gboolean gtk_plug_scroll_event(GtkWidget* widget,
   xevent.xbutton.y_root = gdk_event->y_root;
   xevent.xbutton.state = gdk_event->state;
   xevent.xbutton.button = button;
-  xevent.xbutton.same_screen = True;
+  xevent.xbutton.same_screen = X11True;
 
   gdk_error_trap_push();
 
-  XSendEvent(dpy, xevent.xbutton.window, True, ButtonPressMask, &xevent);
+  XSendEvent(dpy, xevent.xbutton.window, X11True, ButtonPressMask, &xevent);
 
   xevent.xbutton.type = ButtonRelease;
   xevent.xbutton.state |= button_mask;
-  XSendEvent(dpy, xevent.xbutton.window, True, ButtonReleaseMask, &xevent);
+  XSendEvent(dpy, xevent.xbutton.window, X11True, ButtonReleaseMask, &xevent);
 
   gdk_display_sync(gdk_screen_get_display(screen));
   gdk_error_trap_pop();
@@ -1672,6 +1672,10 @@ NPObject* PluginModuleChild::NPN_CreateObject(NPP aNPP, NPClass* aClass) {
 
 NPObject* PluginModuleChild::NPN_RetainObject(NPObject* aNPObj) {
   AssertPluginThread();
+
+  if (NS_WARN_IF(!aNPObj)) {
+    return nullptr;
+  }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
   int32_t refCnt =

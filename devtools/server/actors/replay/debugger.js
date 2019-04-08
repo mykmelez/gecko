@@ -544,6 +544,11 @@ ReplayDebugger.prototype = {
     return data.map(source => this._addSource(source));
   },
 
+  adoptSource(source) {
+    assert(source._dbg == this);
+    return source;
+  },
+
   /////////////////////////////////////////////////////////
   // Object methods
   /////////////////////////////////////////////////////////
@@ -937,7 +942,6 @@ ReplayDebuggerObject.prototype = {
   get boundTargetFunction() { return this.isBoundFunction ? NYI() : undefined; },
   get boundThis() { return this.isBoundFunction ? NYI() : undefined; },
   get boundArguments() { return this.isBoundFunction ? NYI() : undefined; },
-  get global() { return this._dbg._getObject(this._data.global); },
   get isProxy() { return this._data.isProxy; },
   get proto() { return this._dbg._getObject(this._data.proto); },
 
@@ -1057,6 +1061,8 @@ ReplayDebuggerObject.prototype = {
   deleteProperty: NotAllowed,
   forceLexicalInitializationByName: NotAllowed,
 };
+
+ReplayDebugger.Object = ReplayDebuggerObject;
 
 ///////////////////////////////////////////////////////////////////////////////
 // ReplayDebuggerObjectSnapshot

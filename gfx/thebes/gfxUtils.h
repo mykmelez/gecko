@@ -27,6 +27,9 @@ class nsIGfxInfo;
 class nsIPresShell;
 
 namespace mozilla {
+namespace dom {
+class Element;
+}
 namespace layers {
 class WebRenderBridgeChild;
 class GlyphArray;
@@ -310,9 +313,23 @@ class gfxUtils {
   static bool DumpDisplayList();
 
   static FILE* sDumpPaintFile;
+
+  static mozilla::wr::RenderRoot GetContentRenderRoot();
+
+  static mozilla::Maybe<mozilla::wr::RenderRoot> GetRenderRootForFrame(
+      const nsIFrame* aFrame);
+  static mozilla::Maybe<mozilla::wr::RenderRoot> GetRenderRootForElement(
+      const mozilla::dom::Element* aElement);
+  static mozilla::wr::RenderRoot RecursivelyGetRenderRootForFrame(
+      const nsIFrame* aFrame);
+  static mozilla::wr::RenderRoot RecursivelyGetRenderRootForElement(
+      const mozilla::dom::Element* aElement);
 };
 
 namespace mozilla {
+
+struct StyleRGBA;
+
 namespace gfx {
 
 /**
@@ -323,6 +340,7 @@ namespace gfx {
  * applicable).
  */
 Color ToDeviceColor(Color aColor);
+Color ToDeviceColor(const StyleRGBA& aColor);
 Color ToDeviceColor(nscolor aColor);
 
 /**

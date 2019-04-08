@@ -39,6 +39,7 @@
 #include "mozilla/ipc/EnvironmentMap.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/RecordReplay.h"
+#include "mozilla/RDDProcessHost.h"
 #include "mozilla/Scoped.h"
 #include "mozilla/Services.h"
 #include "mozilla/SharedThreadPool.h"
@@ -66,6 +67,10 @@
 #  include "mozilla/SandboxLaunch.h"
 #endif
 
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+#  include "nsMacUtilsImpl.h"
+#endif
+
 #include "nsTArray.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
@@ -74,6 +79,7 @@
 #include "private/pprio.h"
 
 using mozilla::MonitorAutoLock;
+using mozilla::Preferences;
 using mozilla::StaticMutexAutoLock;
 using mozilla::ipc::GeckoChildProcessHost;
 
@@ -365,6 +371,12 @@ bool GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts,
 
 bool GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts) {
   PrepareLaunch();
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+  if (IsMacSandboxLaunchEnabled()) {
+    AppendMacSandboxParams(aExtraOpts);
+  }
+#endif
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
 
@@ -938,7 +950,9 @@ bool GeckoChildProcessHost::PerformAsyncLaunch(
   LaunchAndroidService(childProcessType, childArgv,
                        mLaunchOptions->fds_to_remap, &process);
 #  else   // goes with defined(MOZ_WIDGET_ANDROID)
-  base::LaunchApp(childArgv, *mLaunchOptions, &process);
+  if (!base::LaunchApp(childArgv, *mLaunchOptions, &process)) {
+    return false;
+  }
 #  endif  // defined(MOZ_WIDGET_ANDROID)
 
   // We're in the parent and the child was launched. Close the child FD in the
@@ -1210,11 +1224,15 @@ bool GeckoChildProcessHost::PerformAsyncLaunch(
           .print("==> process %d launched child process %d (%S)\n",
                  base::GetCurrentProcId(), base::GetProcId(process),
                  cmdLine.command_line_string().c_str());
+    } else {
+      return false;
     }
   } else
 #  endif  // defined(MOZ_SANDBOX)
   {
-    base::LaunchApp(cmdLine, *mLaunchOptions, &process);
+    if (!base::LaunchApp(cmdLine, *mLaunchOptions, &process)) {
+      return false;
+    }
 
 #  ifdef MOZ_SANDBOX
     // We need to be able to duplicate handles to some types of non-sandboxed
@@ -1239,9 +1257,7 @@ bool GeckoChildProcessHost::PerformAsyncLaunch(
 #  error Sorry
 #endif  // defined(OS_POSIX)
 
-  if (!process) {
-    return false;
-  }
+  MOZ_ASSERT(process);
   // NB: on OS X, we block much longer than we need to in order to
   // reach this call, waiting for the child process's task_t.  The
   // best way to fix that is to refactor this file, hard.
@@ -1381,3 +1397,59 @@ void GeckoChildProcessHost::LaunchAndroidService(
   }
 }
 #endif
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+void GeckoChildProcessHost::AppendMacSandboxParams(StringVector& aArgs) {
+  MacSandboxInfo info;
+  FillMacSandboxInfo(info);
+  info.AppendAsParams(aArgs);
+}
+
+// Fill |aInfo| with the flags needed to launch the utility sandbox
+/* static */
+void GeckoChildProcessHost::StaticFillMacSandboxInfo(MacSandboxInfo& aInfo) {
+  aInfo.type = GetDefaultMacSandboxType();
+  aInfo.shouldLog = Preferences::GetBool("security.sandbox.logging.enabled") ||
+                    PR_GetEnv("MOZ_SANDBOX_LOGGING");
+
+  nsAutoCString appPath;
+  if (!nsMacUtilsImpl::GetAppPath(appPath)) {
+    MOZ_CRASH("Failed to get app path");
+  }
+  aInfo.appPath.assign(appPath.get());
+}
+
+void GeckoChildProcessHost::FillMacSandboxInfo(MacSandboxInfo& aInfo) {
+  GeckoChildProcessHost::StaticFillMacSandboxInfo(aInfo);
+}
+
+//
+// If early sandbox startup is enabled for this process type, map the
+// process type to the sandbox type and enable the sandbox. Returns true
+// if no errors were encountered or if early sandbox startup is not
+// enabled for this process. Returns false if an error was encountered.
+//
+/* static */
+bool GeckoChildProcessHost::StartMacSandbox(int aArgc, char** aArgv,
+                                            std::string& aErrorMessage) {
+  MacSandboxType sandboxType = MacSandboxType_Invalid;
+  switch (XRE_GetProcessType()) {
+    // For now, only support early sandbox startup for content
+    // processes. Add case statements for the additional process
+    // types once early sandbox startup is implemented for them.
+    case GeckoProcessType_Content:
+      // Content processes don't use GeckoChildProcessHost
+      // to configure sandboxing so hard code the sandbox type.
+      sandboxType = MacSandboxType_Content;
+      break;
+    case GeckoProcessType_RDD:
+      sandboxType = RDDProcessHost::GetMacSandboxType();
+      break;
+    default:
+      return true;
+  }
+  return mozilla::StartMacSandboxIfEnabled(sandboxType, aArgc, aArgv,
+                                           aErrorMessage);
+}
+
+#endif /* XP_MACOSX && MOZ_SANDBOX */

@@ -1431,8 +1431,8 @@ PeerConnectionWrapper.prototype = {
       }
 
       info(this.label + ": iceCandidate = " + JSON.stringify(anEvent.candidate));
-      ok(anEvent.candidate.candidate.length > 0, "ICE candidate contains candidate");
       ok(anEvent.candidate.sdpMid.length > 0, "SDP mid not empty");
+      ok(anEvent.candidate.usernameFragment.length > 0, "usernameFragment not empty");
 
       // only check the m-section for the updated default addr that corresponds
       // with this candidate.
@@ -1653,8 +1653,8 @@ PeerConnectionWrapper.prototype = {
     }
     let attempts = 0;
     // Time-units are MS
-    const waitPeriod = 500;
-    const maxTime = 15000;
+    const waitPeriod = 100;
+    const maxTime = 20000;
     for (let totalTime = maxTime; totalTime > 0; totalTime -= waitPeriod) {
       try {
         let syncedStats = await ensureSyncedRtcp();
@@ -1667,8 +1667,7 @@ PeerConnectionWrapper.prototype = {
           throw e;
       }
       attempts += 1;
-      info("waitForSyncedRtcp: no synced RTCP on attempt" + attempts
-           + ", retrying.\n");
+      info(`waitForSyncedRtcp: no sync on attempt ${attempts}, retrying.`);
       await wait(waitPeriod);
     }
     throw Error("Waiting for synced RTCP timed out after at least "

@@ -918,7 +918,7 @@ template <MaybeConstruct Construct>
 class GenericArgsBase : public mozilla::Conditional<Construct, AnyConstructArgs,
                                                     AnyInvokeArgs>::Type {
  protected:
-  AutoValueVector v_;
+  RootedValueVector v_;
 
   explicit GenericArgsBase(JSContext* cx) : v_(cx) {}
 
@@ -1585,7 +1585,7 @@ class JitActivation : public Activation {
   // all inline frames associated with that frame.
   //
   // This table is lazily initialized by calling getRematerializedFrame.
-  typedef GCVector<RematerializedFrame*> RematerializedFrameVector;
+  typedef GCVector<UniquePtr<RematerializedFrame>> RematerializedFrameVector;
   typedef HashMap<uint8_t*, RematerializedFrameVector> RematerializedFrameTable;
   js::UniquePtr<RematerializedFrameTable> rematerializedFrames_;
 

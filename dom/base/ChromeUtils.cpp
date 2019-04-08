@@ -226,8 +226,8 @@ void ChromeUtils::ShallowClone(GlobalObject& aGlobal, JS::HandleObject aObj,
   auto cleanup = MakeScopeExit([&]() { aRv.NoteJSContextException(cx); });
 
   JS::Rooted<JS::IdVector> ids(cx, JS::IdVector(cx));
-  JS::AutoValueVector values(cx);
-  JS::AutoIdVector valuesIds(cx);
+  JS::RootedVector<JS::Value> values(cx);
+  JS::RootedVector<jsid> valuesIds(cx);
 
   {
     // cx represents our current Realm, so it makes sense to use it for the

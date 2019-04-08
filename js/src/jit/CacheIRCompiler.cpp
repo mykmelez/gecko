@@ -1672,7 +1672,7 @@ bool CacheIRCompiler::emitGuardIsExtensible() {
     return false;
   }
 
-  Address shape(obj, ShapedObject::offsetOfShape());
+  Address shape(obj, JSObject::offsetOfShape());
   masm.loadPtr(shape, scratch);
 
   Address baseShape(scratch, Shape::offsetOfBaseShape());
@@ -1812,37 +1812,6 @@ bool CacheIRCompiler::emitGuardMagicValue() {
   }
 
   masm.branchTestMagicValue(Assembler::NotEqual, val, magic, failure->label());
-  return true;
-}
-
-bool CacheIRCompiler::emitGuardNoUnboxedExpando() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  Address expandoAddr(obj, UnboxedPlainObject::offsetOfExpando());
-  masm.branchPtr(Assembler::NotEqual, expandoAddr, ImmWord(0),
-                 failure->label());
-  return true;
-}
-
-bool CacheIRCompiler::emitGuardAndLoadUnboxedExpando() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  Register output = allocator.defineRegister(masm, reader.objOperandId());
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  Address expandoAddr(obj, UnboxedPlainObject::offsetOfExpando());
-  masm.loadPtr(expandoAddr, output);
-  masm.branchTestPtr(Assembler::Zero, output, output, failure->label());
   return true;
 }
 

@@ -1228,6 +1228,16 @@ static void DeferredCreateOffer(const std::string& aPcHandle,
   }
 }
 
+// Have to use unique_ptr because webidl enums are generated without a
+// copy c'tor.
+static std::unique_ptr<dom::PCErrorData> buildJSErrorData(
+    const JsepSession::Result& aResult, const std::string& aMessage) {
+  std::unique_ptr<dom::PCErrorData> result(new dom::PCErrorData);
+  result->mName = *aResult.mError;
+  result->mMessage = NS_ConvertASCIItoUTF16(aMessage.c_str());
+  return result;
+}
+
 // Used by unit tests and the IDL CreateOffer.
 NS_IMETHODIMP
 PeerConnectionImpl::CreateOffer(const JsepOfferOptions& aOptions) {
@@ -1257,23 +1267,15 @@ PeerConnectionImpl::CreateOffer(const JsepOfferOptions& aOptions) {
 
   std::string offer;
 
-  nrv = mJsepSession->CreateOffer(aOptions, &offer);
+  JsepSession::Result result = mJsepSession->CreateOffer(aOptions, &offer);
   JSErrorResult rv;
-  if (NS_FAILED(nrv)) {
-    Error error;
-    switch (nrv) {
-      case NS_ERROR_UNEXPECTED:
-        error = kInvalidState;
-        break;
-      default:
-        error = kInternalError;
-    }
+  if (result.mError.isSome()) {
     std::string errorString = mJsepSession->GetLastError();
 
     CSFLogError(LOGTAG, "%s: pc = %s, error = %s", __FUNCTION__,
                 mHandle.c_str(), errorString.c_str());
 
-    pco->OnCreateOfferError(error, ObString(errorString.c_str()), rv);
+    pco->OnCreateOfferError(*buildJSErrorData(result, errorString), rv);
   } else {
     UpdateSignalingState();
     pco->OnCreateOfferSuccess(ObString(offer.c_str()), rv);
@@ -1299,23 +1301,15 @@ PeerConnectionImpl::CreateAnswer() {
   JsepAnswerOptions options;
   std::string answer;
 
-  nsresult nrv = mJsepSession->CreateAnswer(options, &answer);
+  JsepSession::Result result = mJsepSession->CreateAnswer(options, &answer);
   JSErrorResult rv;
-  if (NS_FAILED(nrv)) {
-    Error error;
-    switch (nrv) {
-      case NS_ERROR_UNEXPECTED:
-        error = kInvalidState;
-        break;
-      default:
-        error = kInternalError;
-    }
+  if (result.mError.isSome()) {
     std::string errorString = mJsepSession->GetLastError();
 
     CSFLogError(LOGTAG, "%s: pc = %s, error = %s", __FUNCTION__,
                 mHandle.c_str(), errorString.c_str());
 
-    pco->OnCreateAnswerError(error, ObString(errorString.c_str()), rv);
+    pco->OnCreateAnswerError(*buildJSErrorData(result, errorString), rv);
   } else {
     UpdateSignalingState();
     pco->OnCreateAnswerSuccess(ObString(answer.c_str()), rv);
@@ -1366,24 +1360,13 @@ PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP) {
       MOZ_ASSERT(false);
       return NS_ERROR_FAILURE;
   }
-  nsresult nrv = mJsepSession->SetLocalDescription(sdpType, mLocalRequestedSDP);
-  if (NS_FAILED(nrv)) {
-    Error error;
-    switch (nrv) {
-      case NS_ERROR_INVALID_ARG:
-        error = kInvalidSessionDescription;
-        break;
-      case NS_ERROR_UNEXPECTED:
-        error = kInvalidState;
-        break;
-      default:
-        error = kInternalError;
-    }
-
+  JsepSession::Result result =
+      mJsepSession->SetLocalDescription(sdpType, mLocalRequestedSDP);
+  if (result.mError.isSome()) {
     std::string errorString = mJsepSession->GetLastError();
     CSFLogError(LOGTAG, "%s: pc = %s, error = %s", __FUNCTION__,
                 mHandle.c_str(), errorString.c_str());
-    pco->OnSetLocalDescriptionError(error, ObString(errorString.c_str()), rv);
+    pco->OnSetLocalDescriptionError(*buildJSErrorData(result, errorString), rv);
   } else {
     if (wasRestartingIce) {
       RecordIceRestartStatistics(sdpType);
@@ -1466,25 +1449,14 @@ PeerConnectionImpl::SetRemoteDescription(int32_t action, const char* aSDP) {
   }
 
   size_t originalTransceiverCount = mJsepSession->GetTransceivers().size();
-  nsresult nrv =
+  JsepSession::Result result =
       mJsepSession->SetRemoteDescription(sdpType, mRemoteRequestedSDP);
-  if (NS_FAILED(nrv)) {
-    Error error;
-    switch (nrv) {
-      case NS_ERROR_INVALID_ARG:
-        error = kInvalidSessionDescription;
-        break;
-      case NS_ERROR_UNEXPECTED:
-        error = kInvalidState;
-        break;
-      default:
-        error = kInternalError;
-    }
-
+  if (result.mError.isSome()) {
     std::string errorString = mJsepSession->GetLastError();
     CSFLogError(LOGTAG, "%s: pc = %s, error = %s", __FUNCTION__,
                 mHandle.c_str(), errorString.c_str());
-    pco->OnSetRemoteDescriptionError(error, ObString(errorString.c_str()), jrv);
+    pco->OnSetRemoteDescriptionError(*buildJSErrorData(result, errorString),
+                                     jrv);
   } else {
     // Iterate over the JSEP transceivers that were just created
     for (size_t i = originalTransceiverCount;
@@ -1563,15 +1535,12 @@ class RTCStatsReportInternalConstruct : public RTCStatsReportInternal {
                                   DOMHighResTimeStamp now) {
     mPcid = pcid;
     mRtpContributingSourceStats.Construct();
-    mInboundRTPStreamStats.Construct();
-    mOutboundRTPStreamStats.Construct();
-    mMediaStreamTrackStats.Construct();
-    mMediaStreamStats.Construct();
-    mTransportStats.Construct();
-    mIceComponentStats.Construct();
+    mInboundRtpStreamStats.Construct();
+    mOutboundRtpStreamStats.Construct();
+    mRemoteInboundRtpStreamStats.Construct();
+    mRemoteOutboundRtpStreamStats.Construct();
     mIceCandidatePairStats.Construct();
     mIceCandidateStats.Construct();
-    mCodecStats.Construct();
     mTimestamp.Construct(now);
     mTrickledIceCandidateStats.Construct();
     mRawLocalCandidates.Construct();
@@ -1584,15 +1553,16 @@ PeerConnectionImpl::GetStats(MediaStreamTrack* aSelector) {
   PC_AUTO_ENTER_API_CALL(true);
 
   GetStats(aSelector, false)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [handle = mHandle](UniquePtr<RTCStatsQuery>&& aQuery) {
-               DeliverStatsReportToPCObserver_m(
-                   handle, NS_OK, nsAutoPtr<RTCStatsQuery>(aQuery.release()));
-             },
-             [handle = mHandle](nsresult aError) {
-               DeliverStatsReportToPCObserver_m(handle, aError,
-                                                nsAutoPtr<RTCStatsQuery>());
-             });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [handle = mHandle](UniquePtr<RTCStatsQuery>&& aQuery) {
+            DeliverStatsReportToPCObserver_m(
+                handle, NS_OK, nsAutoPtr<RTCStatsQuery>(aQuery.release()));
+          },
+          [handle = mHandle](nsresult aError) {
+            DeliverStatsReportToPCObserver_m(handle, aError,
+                                             nsAutoPtr<RTCStatsQuery>());
+          });
 
   return NS_OK;
 }
@@ -1617,7 +1587,7 @@ PeerConnectionImpl::AddIceCandidate(
 
   STAMP_TIMECARD(mTimeCard, "Add Ice Candidate");
 
-  CSFLogDebug(LOGTAG, "AddIceCandidate: %s", aCandidate);
+  CSFLogDebug(LOGTAG, "AddIceCandidate: %s %s", aCandidate, aUfrag);
 
   // When remote candidates are added before our ICE ctx is up and running
   // (the transition to New is async through STS, so this is not impossible),
@@ -1638,10 +1608,10 @@ PeerConnectionImpl::AddIceCandidate(
   if (!aLevel.IsNull()) {
     level = Some(aLevel.Value());
   }
-  nsresult res = mJsepSession->AddRemoteIceCandidate(aCandidate, aMid, level,
-                                                     &transportId);
+  JsepSession::Result result = mJsepSession->AddRemoteIceCandidate(
+      aCandidate, aMid, level, aUfrag, &transportId);
 
-  if (NS_SUCCEEDED(res)) {
+  if (!result.mError.isSome()) {
     // We do not bother PCMedia about this before offer/answer concludes.
     // Once offer/answer concludes, PCMedia will extract these candidates from
     // the remote SDP.
@@ -1652,30 +1622,15 @@ PeerConnectionImpl::AddIceCandidate(
     pco->OnAddIceCandidateSuccess(rv);
   } else {
     ++mAddCandidateErrorCount;
-    Error error;
-    switch (res) {
-      case NS_ERROR_UNEXPECTED:
-        error = kInvalidState;
-        break;
-      case NS_ERROR_INVALID_ARG:
-        error = kOperationError;
-        break;
-      case NS_ERROR_TYPE_ERR:
-        error = kTypeError;
-        break;
-      default:
-        error = kInternalError;
-    }
-
     std::string errorString = mJsepSession->GetLastError();
 
     CSFLogError(LOGTAG,
                 "Failed to incorporate remote candidate into SDP:"
                 " res = %u, candidate = %s, level = %i, error = %s",
-                static_cast<unsigned>(res), aCandidate, level.valueOr(-1),
-                errorString.c_str());
+                static_cast<unsigned>(*result.mError), aCandidate,
+                level.valueOr(-1), errorString.c_str());
 
-    pco->OnAddIceCandidateError(error, ObString(errorString.c_str()), rv);
+    pco->OnAddIceCandidateError(*buildJSErrorData(result, errorString), rv);
   }
 
   return NS_OK;
@@ -2499,11 +2454,6 @@ void PeerConnectionImpl::CandidateReady(const std::string& candidate,
                                         const std::string& ufrag) {
   PC_AUTO_ENTER_API_CALL_VOID_RETURN(false);
 
-  if (candidate.empty()) {
-    mJsepSession->EndOfLocalCandidates(transportId);
-    return;
-  }
-
   if (mForceIceTcp && std::string::npos != candidate.find(" UDP ")) {
     CSFLogWarn(LOGTAG, "Blocking local UDP candidate: %s", candidate.c_str());
     return;
@@ -2513,8 +2463,8 @@ void PeerConnectionImpl::CandidateReady(const std::string& candidate,
   uint16_t level = 0;
   std::string mid;
   bool skipped = false;
-  nsresult res = mJsepSession->AddLocalIceCandidate(candidate, transportId,
-                                                    &level, &mid, &skipped);
+  nsresult res = mJsepSession->AddLocalIceCandidate(
+      candidate, transportId, ufrag, &level, &mid, &skipped);
 
   if (NS_FAILED(res)) {
     std::string errorString = mJsepSession->GetLastError();
@@ -2822,12 +2772,12 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
           uint32_t packetsReceived;
           uint64_t bytesReceived;
           uint32_t packetsLost;
-          int32_t rtt;
+          Maybe<double> rtt;
           if (mp.Conduit()->GetRTCPReceiverReport(&jitterMs, &packetsReceived,
                                                   &bytesReceived, &packetsLost,
                                                   &rtt)) {
             remoteId = NS_LITERAL_STRING("outbound_rtcp_") + idstr;
-            RTCInboundRTPStreamStats s;
+            RTCRemoteInboundRtpStreamStats s;
             // TODO Bug 1496533 - use reception time not query time
             s.mTimestamp.Construct(query->now);
             s.mId.Construct(remoteId);
@@ -2841,16 +2791,14 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mPacketsReceived.Construct(packetsReceived);
             s.mBytesReceived.Construct(bytesReceived);
             s.mPacketsLost.Construct(packetsLost);
-            if (rtt > 0) {  // RTT is not reported when it is zero
-              s.mRoundTripTime.Construct(static_cast<double>(rtt) / 1000);
-            }
-            query->report->mInboundRTPStreamStats.Value().AppendElement(
+            rtt.apply([&s](auto r) { s.mRoundTripTime.Construct(r); });
+            query->report->mRemoteInboundRtpStreamStats.Value().AppendElement(
                 s, fallible);
           }
         }
         // Then, fill in local side (with cross-link to remote only if present)
         {
-          RTCOutboundRTPStreamStats s;
+          RTCOutboundRtpStreamStats s;
           // TODO Bug 1496533 - use reception time not query time
           s.mTimestamp.Construct(query->now);
           s.mId.Construct(localId);
@@ -2894,7 +2842,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
               qpSum.apply([&s](uint64_t aQp) { s.mQpSum.Construct(aQp); });
             }
           });
-          query->report->mOutboundRTPStreamStats.Value().AppendElement(
+          query->report->mOutboundRtpStreamStats.Value().AppendElement(
               s, fallible);
         }
         break;
@@ -2913,7 +2861,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
           uint64_t bytesSent;
           if (mp.Conduit()->GetRTCPSenderReport(&packetsSent, &bytesSent)) {
             remoteId = NS_LITERAL_STRING("inbound_rtcp_") + idstr;
-            RTCOutboundRTPStreamStats s;
+            RTCRemoteOutboundRtpStreamStats s;
             // TODO Bug 1496533 - use reception time not query time
             s.mTimestamp.Construct(query->now);
             s.mId.Construct(remoteId);
@@ -2925,12 +2873,12 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mLocalId.Construct(localId);
             s.mPacketsSent.Construct(packetsSent);
             s.mBytesSent.Construct(bytesSent);
-            query->report->mOutboundRTPStreamStats.Value().AppendElement(
+            query->report->mRemoteOutboundRtpStreamStats.Value().AppendElement(
                 s, fallible);
           }
         }
         // Then, fill in local side (with cross-link to remote only if present)
-        RTCInboundRTPStreamStats s;
+        RTCInboundRtpStreamStats s;
         s.mTimestamp.Construct(query->now);
         s.mId.Construct(localId);
         s.mType.Construct(RTCStatsType::Inbound_rtp);
@@ -2977,7 +2925,7 @@ RefPtr<RTCStatsQueryPromise> PeerConnectionImpl::ExecuteStatsQuery_s(
             s.mFramesDecoded.Construct(framesDecoded);
           }
         });
-        query->report->mInboundRTPStreamStats.Value().AppendElement(s,
+        query->report->mInboundRtpStreamStats.Value().AppendElement(s,
                                                                     fallible);
         // Fill in Contributing Source statistics
         mp.GetContributingSourceStats(
@@ -3021,8 +2969,7 @@ void PeerConnectionImpl::DeliverStatsReportToPCObserver_m(
       if (NS_SUCCEEDED(result)) {
         pco->OnGetStatsSuccess(*query->report, rv);
       } else {
-        pco->OnGetStatsError(kInternalError,
-                             ObString("Failed to fetch statistics"), rv);
+        pco->OnGetStatsError(ObString("Failed to fetch statistics"), rv);
       }
 
       if (rv.Failed()) {

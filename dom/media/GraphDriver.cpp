@@ -34,7 +34,6 @@ GraphDriver::GraphDriver(MediaStreamGraphImpl* aGraphImpl)
     : mIterationStart(0),
       mIterationEnd(0),
       mGraphImpl(aGraphImpl),
-      mCurrentTimeStamp(TimeStamp::Now()),
       mPreviousDriver(nullptr),
       mNextDriver(nullptr) {}
 
@@ -201,8 +200,7 @@ class MediaStreamGraphInitThreadRunnable : public Runnable {
       mDriver->SetPreviousDriver(nullptr);
     } else {
       MonitorAutoLock mon(mDriver->mGraphImpl->GetMonitor());
-      MOZ_ASSERT(mDriver->mGraphImpl->MessagesQueued() ||
-                     mDriver->mGraphImpl->mForceShutDown,
+      MOZ_ASSERT(mDriver->mGraphImpl->MessagesQueued(),
                  "Don't start a graph without messages queued.");
       mDriver->mGraphImpl->SwapMessageQueues();
     }
@@ -263,6 +261,7 @@ void ThreadedDriver::Shutdown() {
 SystemClockDriver::SystemClockDriver(MediaStreamGraphImpl* aGraphImpl)
     : ThreadedDriver(aGraphImpl),
       mInitialTimeStamp(TimeStamp::Now()),
+      mCurrentTimeStamp(TimeStamp::Now()),
       mLastTimeStamp(TimeStamp::Now()),
       mIsFallback(false) {}
 
@@ -343,11 +342,6 @@ MediaTime SystemClockDriver::GetIntervalForIteration() {
        GraphImpl()->MediaTimeToSeconds(StateComputedTime())));
 
   return interval;
-}
-
-TimeStamp OfflineClockDriver::GetCurrentTimeStamp() {
-  MOZ_CRASH("This driver does not support getting the current timestamp.");
-  return TimeStamp();
 }
 
 void ThreadedDriver::WaitForNextIteration() {
@@ -467,10 +461,12 @@ AsyncCubebTask::Run() {
 }
 
 StreamAndPromiseForOperation::StreamAndPromiseForOperation(
-    MediaStream* aStream, void* aPromise, dom::AudioContextOperation aOperation)
-    : mStream(aStream), mPromise(aPromise), mOperation(aOperation) {
-  // MOZ_ASSERT(aPromise);
-}
+    MediaStream* aStream, void* aPromise, dom::AudioContextOperation aOperation,
+    dom::AudioContextOperationFlags aFlags)
+    : mStream(aStream),
+      mPromise(aPromise),
+      mOperation(aOperation),
+      mFlags(aFlags) {}
 
 AudioCallbackDriver::AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl,
                                          uint32_t aInputChannelCount)
@@ -581,7 +577,7 @@ bool AudioCallbackDriver::Init() {
     RefPtr<CubebDeviceEnumerator> enumerator = Enumerator::GetInstance();
     RefPtr<AudioDeviceInfo> device = enumerator->DeviceInfoFromName(
         NS_ConvertUTF8toUTF16(forcedOutputDeviceName), EnumeratorSide::OUTPUT);
-    if (device->DeviceID()) {
+    if (device && device->DeviceID()) {
       forcedOutputDeviceId = device->DeviceID();
     }
   }
@@ -872,8 +868,6 @@ long AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
        (uint32_t)durationMS,
        (long)(nextStateComputedTime - stateComputedTime)));
 
-  mCurrentTimeStamp = TimeStamp::Now();
-
   if (stateComputedTime < mIterationEnd) {
     LOG(LogLevel::Error,
         ("%p: Media graph global underrun detected", GraphImpl()));
@@ -1050,12 +1044,16 @@ uint32_t AudioCallbackDriver::IterationDuration() {
 bool AudioCallbackDriver::IsStarted() { return mStarted; }
 
 void AudioCallbackDriver::EnqueueStreamAndPromiseForOperation(
-    MediaStream* aStream, void* aPromise,
-    dom::AudioContextOperation aOperation) {
+    MediaStream* aStream, void* aPromise, dom::AudioContextOperation aOperation,
+    dom::AudioContextOperationFlags aFlags) {
   MOZ_ASSERT(OnGraphThread() || !ThreadRunning());
   MonitorAutoLock mon(mGraphImpl->GetMonitor());
-  mPromisesForOperation.AppendElement(
-      StreamAndPromiseForOperation(aStream, aPromise, aOperation));
+  MOZ_ASSERT((aFlags | dom::AudioContextOperationFlags::SendStateChange) ||
+             !aPromise);
+  if (aFlags == dom::AudioContextOperationFlags::SendStateChange) {
+    mPromisesForOperation.AppendElement(
+        StreamAndPromiseForOperation(aStream, aPromise, aOperation, aFlags));
+  }
 }
 
 void AudioCallbackDriver::CompleteAudioContextOperations(
@@ -1076,8 +1074,9 @@ void AudioCallbackDriver::CompleteAudioContextOperations(
          s.mOperation == dom::AudioContextOperation::Resume) ||
         (aOperation == AsyncCubebOperation::SHUTDOWN &&
          s.mOperation != dom::AudioContextOperation::Resume)) {
+      MOZ_ASSERT(s.mFlags == dom::AudioContextOperationFlags::SendStateChange);
       GraphImpl()->AudioContextOperationCompleted(s.mStream, s.mPromise,
-                                                  s.mOperation);
+                                                  s.mOperation, s.mFlags);
       array.RemoveElementAt(i);
       i--;
     }

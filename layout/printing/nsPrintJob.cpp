@@ -83,10 +83,10 @@ static const char kPrintingPromptService[] =
 #include "nsContentCID.h"
 #include "nsLayoutCID.h"
 #include "nsContentUtils.h"
-#include "nsIPresShell.h"
 #include "nsLayoutStylesheetCache.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "Text.h"
 
 #include "nsWidgetsCID.h"
@@ -2235,11 +2235,8 @@ nsresult nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO) {
   rv = aPO->mViewManager->Init(printData->mPrintDC);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  UniquePtr<ServoStyleSet> styleSet =
-      mDocViewerPrint->CreateStyleSet(aPO->mDocument);
-
-  aPO->mPresShell = aPO->mDocument->CreateShell(
-      aPO->mPresContext, aPO->mViewManager, std::move(styleSet));
+  aPO->mPresShell =
+      aPO->mDocument->CreatePresShell(aPO->mPresContext, aPO->mViewManager);
   if (!aPO->mPresShell) {
     return NS_ERROR_FAILURE;
   }
@@ -2426,14 +2423,14 @@ static nsINode* GetCorrespondingNodeInDocument(const nsINode* aNode,
 static NS_NAMED_LITERAL_STRING(kEllipsis, u"\x2026");
 
 static nsresult DeleteUnselectedNodes(Document* aOrigDoc, Document* aDoc) {
-  nsIPresShell* origShell = aOrigDoc->GetShell();
-  nsIPresShell* shell = aDoc->GetShell();
-  NS_ENSURE_STATE(origShell && shell);
+  PresShell* origPresShell = aOrigDoc->GetPresShell();
+  PresShell* presShell = aDoc->GetPresShell();
+  NS_ENSURE_STATE(origPresShell && presShell);
 
   RefPtr<Selection> origSelection =
-      origShell->GetCurrentSelection(SelectionType::eNormal);
+      origPresShell->GetCurrentSelection(SelectionType::eNormal);
   RefPtr<Selection> selection =
-      shell->GetCurrentSelection(SelectionType::eNormal);
+      presShell->GetCurrentSelection(SelectionType::eNormal);
   NS_ENSURE_STATE(origSelection && selection);
 
   nsINode* bodyNode = aDoc->GetBodyElement();

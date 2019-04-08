@@ -1,5 +1,6 @@
-/* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // Tests loading sourcemapped sources, setting breakpoints, and
 // stepping in them.
@@ -22,10 +23,7 @@ async function assertEditorBreakpoint(dbg, line, shouldExist) {
   const exists = !!el.querySelector(".new-breakpoint");
   ok(
     exists === shouldExist,
-    "Breakpoint " +
-      (shouldExist ? "exists" : "does not exist") +
-      " on line " +
-      line
+    `Breakpoint ${shouldExist ? "exists" : "does not exist"} on line ${line}`
   );
 }
 
@@ -42,11 +40,25 @@ async function clickGutter(dbg, line) {
   clickDOMElement(dbg, el);
 }
 
+async function waitForBreakpointCount(dbg, count) {
+  const {
+    selectors: { getBreakpointCount },
+    getState
+  } = dbg;
+  await waitForState(dbg, state => getBreakpointCount(getState()) == count);
+}
+
 add_task(async function() {
   // NOTE: the CORS call makes the test run times inconsistent
-  const dbg = await initDebugger("doc-sourcemaps.html", "entry.js", "output.js", "times2.js", "opts.js");
+  const dbg = await initDebugger(
+    "doc-sourcemaps.html",
+    "entry.js",
+    "output.js",
+    "times2.js",
+    "opts.js"
+  );
   const {
-    selectors: { getBreakpoint, getBreakpointCount },
+    selectors: { getBreakpointCount },
     getState
   } = dbg;
 
@@ -60,12 +72,12 @@ add_task(async function() {
   await selectSource(dbg, bundleSrc);
 
   await clickGutter(dbg, 70);
-  await waitForDispatch(dbg, "ADD_BREAKPOINT");
-  assertEditorBreakpoint(dbg, 70, true);
+  await waitForBreakpointCount(dbg, 1);
+  await assertEditorBreakpoint(dbg, 70, true);
 
   await clickGutter(dbg, 70);
-  await waitForDispatch(dbg, "REMOVE_BREAKPOINT");
-  is(getBreakpointCount(getState()), 0, "No breakpoints exists");
+  await waitForBreakpointCount(dbg, 0);
+  is(dbg.selectors.getBreakpointCount(getState()), 0, "No breakpoints exists");
 
   const entrySrc = findSource(dbg, "entry.js");
 
@@ -89,12 +101,12 @@ add_task(async function() {
   await stepIn(dbg);
   assertPausedLocation(dbg);
 
-  await dbg.actions.jumpToMappedSelectedLocation();
+  await dbg.actions.jumpToMappedSelectedLocation(getContext(dbg));
   await stepOver(dbg);
   assertPausedLocation(dbg);
   assertDebugLine(dbg, 71);
 
-  await dbg.actions.jumpToMappedSelectedLocation();
+  await dbg.actions.jumpToMappedSelectedLocation(getContext(dbg));
   await stepOut(dbg);
   assertPausedLocation(dbg);
   assertDebugLine(dbg, 16);

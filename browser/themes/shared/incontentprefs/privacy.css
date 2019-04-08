@@ -18,6 +18,11 @@
   width: 16px;
 }
 
+.content-blocking-category .checkbox-label-box {
+  -moz-context-properties: fill;
+  fill: currentColor;
+}
+
 #contentBlockingTrackingProtectionCheckbox > .checkbox-label-box {
   list-style-image: url("chrome://browser/skin/controlcenter/trackers.svg");
 }
@@ -97,13 +102,11 @@
 }
 
 #trackingProtectionShield {
-  background-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg");
+  list-style-image: url("chrome://browser/skin/controlcenter/tracking-protection.svg");
   -moz-context-properties: fill;
   fill: #737373;
   width: 64px;
   height: 64px;
-  background-repeat: no-repeat;
-  background-size: contain;
   margin-inline-end: 10px;
 }
 
@@ -126,11 +129,6 @@
 .content-blocking-warning > .indent,
 .content-blocking-category > .indent {
   margin-inline-end: 28px;
-}
-
-#contentBlockingCategories[fallback-ui] .default-content-blocking-ui,
-#contentBlockingCategories:not([fallback-ui]) .fallback-content-blocking-ui {
-  display: none;
 }
 
 .arrowhead {
@@ -237,13 +235,13 @@
   margin-top: 18px;
 }
 
-.extra-information-label:last-child {
-  margin-bottom: 18px;
-}
-
 .content-blocking-category.expanded .content-blocking-extra-information,
 .content-blocking-category.selected .content-blocking-extra-information {
   visibility: visible;
+}
+
+.content-blocking-extra-information > .indent {
+  margin-bottom: 18px;
 }
 
 .content-blocking-extra-information > .custom-option {
@@ -257,7 +255,7 @@
   margin: 10px 0;
 }
 
-.content-blocking-warning + .content-blocking-warning {
+.content-blocking-warning:not([hidden]) + .content-blocking-warning {
   margin-top: 0;
 }
 
@@ -268,6 +266,16 @@
 
 .content-blocking-cookies-image {
   list-style-image: url("chrome://browser/skin/controlcenter/3rdpartycookies-disabled.svg");
+  margin-inline-end: 5px;
+}
+
+.content-blocking-cryptominers-image {
+  list-style-image: url("chrome://browser/skin/controlcenter/cryptominers-disabled.svg");
+  margin-inline-end: 5px;
+}
+
+.content-blocking-fingerprinters-image {
+  list-style-image: url("chrome://browser/skin/controlcenter/fingerprinters-disabled.svg");
   margin-inline-end: 5px;
 }
 

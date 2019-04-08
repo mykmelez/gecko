@@ -16,6 +16,7 @@
 #include "mozilla/dom/FileSystemUtils.h"
 #include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/WheelEventBinding.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs.h"
 #include "nsAttrValueInlines.h"
 #include "nsCRTGlue.h"
@@ -27,7 +28,7 @@
 
 #include "HTMLFormSubmissionConstants.h"
 #include "mozilla/Telemetry.h"
-#include "nsIControllers.h"
+#include "nsBaseCommandController.h"
 #include "nsIStringBundle.h"
 #include "nsFocusManager.h"
 #include "nsColorControlFrame.h"
@@ -43,7 +44,6 @@
 #include "nsMappedAttributes.h"
 #include "nsIFormControl.h"
 #include "mozilla/dom/Document.h"
-#include "nsIPresShell.h"
 #include "nsIFormControlFrame.h"
 #include "nsITextControlFrame.h"
 #include "nsIFrame.h"
@@ -109,7 +109,6 @@
 #include "nsIColorPicker.h"
 #include "nsIStringEnumerator.h"
 #include "HTMLSplitOnSpacesTokenizer.h"
-#include "nsIController.h"
 #include "nsIMIMEInfo.h"
 #include "nsFrameSelection.h"
 #include "nsBaseCommandController.h"
@@ -2614,7 +2613,7 @@ nsresult HTMLInputElement::SetValueInternal(const nsAString& aValue,
         // FIXME(emilio): eSetValue_Internal is not supposed to change state,
         // but maybe we could run this too?
         if (aFlags & nsTextEditorState::eSetValue_ByContent) {
-          MaybeUpdateAllValidityStates();
+          MaybeUpdateAllValidityStates(!mDoneCreating);
         }
       } else {
         free(mInputData.mValue);
@@ -5448,22 +5447,22 @@ nsIControllers* HTMLInputElement::GetControllers(ErrorResult& aRv) {
         return nullptr;
       }
 
-      nsCOMPtr<nsIController> controller =
+      RefPtr<nsBaseCommandController> commandController =
           nsBaseCommandController::CreateEditorController();
-      if (!controller) {
+      if (!commandController) {
         aRv.Throw(NS_ERROR_FAILURE);
         return nullptr;
       }
 
-      mControllers->AppendController(controller);
+      mControllers->AppendController(commandController);
 
-      controller = nsBaseCommandController::CreateEditingController();
-      if (!controller) {
+      commandController = nsBaseCommandController::CreateEditingController();
+      if (!commandController) {
         aRv.Throw(NS_ERROR_FAILURE);
         return nullptr;
       }
 
-      mControllers->AppendController(controller);
+      mControllers->AppendController(commandController);
     }
   }
 
@@ -5662,6 +5661,7 @@ nsresult HTMLInputElement::SetDefaultValueAsValue() {
   GetDefaultValue(resetVal);
 
   // SetValueInternal is going to sanitize the value.
+  // TODO(mbrodesser): sanitizing will only happen if `mDoneCreating` is true.
   return SetValueInternal(resetVal, nsTextEditorState::eSetValue_Internal);
 }
 
@@ -5673,6 +5673,14 @@ void HTMLInputElement::SetDirectionFromValue(bool aNotify) {
   }
 }
 
+namespace {
+
+bool IsDateOrTime(uint8_t aType) {
+  return (aType == NS_FORM_INPUT_DATE) || (aType == NS_FORM_INPUT_TIME);
+}
+
+}  // namespace
+
 NS_IMETHODIMP
 HTMLInputElement::Reset() {
   // We should be able to reset all dirty flags regardless of the type.
@@ -5681,8 +5689,15 @@ HTMLInputElement::Reset() {
   mLastValueChangeWasInteractive = false;
 
   switch (GetValueMode()) {
-    case VALUE_MODE_VALUE:
-      return SetDefaultValueAsValue();
+    case VALUE_MODE_VALUE: {
+      nsresult result = SetDefaultValueAsValue();
+      if (IsDateOrTime(mType)) {
+        // mFocusedValue has to be set here, so that `FireChangeEventIfNeeded`
+        // can fire a change event if necessary.
+        GetValue(mFocusedValue, CallerType::System);
+      }
+      return result;
+    }
     case VALUE_MODE_DEFAULT_ON:
       DoSetChecked(DefaultChecked(), true, false);
       return NS_OK;
@@ -5917,7 +5932,7 @@ void HTMLInputElement::DoneCreatingElement() {
     DoSetChecked(DefaultChecked(), false, false);
   }
 
-  // Sanitize the value.
+  // Sanitize the value and potentially set mFocusedValue.
   if (GetValueMode() == VALUE_MODE_VALUE) {
     nsAutoString aValue;
     GetValue(aValue, CallerType::System);
@@ -5925,6 +5940,12 @@ void HTMLInputElement::DoneCreatingElement() {
     // may potentially be big, but most likely we've failed to allocate
     // before the type change.)
     SetValueInternal(aValue, nsTextEditorState::eSetValue_Internal);
+
+    if (IsDateOrTime(mType)) {
+      // mFocusedValue has to be set here, so that `FireChangeEventIfNeeded` can
+      // fire a change event if necessary.
+      mFocusedValue = aValue;
+    }
   }
 
   mShouldInitChecked = false;

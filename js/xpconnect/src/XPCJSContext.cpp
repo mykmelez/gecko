@@ -71,6 +71,8 @@
 #endif
 
 #ifdef XP_WIN
+// For min.
+#  include <algorithm>
 #  include <windows.h>
 #endif
 
@@ -698,7 +700,7 @@ bool XPCJSContext::InterruptCallback(JSContext* cx) {
 
   // Show the prompt to the user, and kill if requested.
   nsGlobalWindowInner::SlowScriptResponse response =
-      win->ShowSlowScriptDialog(addonId);
+      win->ShowSlowScriptDialog(cx, addonId);
   if (response == nsGlobalWindowInner::KillSlowScript) {
     if (Preferences::GetBool("dom.global_stop_script", true)) {
       xpc::Scriptability::Get(global).Block();
@@ -761,13 +763,15 @@ static mozilla::Atomic<bool> sSharedMemoryEnabled(false);
 static mozilla::Atomic<bool> sStreamsEnabled(false);
 static mozilla::Atomic<bool> sBigIntEnabled(false);
 static mozilla::Atomic<bool> sFieldsEnabled(false);
+static mozilla::Atomic<bool> sAwaitFixEnabled(false);
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(sSharedMemoryEnabled)
       .setBigIntEnabled(sBigIntEnabled)
       .setStreamsEnabled(sStreamsEnabled)
-      .setFieldsEnabled(sFieldsEnabled);
+      .setFieldsEnabled(sFieldsEnabled)
+      .setAwaitFixEnabled(sAwaitFixEnabled);
 }
 
 static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
@@ -808,8 +812,10 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
 
   int32_t baselineThreshold =
       Preferences::GetInt(JS_OPTIONS_DOT_STR "baselinejit.threshold", -1);
-  int32_t ionThreshold =
+  int32_t normalIonThreshold =
       Preferences::GetInt(JS_OPTIONS_DOT_STR "ion.threshold", -1);
+  int32_t fullIonThreshold =
+      Preferences::GetInt(JS_OPTIONS_DOT_STR "ion.full.threshold", -1);
   int32_t ionFrequentBailoutThreshold = Preferences::GetInt(
       JS_OPTIONS_DOT_STR "ion.frequent_bailout_threshold", -1);
 
@@ -843,14 +849,13 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
   bool spectreJitToCxxCalls =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.jit_to_C++_calls");
 
-  bool unboxedObjects =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "unboxed_objects");
-
   sSharedMemoryEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
   sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
   sFieldsEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
+  sAwaitFixEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.await_fix");
 
 #ifdef DEBUG
   sExtraWarningsForSystemJS =
@@ -908,8 +913,10 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
   JS_SetOffthreadIonCompilationEnabled(cx, offthreadIonCompilation);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_WARMUP_TRIGGER,
                                 useBaselineEager ? 0 : baselineThreshold);
-  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_WARMUP_TRIGGER,
-                                useIonEager ? 0 : ionThreshold);
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_NORMAL_WARMUP_TRIGGER,
+                                useIonEager ? 0 : normalIonThreshold);
+  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_FULL_WARMUP_TRIGGER,
+                                useIonEager ? 0 : fullIonThreshold);
   JS_SetGlobalJitCompilerOption(cx,
                                 JSJITCOMPILER_ION_FREQUENT_BAILOUT_THRESHOLD,
                                 ionFrequentBailoutThreshold);
@@ -933,9 +940,6 @@ static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
                                 spectreValueMasking);
   JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_JIT_TO_CXX_CALLS,
                                 spectreJitToCxxCalls);
-
-  JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_UNBOXED_OBJECTS,
-                                unboxedObjects);
 }
 
 XPCJSContext::~XPCJSContext() {
@@ -1139,13 +1143,17 @@ nsresult XPCJSContext::Initialize(XPCJSContext* aPrimaryContext) {
 #  endif
 #elif defined(XP_WIN)
   // 1MB is the default stack size on Windows. We use the -STACK linker flag
-  // (see WIN32_EXE_LDFLAGS in config/config.mk) to request a larger stack,
-  // so we determine the stack size at runtime.
-  const size_t kStackQuota = GetWindowsStackSize();
+  // (see WIN32_EXE_LDFLAGS in config/config.mk) to request a larger stack, so
+  // we determine the stack size at runtime. But 8MB is more than the Web can
+  // handle (bug 1537609), so clamp to something remotely reasonable.
 #  if defined(MOZ_ASAN)
   // See the standalone MOZ_ASAN branch below for the ASan case.
+  const size_t kStackQuota =
+      std::min(GetWindowsStackSize(), size_t(6 * 1024 * 1024));
   const size_t kTrustedScriptBuffer = 450 * 1024;
 #  else
+  const size_t kStackQuota =
+      std::min(GetWindowsStackSize(), size_t(2 * 1024 * 1024));
   const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8)
                                           ? 180 * 1024   // win64
                                           : 120 * 1024;  // win32

@@ -48,11 +48,11 @@ typedef enum JSGCMode {
   /** Perform per-zone GCs until too much garbage has accumulated. */
   JSGC_MODE_ZONE = 1,
 
-  /**
-   * Collect in short time slices rather than all at once. Implies
-   * JSGC_MODE_ZONE.
-   */
-  JSGC_MODE_INCREMENTAL = 2
+  /** Collect in short time slices rather than all at once. */
+  JSGC_MODE_INCREMENTAL = 2,
+
+  /** Both of the above. */
+  JSGC_MODE_ZONE_INCREMENTAL = 3,
 } JSGCMode;
 
 /**
@@ -91,6 +91,9 @@ typedef enum JSGCParamKey {
   /**
    * Maximum size of the generational GC nurseries.
    *
+   * This will be rounded to the nearest gc::ChunkSize.  The special value 0
+   * will disable generational GC.
+   *
    * Pref: javascript.options.mem.nursery.max_kb
    * Default: JS::DefaultNurseryBytes
    */
@@ -108,7 +111,7 @@ typedef enum JSGCParamKey {
    * See: JSGCMode in GCAPI.h
    * prefs: javascript.options.mem.gc_per_zone and
    *   javascript.options.mem.gc_incremental.
-   * Default: JSGC_MODE_INCREMENTAL
+   * Default: JSGC_MODE_ZONE_INCREMENTAL
    */
   JSGC_MODE = 6,
 
@@ -292,6 +295,17 @@ typedef enum JSGCParamKey {
    * Pref: None
    */
   JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT = 30,
+
+  /**
+   * Minimum size of the generational GC nurseries.
+   *
+   * This value will be rounded to the nearest Nursery::SubChunkStep if below
+   * gc::ChunkSize, otherwise it'll be rounded to the nearest gc::ChunkSize.
+   *
+   * Default: Nursery::SubChunkLimit
+   * Pref: None
+   */
+  JSGC_MIN_NURSERY_BYTES = 31,
 
 } JSGCParamKey;
 
@@ -511,8 +525,8 @@ extern JS_PUBLIC_API void NonIncrementalGC(JSContext* cx,
  * must be met:
  *  - The collection must be run by calling JS::IncrementalGC() rather than
  *    JS_GC().
- *  - The GC mode must have been set to JSGC_MODE_INCREMENTAL with
- *    JS_SetGCParameter().
+ *  - The GC mode must have been set to JSGC_MODE_INCREMENTAL or
+ *    JSGC_MODE_ZONE_INCREMENTAL with JS_SetGCParameter().
  *
  * Note: Even if incremental GC is enabled and working correctly,
  *       non-incremental collections can still happen when low on memory.

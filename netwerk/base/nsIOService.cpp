@@ -59,6 +59,7 @@
 #include "ReferrerPolicy.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
+#include "nsExceptionHandler.h"
 
 namespace mozilla {
 namespace net {
@@ -907,7 +908,23 @@ nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
                             aLoadingNode, aSecurityFlags, aContentPolicyType,
                             aLoadingClientInfo, aController);
   }
-  MOZ_ASSERT(loadInfo, "Please pass security info when creating a channel");
+  if (!loadInfo) {
+    JSContext *cx = nsContentUtils::GetCurrentJSContext();
+    // if coming from JS we like to know the JS stack, otherwise
+    // we just assert that we are able to create a valid loadinfo!
+    if (cx) {
+      JS::UniqueChars chars = xpc_PrintJSStack(cx,
+                                               /*showArgs=*/false,
+                                               /*showLocals=*/false,
+                                               /*showThisProps=*/false);
+      nsDependentCString stackTrace(chars.get());
+      CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::Bug_1541161,
+                                         stackTrace);
+    }
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "Please pass security info when creating a channel");
+    return NS_ERROR_INVALID_ARG;
+  }
   return NewChannelFromURIWithProxyFlagsInternal(aURI, aProxyURI, aProxyFlags,
                                                  loadInfo, result);
 }
@@ -938,7 +955,7 @@ nsresult nsIOService::NewChannelFromURIWithProxyFlagsInternal(
   } else {
     rv = handler->NewChannel(aURI, aLoadInfo, getter_AddRefs(channel));
   }
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) return rv;
 
   // Make sure that all the individual protocolhandlers attach a loadInfo.
   if (aLoadInfo) {
@@ -1763,6 +1780,10 @@ nsresult nsIOService::SpeculativeConnectInternal(
   nsCOMPtr<nsIPrincipal> loadingPrincipal = aPrincipal;
 
   MOZ_ASSERT(aPrincipal, "We expect passing a principal here.");
+
+  if (!aPrincipal) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   // dummy channel used to create a TCP connection.
   // we perform security checks on the *real* channel, responsible

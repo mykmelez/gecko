@@ -26,8 +26,8 @@
  * For a collection to be carried out incrementally the following conditions
  * must be met:
  *  - the collection must be run by calling js::GCSlice() rather than js::GC()
- *  - the GC mode must have been set to JSGC_MODE_INCREMENTAL with
- *    JS_SetGCParameter()
+ *  - the GC mode must have been set to JSGC_MODE_INCREMENTAL or
+ *    JSGC_MODE_ZONE_INCREMENTAL with JS_SetGCParameter()
  *  - no thread may have an AutoKeepAtoms instance on the stack
  *
  * The last condition is an engine-internal mechanism to ensure that incremental
@@ -286,6 +286,14 @@ static const size_t GCZoneAllocThresholdBase = 30 * 1024 * 1024;
 /* JSGC_MAX_MALLOC_BYTES */
 static const size_t MaxMallocBytes = 128 * 1024 * 1024;
 
+/*
+ * JSGC_MIN_NURSERY_BYTES
+ *
+ * 192K is conservative, not too low that root marking dominates. The Limit
+ * should be a multiple of Nursery::SubChunkStep.
+ */
+static const size_t GCMinNurseryBytes = 192 * 1024;
+
 /* JSGC_ALLOCATION_THRESHOLD_FACTOR */
 static const float AllocThresholdFactor = 0.9f;
 
@@ -338,7 +346,7 @@ static const uint32_t MaxEmptyChunkCount = 30;
 static const int64_t DefaultTimeBudget = SliceBudget::UnlimitedTimeBudget;
 
 /* JSGC_MODE */
-static const JSGCMode Mode = JSGC_MODE_INCREMENTAL;
+static const JSGCMode Mode = JSGC_MODE_ZONE_INCREMENTAL;
 
 /* JSGC_COMPACTING_ENABLED */
 static const bool CompactingEnabled = true;
@@ -1364,7 +1372,7 @@ bool GCRuntime::setParameter(JSGCParamKey key, uint32_t value,
       break;
     case JSGC_MODE:
       if (mode != JSGC_MODE_GLOBAL && mode != JSGC_MODE_ZONE &&
-          mode != JSGC_MODE_INCREMENTAL) {
+          mode != JSGC_MODE_INCREMENTAL && mode != JSGC_MODE_ZONE_INCREMENTAL) {
         return false;
       }
       mode = JSGCMode(value);
@@ -1394,7 +1402,20 @@ bool GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value,
     case JSGC_MAX_BYTES:
       gcMaxBytes_ = value;
       break;
+    case JSGC_MIN_NURSERY_BYTES:
+      if ((value > gcMaxNurseryBytes_ && gcMaxNurseryBytes_ != 0) ||
+          value < ArenaSize) {
+        // We make an exception for gcMaxNurseryBytes_ == 0 since that special
+        // value is used to disable generational GC.
+        return false;
+      }
+      gcMinNurseryBytes_ = value;
+      break;
     case JSGC_MAX_NURSERY_BYTES:
+      if ((value < gcMinNurseryBytes_) && (value != 0)) {
+        // Note that we make an exception for value == 0 as above.
+        return false;
+      }
       gcMaxNurseryBytes_ = value;
       break;
     case JSGC_HIGH_FREQUENCY_TIME_LIMIT:
@@ -1569,6 +1590,7 @@ void GCSchedulingTunables::setMaxEmptyChunkCount(uint32_t value) {
 GCSchedulingTunables::GCSchedulingTunables()
     : gcMaxBytes_(0),
       maxMallocBytes_(TuningDefaults::MaxMallocBytes),
+      gcMinNurseryBytes_(TuningDefaults::GCMinNurseryBytes),
       gcMaxNurseryBytes_(0),
       gcZoneAllocThresholdBase_(TuningDefaults::GCZoneAllocThresholdBase),
       allocThresholdFactor_(TuningDefaults::AllocThresholdFactor),
@@ -1625,7 +1647,10 @@ void GCSchedulingTunables::resetParameter(JSGCParamKey key,
     case JSGC_MAX_BYTES:
       gcMaxBytes_ = 0xffffffff;
       break;
+    case JSGC_MIN_NURSERY_BYTES:
     case JSGC_MAX_NURSERY_BYTES:
+      // Reset these togeather to maintain their min <= max invariant.
+      gcMinNurseryBytes_ = TuningDefaults::GCMinNurseryBytes;
       gcMaxNurseryBytes_ = JS::DefaultNurseryBytes;
       break;
     case JSGC_HIGH_FREQUENCY_TIME_LIMIT:
@@ -1694,8 +1719,16 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return uint32_t(tunables.gcMaxBytes());
     case JSGC_MAX_MALLOC_BYTES:
       return mallocCounter.maxBytes();
+    case JSGC_MIN_NURSERY_BYTES:
+      MOZ_ASSERT(tunables.gcMinNurseryBytes() < UINT32_MAX);
+      return uint32_t(tunables.gcMinNurseryBytes());
+    case JSGC_MAX_NURSERY_BYTES:
+      MOZ_ASSERT(tunables.gcMaxNurseryBytes() < UINT32_MAX);
+      return uint32_t(tunables.gcMaxNurseryBytes());
     case JSGC_BYTES:
       return uint32_t(heapSize.gcBytes());
+    case JSGC_NUMBER:
+      return uint32_t(number);
     case JSGC_MODE:
       return uint32_t(mode);
     case JSGC_UNUSED_CHUNKS:
@@ -1741,13 +1774,17 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return tunables.maxEmptyChunkCount();
     case JSGC_COMPACTING_ENABLED:
       return compactingEnabled;
+    case JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION:
+      return tunables.nurseryFreeThresholdForIdleCollection();
+    case JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT:
+      return uint32_t(tunables.nurseryFreeThresholdForIdleCollectionFraction() *
+                      100.0f);
     case JSGC_PRETENURE_THRESHOLD:
       return uint32_t(tunables.pretenureThreshold() * 100);
     case JSGC_PRETENURE_GROUP_THRESHOLD:
       return tunables.pretenureGroupThreshold();
     default:
-      MOZ_ASSERT(key == JSGC_NUMBER);
-      return uint32_t(number);
+      MOZ_CRASH("Unknown parameter key");
   }
 }
 
@@ -1770,6 +1807,7 @@ void GCRuntime::removeBlackRootsTracer(JSTraceDataOp traceOp, void* data) {
     Callback<JSTraceDataOp>* e = &blackRootTracers.ref()[i];
     if (e->op == traceOp && e->data == data) {
       blackRootTracers.ref().erase(e);
+      break;
     }
   }
 }
@@ -2577,7 +2615,6 @@ struct ArenasToUpdate {
   Arena* arena;      // Next arena to process
 
   AllocKind nextAllocKind(AllocKind i) { return AllocKind(uint8_t(i) + 1); }
-  bool shouldProcessKind(AllocKind kind);
   Arena* next(AutoLockHelperThreadState& lock);
 };
 
@@ -2589,9 +2626,9 @@ ArenasToUpdate::ArenasToUpdate(Zone* zone, AllocKinds kinds)
 Arena* ArenasToUpdate::next(AutoLockHelperThreadState& lock) {
   // Find the next arena to update.
   //
-  // This iterates through the GC thing kinds filtered by shouldProcessKind(),
-  // and then through thea arenas of that kind.  All state is held in the
-  // object and we just return when we find an arena.
+  // This iterates through the GC thing kinds and then through the arenas of
+  // that kind.  All state is held in the object and we just return when we find
+  // an arena.
 
   for (; kind < AllocKind::LIMIT; kind = nextAllocKind(kind)) {
     if (kinds.contains(kind)) {
@@ -4183,7 +4220,6 @@ bool GCRuntime::prepareZonesForCollection(JS::GCReason reason,
     c->gcState.maybeAlive = false;
     c->gcState.hasEnteredRealm = false;
     for (RealmsInCompartmentIter r(c); !r.done(); r.next()) {
-      r->unmark();
       if (r->shouldTraceGlobal() || !r->zone()->isGCScheduled()) {
         c->gcState.maybeAlive = true;
       }
@@ -7198,7 +7234,8 @@ GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
   if (unsafeReason == AbortReason::None) {
     if (reason == JS::GCReason::COMPARTMENT_REVIVED) {
       unsafeReason = gc::AbortReason::CompartmentRevived;
-    } else if (mode != JSGC_MODE_INCREMENTAL) {
+    } else if (mode != JSGC_MODE_INCREMENTAL &&
+               mode != JSGC_MODE_ZONE_INCREMENTAL) {
       unsafeReason = gc::AbortReason::ModeChange;
     }
   }
@@ -7263,7 +7300,8 @@ static void ScheduleZones(GCRuntime* gc) {
       continue;
     }
 
-    if (gc->gcMode() == JSGC_MODE_GLOBAL) {
+    if (gc->gcMode() == JSGC_MODE_GLOBAL ||
+        gc->gcMode() == JSGC_MODE_INCREMENTAL) {
       zone->scheduleGC();
     }
 
@@ -7832,7 +7870,8 @@ JS::AutoDisableGenerationalGC::AutoDisableGenerationalGC(JSContext* cx)
 }
 
 JS::AutoDisableGenerationalGC::~AutoDisableGenerationalGC() {
-  if (--cx->generationalDisabled == 0) {
+  if (--cx->generationalDisabled == 0 &&
+      cx->runtime()->gc.tunables.gcMaxNurseryBytes() > 0) {
     cx->nursery().enable();
   }
 }
@@ -8057,14 +8096,6 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
 
     group->setGeneration(target->zone()->types.generation);
     group->realm_ = target;
-
-    // Remove any unboxed layouts from the list in the off thread
-    // realm. These do not need to be reinserted in the target
-    // realm's list, as the list is not required to be complete.
-    if (UnboxedLayout* layout =
-            group->maybeUnboxedLayoutDontCheckGeneration()) {
-      layout->detachFromRealm();
-    }
   }
 
   // Fixup zone pointers in source's zone to refer to target's zone.
@@ -8660,8 +8691,15 @@ JS_PUBLIC_API void JS::IncrementalPreWriteBarrier(JSObject* obj) {
     return;
   }
 
-  MOZ_ASSERT(!JS::RuntimeHeapIsMajorCollecting());
   JSObject::writeBarrierPre(obj);
+}
+
+JS_PUBLIC_API void JS::IncrementalPreWriteBarrier(GCCellPtr thing) {
+  if (!thing) {
+    return;
+  }
+
+  TenuredCell::writeBarrierPre(&thing.asCell()->asTenured());
 }
 
 JS_PUBLIC_API void JS::IncrementalReadBarrier(GCCellPtr thing) {

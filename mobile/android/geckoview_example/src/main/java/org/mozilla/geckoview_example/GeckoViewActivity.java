@@ -135,7 +135,7 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
                     .contentBlocking(new ContentBlocking.Settings.Builder()
-                        .categories(ContentBlocking.AT_ALL | ContentBlocking.SB_ALL)
+                        .categories(ContentBlocking.AT_DEFAULT)
                         .build())
                     .crashHandler(ExampleCrashHandler.class);
 
@@ -580,6 +580,11 @@ public class GeckoViewActivity extends AppCompatActivity {
         @Override
         public void onSecurityChange(GeckoSession session, SecurityInformation securityInfo) {
             Log.i(LOGTAG, "Security status changed to " + securityInfo.securityMode);
+        }
+
+        @Override
+        public void onSessionStateChange(GeckoSession session, GeckoSession.SessionState state) {
+            Log.i(LOGTAG, "New Session state: " + state.toString());
         }
     }
 

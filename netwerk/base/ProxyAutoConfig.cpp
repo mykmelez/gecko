@@ -19,6 +19,7 @@
 #include "js/PropertySpec.h"
 #include "js/SourceText.h"
 #include "js/Utility.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
 #include "prnetdb.h"
 #include "nsITimer.h"
 #include "mozilla/net/DNS.h"
@@ -626,9 +627,6 @@ class JSContextWrapper {
 
     JSAutoRealm ar(mContext, global);
     AutoPACErrorReporter aper(mContext);
-    if (!JS::InitRealmStandardClasses(mContext)) {
-      return NS_ERROR_FAILURE;
-    }
     if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions)) {
       return NS_ERROR_FAILURE;
     }
@@ -639,22 +637,9 @@ class JSContextWrapper {
   }
 };
 
-static const JSClassOps sJSContextWrapperGlobalClassOps = {
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    JS_GlobalObjectTraceHook};
-
-const JSClass JSContextWrapper::sGlobalClass = {
-    "PACResolutionThreadGlobal", JSCLASS_GLOBAL_FLAGS,
-    &sJSContextWrapperGlobalClassOps};
+const JSClass JSContextWrapper::sGlobalClass = {"PACResolutionThreadGlobal",
+                                                JSCLASS_GLOBAL_FLAGS,
+                                                &JS::DefaultGlobalClassOps};
 
 void ProxyAutoConfig::SetThreadLocalIndex(uint32_t index) {
   sRunningIndex = index;

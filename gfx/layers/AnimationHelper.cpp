@@ -26,6 +26,7 @@ void CompositorAnimationStorage::Clear() {
 
   mAnimatedValues.Clear();
   mAnimations.Clear();
+  mAnimationRenderRoots.Clear();
 }
 
 void CompositorAnimationStorage::ClearById(const uint64_t& aId) {
@@ -33,6 +34,7 @@ void CompositorAnimationStorage::ClearById(const uint64_t& aId) {
 
   mAnimatedValues.Remove(aId);
   mAnimations.Remove(aId);
+  mAnimationRenderRoots.Remove(aId);
 }
 
 AnimatedValue* CompositorAnimationStorage::GetAnimatedValue(
@@ -134,10 +136,12 @@ nsTArray<PropertyAnimationGroup>* CompositorAnimationStorage::GetAnimations(
 }
 
 void CompositorAnimationStorage::SetAnimations(uint64_t aId,
-                                               const AnimationArray& aValue) {
+                                               const AnimationArray& aValue,
+                                               wr::RenderRoot aRenderRoot) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   mAnimations.Put(aId, new nsTArray<PropertyAnimationGroup>(
                            AnimationHelper::ExtractAnimations(aValue)));
+  mAnimationRenderRoots.Put(aId, aRenderRoot);
 }
 
 enum class CanSkipCompose {
@@ -162,8 +166,7 @@ static AnimationHelper::SampleResult SampleAnimationForProperty(
   // Process in order, since later animations override earlier ones.
   for (PropertyAnimation& animation : aPropertyAnimations) {
     MOZ_ASSERT(
-        (!animation.mOriginTime.IsNull() &&
-         animation.mStartTime.type() == MaybeTimeDuration::TTimeDuration) ||
+        (!animation.mOriginTime.IsNull() && animation.mStartTime.isSome()) ||
             animation.mIsNotPlaying,
         "If we are playing, we should have an origin time and a start time");
 
@@ -188,7 +191,7 @@ static AnimationHelper::SampleResult SampleAnimationForProperty(
       // underflow in the middle of the calulation.
       const TimeStamp readyTime =
           animation.mOriginTime +
-          (animation.mStartTime.get_TimeDuration() +
+          (animation.mStartTime.ref() +
            animation.mHoldTime.MultDouble(1.0 / animation.mPlaybackRate));
       hasFutureReadyTime =
           !readyTime.IsNull() && readyTime > aPreviousFrameTime;
@@ -212,11 +215,9 @@ static AnimationHelper::SampleResult SampleAnimationForProperty(
     // If the animation is not currently playing, e.g. paused or
     // finished, then use the hold time to stay at the same position.
     TimeDuration elapsedDuration =
-        animation.mIsNotPlaying ||
-                animation.mStartTime.type() != MaybeTimeDuration::TTimeDuration
+        animation.mIsNotPlaying || animation.mStartTime.isNothing()
             ? animation.mHoldTime
-            : (timeStamp - animation.mOriginTime -
-               animation.mStartTime.get_TimeDuration())
+            : (timeStamp - animation.mOriginTime - animation.mStartTime.ref())
                   .MultDouble(animation.mPlaybackRate);
 
     ComputedTiming computedTiming = dom::AnimationEffect::GetComputedTimingAt(
@@ -360,19 +361,19 @@ AnimationHelper::SampleResult AnimationHelper::SampleAnimationForEachNode(
 
 #ifdef DEBUG
   // Sanity check that all of animation data are the same.
-  const AnimationData& lastData =
+  const Maybe<TransformData>& lastData =
       aPropertyAnimationGroups.LastElement().mAnimationData;
   for (const PropertyAnimationGroup& group : aPropertyAnimationGroups) {
-    const AnimationData& data = group.mAnimationData;
-    MOZ_ASSERT(data.type() == lastData.type(),
+    const Maybe<TransformData>& data = group.mAnimationData;
+    MOZ_ASSERT(data.isSome() == lastData.isSome(),
                "The type of AnimationData should be the same");
-    if (data.type() == AnimationData::Tnull_t) {
+    if (data.isNothing()) {
       continue;
     }
 
-    MOZ_ASSERT(data.type() == AnimationData::TTransformData);
-    const TransformData& transformData = data.get_TransformData();
-    const TransformData& lastTransformData = lastData.get_TransformData();
+    MOZ_ASSERT(data.isSome());
+    const TransformData& transformData = data.ref();
+    const TransformData& lastTransformData = lastData.ref();
     MOZ_ASSERT(transformData.origin() == lastTransformData.origin() &&
                    transformData.transformOrigin() ==
                        lastTransformData.transformOrigin() &&
@@ -572,7 +573,7 @@ bool AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
       case eCSSProperty_translate:
       case eCSSProperty_transform: {
         const TransformData& transformData =
-            lastPropertyAnimationGroup.mAnimationData.get_TransformData();
+            lastPropertyAnimationGroup.mAnimationData.ref();
 
         gfx::Matrix4x4 transform =
             ServoAnimationValueToMatrix4x4(animationValues, transformData);

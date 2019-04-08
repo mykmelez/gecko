@@ -8,6 +8,7 @@
 #include "mozilla/RangedPtr.h"
 #include "mozilla/TextUtils.h"
 
+#include "nsCRTGlue.h"
 #include "nsURLParsers.h"
 #include "nsURLHelper.h"
 #include "nsString.h"
@@ -558,7 +559,7 @@ nsAuthURLParser::ParseServerInfo(const char *serverinfo, int32_t serverinfoLen,
   // In case of IPv6 address check its validity
   if (*hostnameLen > 1 && *(serverinfo + *hostnamePos) == '[' &&
       *(serverinfo + *hostnamePos + *hostnameLen - 1) == ']' &&
-      !net_IsValidIPv6Addr(serverinfo + *hostnamePos + 1, *hostnameLen - 2))
+      !net_IsValidIPv6Addr(Substring(serverinfo + *hostnamePos + 1, *hostnameLen - 2)))
     return NS_ERROR_MALFORMED_URI;
 
   return NS_OK;

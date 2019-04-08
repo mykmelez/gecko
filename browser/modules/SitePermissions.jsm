@@ -148,15 +148,23 @@ const GloballyBlockedPermissions = {
       entry[prePath] = {};
     }
 
+    if (entry[prePath][id]) {
+      return;
+    }
     entry[prePath][id] = true;
 
-    // Listen to any top level navigations, once we see one clear the flag
-    // and remove the listener.
+    // Clear the flag and remove the listener once the user has navigated.
+    // WebProgress will report various things including hashchanges to us, the
+    // navigation we care about is either leaving the current page or reloading.
     browser.addProgressListener({
       QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
                                               Ci.nsISupportsWeakReference]),
       onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-        if (aWebProgress.isTopLevel) {
+        let hasLeftPage = aLocation.prePath != prePath ||
+            !(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT);
+        let isReload = !!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_RELOAD);
+
+        if (aWebProgress.isTopLevel && (hasLeftPage || isReload)) {
           GloballyBlockedPermissions.remove(browser, id, prePath);
           browser.removeProgressListener(this);
         }
@@ -245,6 +253,8 @@ var SitePermissions = {
    *            (e.g. SitePermissions.ALLOW)
    */
   getAllByURI(uri) {
+    if (!(uri instanceof Ci.nsIURI))
+      throw new Error("uri parameter should be an nsIURI");
     let result = [];
     if (!this.isSupportedURI(uri)) {
       return result;
@@ -450,6 +460,8 @@ var SitePermissions = {
    *             (e.g. SitePermissions.SCOPE_PERSISTENT)
    */
   get(uri, permissionID, browser) {
+    if ((!uri && !browser) || (uri && !(uri instanceof Ci.nsIURI)))
+      throw new Error("uri parameter should be an nsIURI or a browser parameter is needed");
     let defaultState = this.getDefault(permissionID);
     let result = { state: defaultState, scope: this.SCOPE_PERSISTENT };
     if (this.isSupportedURI(uri)) {
@@ -504,6 +516,8 @@ var SitePermissions = {
    *        This needs to be provided if the scope is SCOPE_TEMPORARY!
    */
   set(uri, permissionID, state, scope = this.SCOPE_PERSISTENT, browser = null) {
+    if ((!uri && !browser) || (uri && !(uri instanceof Ci.nsIURI)))
+      throw new Error("uri parameter should be an nsIURI or a browser parameter is needed");
     if (scope == this.SCOPE_GLOBAL && state == this.BLOCK) {
       GloballyBlockedPermissions.set(browser, permissionID);
       browser.dispatchEvent(new browser.ownerGlobal.CustomEvent("PermissionStateChange"));
@@ -521,7 +535,7 @@ var SitePermissions = {
     }
 
     if (state == this.ALLOW_COOKIES_FOR_SESSION && permissionID != "cookie") {
-      throw "ALLOW_COOKIES_FOR_SESSION can only be set on the cookie permission";
+      throw new Error("ALLOW_COOKIES_FOR_SESSION can only be set on the cookie permission");
     }
 
     // Save temporary permissions.
@@ -535,11 +549,11 @@ var SitePermissions = {
       // a more fine-grained TemporaryPermissions that temporarily blocks for the
       // entire browser, but temporarily allows only for specific frames.
       if (state != this.BLOCK) {
-        throw "'Block' is the only permission we can save temporarily on a browser";
+        throw new Error("'Block' is the only permission we can save temporarily on a browser");
       }
 
       if (!browser) {
-        throw "TEMPORARY scoped permissions require a browser object";
+        throw new Error("TEMPORARY scoped permissions require a browser object");
       }
 
       TemporaryPermissions.set(browser, permissionID, state);
@@ -571,6 +585,8 @@ var SitePermissions = {
    *        The browser object to remove temporary permissions on.
    */
   remove(uri, permissionID, browser) {
+    if ((!uri && !browser) || (uri && !(uri instanceof Ci.nsIURI)))
+      throw new Error("uri parameter should be an nsIURI or a browser parameter is needed");
     if (this.isSupportedURI(uri))
       Services.perms.remove(uri, permissionID);
 

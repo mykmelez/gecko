@@ -1,7 +1,7 @@
-// @flow
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+// @flow
 
 import { groupBy } from "lodash";
 import { createSelector } from "reselect";
@@ -15,6 +15,8 @@ import {
 } from "../selectors";
 import { getVisibleBreakpoints } from "./visibleBreakpoints";
 import { getSelectedLocation } from "../utils/source-maps";
+import { sortSelectedLocations } from "../utils/location";
+
 import type { Selector, State } from "../reducers/types";
 
 import type {
@@ -162,7 +164,7 @@ export const visibleColumnBreakpoints: Selector<
 export function getFirstBreakpointPosition(
   state: State,
   { line, sourceId }: SourceLocation
-) {
+): ?BreakpointPosition {
   const positions = getBreakpointPositionsForSource(state, sourceId);
   const source = getSource(state, sourceId);
 
@@ -170,7 +172,7 @@ export function getFirstBreakpointPosition(
     return;
   }
 
-  return positions.find(
+  return sortSelectedLocations(positions, source).find(
     position => getSelectedLocation(position, source).line == line
   );
 }

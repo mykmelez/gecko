@@ -51,6 +51,7 @@ jobs:
     definition: debian-base
     parent: debian7-raw
     packages:
+      - deb7-apt
       - deb7-gdb
       - deb7-git
       - deb7-make
@@ -155,6 +156,12 @@ jobs:
     definition: debian-build
     args:
       ARCH: amd64
+  debian9-arm64-build:
+    symbol: I(deb9-arm64)
+    parent: debian9-base
+    definition: debian-build
+    args:
+      ARCH: arm64
   android-build:
     symbol: I(agb)
     parent: debian9-base

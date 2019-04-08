@@ -14,8 +14,10 @@ let whitelist = [
   {sourceName: /codemirror\.css$/i,
    isFromDevTools: true},
   // The debugger uses cross-browser CSS.
-  {sourceName: /devtools\/client\/debugger\/new\/dist\/debugger.css/i,
+  {sourceName: /devtools\/client\/debugger\/new\/dist\/vendors.css/i,
    isFromDevTools: true},
+  {sourceName: /devtools\/client\/debugger\/new\/src\/components\/([A-z\/]+).css/i,
+  isFromDevTools: true},
    // Reps uses cross-browser CSS.
    {sourceName: /devtools-client-shared\/components\/reps\/reps.css/i,
    isFromDevTools: true},
@@ -63,6 +65,9 @@ let whitelist = [
    intermittent: true,
    errorMessage: /Property contained reference to invalid variable.*background/i,
    isFromDevTools: true},
+  {sourceName: /pictureinpicture\/toggle.css$/i,
+   errorMessage: /Unknown pseudo-class.*moz-native-anonymous/i,
+   isFromDevTools: false},
 ];
 
 if (!Services.prefs.getBoolPref("layout.css.xul-box-display-values.content.enabled")) {
@@ -70,6 +75,15 @@ if (!Services.prefs.getBoolPref("layout.css.xul-box-display-values.content.enabl
   whitelist.push({
     sourceName: /(skin\/shared\/Heartbeat|((?:res|gre-resources)\/(ua|html)))\.css$/i,
     errorMessage: /Error in parsing value for .*\bdisplay\b/i,
+    isFromDevTools: false,
+  });
+}
+
+if (!Services.prefs.getBoolPref("layout.css.line-height-moz-block-height.content.enabled")) {
+  // -moz-block-height is used in form controls but not exposed to the web.
+  whitelist.push({
+    sourceName: /(?:res|gre-resources)\/forms\.css$/i,
+    errorMessage: /Error in parsing value for \u2018line-height\u2019/iu,
     isFromDevTools: false,
   });
 }

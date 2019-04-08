@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 import yaml
 
 from collections import OrderedDict
@@ -47,6 +48,7 @@ from mozbuild.backend import (
     backends,
 )
 
+from mozversioncontrol import get_repository_object
 
 BUILD_WHAT_HELP = '''
 What to build. Can be a top-level make target or a relative directory. If
@@ -1429,8 +1431,7 @@ class PackageFrontend(MachCommandBase):
                 records[record.filename] = DownloadRecord(
                     url, record.filename, record.size, record.digest,
                     record.algorithm, unpack=record.unpack,
-                    version=record.version, visibility=record.visibility,
-                    setup=record.setup)
+                    version=record.version, visibility=record.visibility)
 
         if from_build:
             if 'MOZ_AUTOMATION' in os.environ:
@@ -1575,7 +1576,7 @@ class PackageFrontend(MachCommandBase):
                     'sha256': h.hexdigest(),
                 }
             if record.unpack and not no_unpack:
-                unpack_file(local, record.setup)
+                unpack_file(local)
                 os.unlink(local)
 
         if not downloaded:
@@ -1700,8 +1701,10 @@ class StaticAnalysis(MachCommandBase):
                      help='Write clang-tidy output in a file')
     @CommandArgument('--format', default='text', choices=('text', 'json'),
                      help='Output format to write in a file')
+    @CommandArgument('--outgoing', default=False, action='store_true',
+                     help='Run static analysis checks on outgoing files from mercurial repository')
     def check(self, source=None, jobs=2, strip=1, verbose=False,
-              checks='-*', fix=False, header_filter='', output=None, format='text'):
+              checks='-*', fix=False, header_filter='', output=None, format='text', outgoing=False):
         from mozbuild.controller.building import (
             StaticAnalysisFooter,
             StaticAnalysisOutputManager,
@@ -1715,6 +1718,12 @@ class StaticAnalysis(MachCommandBase):
         rc = rc or self._get_clang_tools(verbose=verbose)
         if rc != 0:
             return rc
+
+        # Use outgoing files instead of source files
+        if outgoing:
+            repo = get_repository_object(self.topsrcdir)
+            files = repo.get_outgoing_files()
+            source = map(os.path.abspath, files)
 
         # Split in several chunks to avoid hitting Python's limit of 100 groups in re
         compile_db = json.loads(open(self._compile_db, 'r').read())
@@ -1888,9 +1897,9 @@ class StaticAnalysis(MachCommandBase):
             file_handler = open(mozpath.join(self.topsrcdir, "tools", "clang-tidy", "config.yaml"))
             config = yaml.safe_load(file_handler)
         except Exception:
-                print('Looks like config.yaml is not valid, we are going to use default'
-                      ' values for the rest of the analysis.')
-                return None
+            print('Looks like config.yaml is not valid, we are going to use default'
+                  ' values for the rest of the analysis.')
+            return None
         return config
 
     def _get_clang_tidy_command(self, checks, header_filter, sources, jobs, fix):
@@ -2056,6 +2065,7 @@ class StaticAnalysis(MachCommandBase):
         # Build the dummy compile_commands.json
         self._compilation_commands_path = self._create_temp_compilation_db(self._clang_tidy_config)
         checkers_test_batch = []
+        checkers_results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for item in self._clang_tidy_config['clang_checkers']:
@@ -2075,7 +2085,7 @@ class StaticAnalysis(MachCommandBase):
                    checker_not_in_list:
                     continue
                 checkers_test_batch.append(item['name'])
-                futures.append(executor.submit(self._verify_checker, item))
+                futures.append(executor.submit(self._verify_checker, item, checkers_results))
 
             error_code = self.TOOLS_SUCCESS
             for future in concurrent.futures.as_completed(futures):
@@ -2088,7 +2098,32 @@ class StaticAnalysis(MachCommandBase):
                     error_code = ret_val
 
             if error_code != self.TOOLS_SUCCESS:
-                self.log(logging.INFO, 'static-analysis', {}, "FAIL: clang-tidy some tests failed.")
+
+                self.log(logging.INFO, 'static-analysis', {}, "FAIL: the following clang-tidy check(s) failed:")
+                for failure in checkers_results:
+                    checker_error = failure['checker-error']
+                    checker_name = failure['checker-name']
+                    info1 = failure['info1']
+                    info2 = failure['info2']
+                    info3 = failure['info3']
+
+                    message_to_log = ''
+                    if checker_error == self.TOOLS_CHECKER_NOT_FOUND:
+                        message_to_log = "\tChecker {} not present in this clang-tidy version.".format(
+                            checker_name)
+                    elif checker_error == self.TOOLS_CHECKER_NO_TEST_FILE:
+                        message_to_log = "\tChecker {0} does not have a test file - {0}.cpp".format(checker_name)
+                    elif checker_error == self.TOOLS_CHECKER_RETURNED_NO_ISSUES:
+                        message_to_log = "\tChecker {0} did not find any issues in its test file, clang-tidy output for the run is:\n{1}".format(
+                            checker_name, info1)
+                    elif checker_error == self.TOOLS_CHECKER_RESULT_FILE_NOT_FOUND:
+                        message_to_log = "\tChecker {0} does not have a result file - {0}.json".format(checker_name)
+                    elif checker_error == self.TOOLS_CHECKER_DIFF_FAILED:
+                        message_to_log = "\tChecker {0}\nExpected: {1}\nGot: {2}\nclang-tidy output for the run is:\n{3}".format(
+                            checker_name, info1, info2, info3)
+
+                    print('\n'+message_to_log)
+
                 # Also delete the tmp folder
                 shutil.rmtree(self._compilation_commands_path)
                 return error_code
@@ -2116,7 +2151,7 @@ class StaticAnalysis(MachCommandBase):
         except subprocess.CalledProcessError as e:
             print(e.output)
             return None
-        return self._parse_issues(clang_output)
+        return self._parse_issues(clang_output), clang_output
 
     def _run_analysis_batch(self, items):
         self.log(logging.INFO, 'static-analysis', {},"RUNNING: clang-tidy checker batch analysis.")
@@ -2124,25 +2159,34 @@ class StaticAnalysis(MachCommandBase):
             self.log(logging.ERROR, 'static-analysis', {}, "ERROR: clang-tidy checker list is empty!")
             return self.TOOLS_CHECKER_LIST_EMPTY
 
-        issues = self._run_analysis(
+        issues, clang_output = self._run_analysis(
             checks='-*,' + ",".join(items), header_filter='',
             sources=[mozpath.join(self._clang_tidy_base_path, "test", checker) + '.cpp' for checker in items], print_out=True)
 
         if issues is None:
             return self.TOOLS_CHECKER_FAILED_FILE
 
+        failed_checks = []
+        failed_checks_baseline = []
         for checker in items:
             test_file_path_json = mozpath.join(self._clang_tidy_base_path, "test", checker) + '.json'
-             # Read the pre-determined issues
+            # Read the pre-determined issues
             baseline_issues = self._get_autotest_stored_issues(test_file_path_json)
             found = all([element_base in issues for element_base in baseline_issues])
 
             if not found:
-                self.log(
-                    logging.ERROR, 'static-analysis', {},
-                    "ERROR: clang-tidy auto-test failed for checker {0} in multiple files process unit.".
-                    format(checker))
-                return self.TOOLS_CHECKER_DIFF_FAILED
+                failed_checks.append(checker)
+                failed_checks_baseline.append(baseline_issues)
+
+        if len(failed_checks) > 0:
+            self.log(logging.ERROR, 'static-analysis', {}, 'The following check(s) failed for bulk analysis: ' + ' '.join(failed_checks))
+
+            for failed_check, baseline_issue in zip(failed_checks, failed_checks_baseline):
+                print('\tChecker {0} expect following results: \n\t\t{1}'.format(failed_check, baseline_issue))
+
+            print('This is the output generated by clang-tidy for the bulk build:\n{}'.format(clang_output))
+            return self.TOOLS_CHECKER_DIFF_FAILED
+
         return self.TOOLS_SUCCESS
 
     def _create_temp_compilation_db(self, config):
@@ -2367,11 +2411,20 @@ class StaticAnalysis(MachCommandBase):
     @CommandArgument('--output', '-o', default=None, dest='output_path',
                      help='Specify a file handle to write clang-format raw output instead of '
                           'applying changes. This can be stdout or a file path.')
-    def clang_format(self, assume_filename, path, commit, output_path=None, verbose=False):
+    @CommandArgument('--format', '-f', choices=('diff', 'json'), default='diff', dest='output_format',
+                     help='Specify the output format used: diff is the raw patch provided by '
+                     'clang-format, json is a list of atomic changes to process.')
+    @CommandArgument('--outgoing', default=False, action='store_true',
+                     help='Run clang-format on outgoing files from mercurial repository')
+    def clang_format(self, assume_filename, path, commit, output_path=None, output_format='diff', verbose=False, outgoing=False):
         # Run clang-format or clang-format-diff on the local changes
         # or files/directories
-        if path is not None:
-            path = self._conv_to_abspath(path)
+        if path is None and outgoing:
+            repo = get_repository_object(self.topsrcdir)
+            path = repo.get_outgoing_files()
+
+        if path:
+            path = map(os.path.abspath, path)
 
         os.chdir(self.topsrcdir)
 
@@ -2408,9 +2461,9 @@ class StaticAnalysis(MachCommandBase):
         if assume_filename:
             return self._run_clang_format_in_console(self._clang_format_path, path, assume_filename)
 
-        return self._run_clang_format_path(self._clang_format_path, path, output)
+        return self._run_clang_format_path(self._clang_format_path, path, output, output_format)
 
-    def _verify_checker(self, item):
+    def _verify_checker(self, item, checkers_results):
         check = item['name']
         test_file_path = mozpath.join(self._clang_tidy_base_path, "test", check)
         test_file_path_cpp = test_file_path + '.cpp'
@@ -2419,27 +2472,37 @@ class StaticAnalysis(MachCommandBase):
         self.log(logging.INFO, 'static-analysis', {},
                  "RUNNING: clang-tidy checker {}.".format(check))
 
+        # Structured information in case a checker fails
+        checker_error = {
+            'checker-name': check,
+            'checker-error': '',
+            'info1': '',
+            'info2': '',
+            'info3': ''
+        }
+
         # Verify if this checker actually exists
         if not check in self._clang_tidy_checks:
-            self.log(logging.ERROR, 'static-analysis', {}, "ERROR: clang-tidy checker {} doesn't exist in this clang-tidy version.".format(check))
+            checker_error['checker-error'] = self.TOOLS_CHECKER_NOT_FOUND
+            checkers_results.append(checker_error)
             return self.TOOLS_CHECKER_NOT_FOUND
 
         # Verify if the test file exists for this checker
         if not os.path.exists(test_file_path_cpp):
-            self.log(logging.ERROR, 'static-analysis', {}, "ERROR: clang-tidy checker {} doesn't have a test file.".format(check))
+            checker_error['checker-error'] = self.TOOLS_CHECKER_NO_TEST_FILE
+            checkers_results.append(checker_error)
             return self.TOOLS_CHECKER_NO_TEST_FILE
 
-        issues = self._run_analysis(
+        issues, clang_output = self._run_analysis(
             checks='-*,' + check, header_filter='', sources=[test_file_path_cpp])
         if issues is None:
             return self.TOOLS_CHECKER_FAILED_FILE
 
         # Verify to see if we got any issues, if not raise exception
         if not issues:
-            self.log(
-                logging.ERROR, 'static-analysis', {},
-                "ERROR: clang-tidy checker {0} did not find any issues in its associated test file.".
-                format(check))
+            checker_error['checker-error'] = self.TOOLS_CHECKER_RETURNED_NO_ISSUES
+            checker_error['info1'] = clang_output
+            checkers_results.append(checker_error)
             return self.TOOLS_CHECKER_RETURNED_NO_ISSUES
 
         if self._dump_results:
@@ -2447,21 +2510,22 @@ class StaticAnalysis(MachCommandBase):
         else:
             if not os.path.exists(test_file_path_json):
                 # Result file for test not found maybe regenerate it?
-                self.log(
-                    logging.ERROR, 'static-analysis', {},
-                    "ERROR: clang-tidy result file not found for checker {0}".format(
-                        check))
+                checker_error['checker-error'] = self.TOOLS_CHECKER_RESULT_FILE_NOT_FOUND
+                checkers_results.append(checker_error)
                 return self.TOOLS_CHECKER_RESULT_FILE_NOT_FOUND
+
             # Read the pre-determined issues
             baseline_issues = self._get_autotest_stored_issues(test_file_path_json)
 
             # Compare the two lists
             if issues != baseline_issues:
-                self.log(
-                    logging.ERROR, 'static-analysis', {},
-                    "ERROR: clang-tidy auto-test failed for checker {0} Expected: {1} Got: {2}".
-                    format(check, baseline_issues, issues))
+                checker_error['checker-error'] = self.TOOLS_CHECKER_DIFF_FAILED
+                checker_error['info1'] = baseline_issues
+                checker_error['info2'] = issues
+                checker_error['info3'] = clang_output
+                checkers_results.append(checker_error)
                 return self.TOOLS_CHECKER_DIFF_FAILED
+
         return self.TOOLS_SUCCESS
 
     def _build_autotest_result(self, file, issues):
@@ -2597,13 +2661,6 @@ class StaticAnalysis(MachCommandBase):
         return builder._run_make(directory=self.topobjdir, target='export',
                                  line_handler=None, silent=not verbose,
                                  num_jobs=jobs)
-
-    def _conv_to_abspath(self, paths):
-        # Converts all the paths to absolute pathnames
-        tmp_path = []
-        for f in paths:
-            tmp_path.append(os.path.abspath(f))
-        return tmp_path
 
     def _set_clang_tools_paths(self):
         rc, config, _ = self._get_config_environment()
@@ -2873,12 +2930,16 @@ class StaticAnalysis(MachCommandBase):
             process.wait();
             return 0
 
-    def _run_clang_format_path(self, clang_format, paths, output_file):
+    def _run_clang_format_path(self, clang_format, paths, output_file, output_format):
 
         # Run clang-format on files or directories directly
         from subprocess import check_output, CalledProcessError
 
-        args = [clang_format, "-i"]
+        if output_format == 'json':
+            # Get replacements in xml, then process to json
+            args = [clang_format, '-output-replacements-xml']
+        else:
+            args = [clang_format, '-i']
 
         if output_file:
             # We just want to show the diff, we create the directory to copy it
@@ -2894,6 +2955,7 @@ class StaticAnalysis(MachCommandBase):
         print("Processing %d file(s)..." % len(path_list))
 
         if output_file:
+            patches = {}
             for i in range(0, len(path_list)):
                 l = path_list[i: (i + 1)]
 
@@ -2911,22 +2973,35 @@ class StaticAnalysis(MachCommandBase):
 
                 # Run clang-format on the list
                 try:
-                    check_output(args + l)
+                    output = check_output(args + l)
+                    if output and output_format == 'json':
+                        patches[original_path] = self._parse_xml_output(original_path, output)
                 except CalledProcessError as e:
                     # Something wrong happend
                     print("clang-format: An error occured while running clang-format.")
                     return e.returncode
 
                 # show the diff
-                diff_command = ["diff", "-u", original_path, target_file]
-                try:
-                    output = check_output(diff_command)
-                except CalledProcessError as e:
-                    # diff -u returns 0 when no change
-                    # here, we expect changes. if we are here, this means that
-                    # there is a diff to show
-                    if e.output:
-                        print(e.output, file=output_file)
+                if output_format == 'diff':
+                    diff_command = ["diff", "-u", original_path, target_file]
+                    try:
+                        output = check_output(diff_command)
+                    except CalledProcessError as e:
+                        # diff -u returns 0 when no change
+                        # here, we expect changes. if we are here, this means that
+                        # there is a diff to show
+                        if e.output:
+                            # Replace the temp path by its original path to display a valid patch
+                            patches[original_path] = e.output.replace(target_file, original_path)
+
+            if output_format == 'json':
+                output = json.dumps(patches, indent=4)
+            else:
+                # Display all the patches at once
+                output = '\n'.join(patches.values())
+
+            # Output to specified file or stdout
+            print(output, file=output_file)
 
             shutil.rmtree(tmpdir)
             return 0
@@ -2971,6 +3046,35 @@ class StaticAnalysis(MachCommandBase):
             if error_code is not None:
                 return error_code
         return 0
+
+    def _parse_xml_output(self, path, clang_output):
+        '''
+        Parse the clang-format XML output to convert it in a JSON compatible
+        list of patches, and calculates line level informations from the
+        character level provided changes.
+        '''
+        content = open(path, 'r').read().decode('utf-8')
+
+        def _nb_of_lines(start, end):
+            return len(content[start:end].splitlines())
+
+        def _build(replacement):
+            offset = int(replacement.attrib['offset'])
+            length = int(replacement.attrib['length'])
+            last_line = content.rfind('\n', 0, offset)
+            return {
+                'replacement': replacement.text,
+                'char_offset': offset,
+                'char_length': length,
+                'line': _nb_of_lines(0, offset),
+                'line_offset': last_line != -1 and (offset - last_line) or 0,
+                'lines_modified': _nb_of_lines(offset, offset + length),
+            }
+
+        return [
+            _build(replacement)
+            for replacement in ET.fromstring(clang_output).findall('replacement')
+        ]
 
 
 @CommandProvider

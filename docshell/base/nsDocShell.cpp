@@ -28,7 +28,9 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MediaFeatureChange.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/StartupTimeline.h"
@@ -77,7 +79,6 @@
 #include "nsIChannel.h"
 #include "nsIChannelEventSink.h"
 #include "nsIClassOfService.h"
-#include "nsICommandManager.h"
 #include "nsIConsoleReportCollector.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
@@ -177,6 +178,7 @@
 #include "nsDOMCID.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsDSURIContentListener.h"
+#include "nsEditingSession.h"
 #include "nsError.h"
 #include "nsEscape.h"
 #include "nsFocusManager.h"
@@ -316,7 +318,6 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext)
       mForcedCharset(nullptr),
       mParentCharset(nullptr),
       mTreeOwner(nullptr),
-      mChromeEventHandler(nullptr),
       mDefaultScrollbarPref(Scrollbar_Auto, Scrollbar_Auto),
       mCharsetReloadState(eCharsetReloadInit),
       mOrientationLock(hal::eScreenOrientation_None),
@@ -541,7 +542,7 @@ void nsDocShell::DestroyChildren() {
 NS_IMPL_CYCLE_COLLECTION_INHERITED(nsDocShell, nsDocLoader,
                                    mSessionStorageManager, mScriptGlobal,
                                    mInitialClientSource, mSessionHistory,
-                                   mBrowsingContext)
+                                   mBrowsingContext, mChromeEventHandler)
 
 NS_IMPL_ADDREF_INHERITED(nsDocShell, nsDocLoader)
 NS_IMPL_RELEASE_INHERITED(nsDocShell, nsDocLoader)
@@ -573,7 +574,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink) {
 
   if (aIID.Equals(NS_GET_IID(nsICommandManager))) {
     NS_ENSURE_SUCCESS(EnsureCommandHandler(), NS_ERROR_FAILURE);
-    *aSink = mCommandManager;
+    *aSink = static_cast<nsICommandManager*>(mCommandManager.get());
   } else if (aIID.Equals(NS_GET_IID(nsIURIContentListener))) {
     *aSink = mContentListener;
   } else if ((aIID.Equals(NS_GET_IID(nsIScriptGlobalObject)) ||
@@ -1141,7 +1142,6 @@ nsDocShell::GetOuterWindowID(uint64_t* aWindowID) {
 
 NS_IMETHODIMP
 nsDocShell::SetChromeEventHandler(EventTarget* aChromeEventHandler) {
-  // Weak reference. Don't addref.
   mChromeEventHandler = aChromeEventHandler;
 
   if (mScriptGlobal) {
@@ -1154,7 +1154,7 @@ nsDocShell::SetChromeEventHandler(EventTarget* aChromeEventHandler) {
 NS_IMETHODIMP
 nsDocShell::GetChromeEventHandler(EventTarget** aChromeEventHandler) {
   NS_ENSURE_ARG_POINTER(aChromeEventHandler);
-  nsCOMPtr<EventTarget> handler = mChromeEventHandler;
+  RefPtr<EventTarget> handler = mChromeEventHandler;
   handler.forget(aChromeEventHandler);
   return NS_OK;
 }
@@ -4199,7 +4199,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     errorPage.AssignLiteral("tabcrashed");
     error = "tabcrashed";
 
-    nsCOMPtr<EventTarget> handler = mChromeEventHandler;
+    RefPtr<EventTarget> handler = mChromeEventHandler;
     if (handler) {
       nsCOMPtr<Element> element = do_QueryInterface(handler);
       element->GetAttribute(NS_LITERAL_STRING("crashedPageTitle"), messageStr);
@@ -4993,6 +4993,8 @@ nsDocShell::Destroy() {
 
   mTabChild = nullptr;
 
+  mChromeEventHandler = nullptr;
+
   mOnePermittedSandboxedNavigator = nullptr;
 
   // required to break ref cycle
@@ -5629,10 +5631,10 @@ nsresult nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
   nsIScrollableFrame* sf = GetRootScrollFrame();
   NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
 
-  nsIScrollableFrame::ScrollMode scrollMode = nsIScrollableFrame::INSTANT;
+  ScrollMode scrollMode = ScrollMode::eInstant;
   if (sf->GetScrollStyles().mScrollBehavior ==
       NS_STYLE_SCROLL_BEHAVIOR_SMOOTH) {
-    scrollMode = nsIScrollableFrame::SMOOTH_MSD;
+    scrollMode = ScrollMode::eSmoothMsd;
   }
 
   nsPoint targetPos(aCurHorizontalPos, aCurVerticalPos);
@@ -5657,11 +5659,8 @@ nsresult nsDocShell::SetCurScrollPosEx(int32_t aCurHorizontalPos,
     return NS_OK;
   }
 
-  // TODO: If scrollMode == SMOOTH_MSD, this will effectively override that
-  // and jump to the target position instantly. A proper solution here would
-  // involve giving nsIScrollableFrame a visual viewport smooth scrolling API.
-  shell->SetPendingVisualScrollUpdate(targetPos,
-                                      layers::FrameMetrics::eMainThread);
+  shell->ScrollToVisual(targetPos, layers::FrameMetrics::eMainThread,
+                        scrollMode);
 
   return NS_OK;
 }
@@ -7880,8 +7879,9 @@ nsresult nsDocShell::RestoreFromHistory() {
   } else {
     rootViewParent = nullptr;
   }
-  if (sibling && sibling->GetShell() && sibling->GetShell()->GetViewManager()) {
-    rootViewSibling = sibling->GetShell()->GetViewManager()->GetRootView();
+  if (sibling && sibling->GetPresShell() &&
+      sibling->GetPresShell()->GetViewManager()) {
+    rootViewSibling = sibling->GetPresShell()->GetViewManager()->GetRootView();
   } else {
     rootViewSibling = nullptr;
   }
@@ -10363,8 +10363,8 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
       break;
   }
 
-  if (!aBypassClassifier) {
-    loadFlags |= nsIChannel::LOAD_CLASSIFY_URI;
+  if (aBypassClassifier) {
+    loadFlags |= nsIChannel::LOAD_BYPASS_URL_CLASSIFIER;
   }
 
   // If the user pressed shift-reload, then do not allow ServiceWorker
@@ -11795,9 +11795,7 @@ nsDocShell::GetHasEditingSession(bool* aHasEditingSession) {
   NS_ENSURE_ARG_POINTER(aHasEditingSession);
 
   if (mEditorData) {
-    nsCOMPtr<nsIEditingSession> editingSession;
-    mEditorData->GetEditingSession(getter_AddRefs(editingSession));
-    *aHasEditingSession = (editingSession.get() != nullptr);
+    *aHasEditingSession = !!mEditorData->GetEditingSession();
   } else {
     *aHasEditingSession = false;
   }
@@ -12384,15 +12382,10 @@ nsDocShell::DoCommandWithParams(const char* aCommand,
 
 nsresult nsDocShell::EnsureCommandHandler() {
   if (!mCommandManager) {
-    nsCOMPtr<nsPICommandUpdater> commandUpdater = new nsCommandManager();
-
-    nsCOMPtr<nsPIDOMWindowOuter> domWindow = GetWindow();
-    nsresult rv = commandUpdater->Init(domWindow);
-    if (NS_SUCCEEDED(rv)) {
-      mCommandManager = do_QueryInterface(commandUpdater);
+    if (nsCOMPtr<nsPIDOMWindowOuter> domWindow = GetWindow()) {
+      mCommandManager = new nsCommandManager(domWindow);
     }
   }
-
   return mCommandManager ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -13275,7 +13268,7 @@ nsDocShell::GetEditingSession(nsIEditingSession** aEditSession) {
     return NS_ERROR_FAILURE;
   }
 
-  mEditorData->GetEditingSession(aEditSession);
+  *aEditSession = do_AddRef(mEditorData->GetEditingSession()).take();
   return *aEditSession ? NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -13290,7 +13283,7 @@ already_AddRefed<nsITabChild> nsDocShell::GetTabChild() {
   return tc.forget();
 }
 
-nsICommandManager* nsDocShell::GetCommandManager() {
+nsCommandManager* nsDocShell::GetCommandManager() {
   NS_ENSURE_SUCCESS(EnsureCommandHandler(), nullptr);
   return mCommandManager;
 }

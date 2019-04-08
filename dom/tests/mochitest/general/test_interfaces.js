@@ -44,6 +44,9 @@ var ecmaGlobals =
     {name: "Array", insecureContext: true},
     {name: "ArrayBuffer", insecureContext: true},
     {name: "Atomics", insecureContext: true, disabled: true},
+    {name: "BigInt", insecureContext: true, nightly: true},
+    {name: "BigInt64Array", insecureContext: true, nightly: true},
+    {name: "BigUint64Array", insecureContext: true, nightly: true},
     {name: "Boolean", insecureContext: true},
     {name: "ByteLengthQueuingStrategy", insecureContext: true},
     {name: "CountQueuingStrategy", insecureContext: true},
@@ -1147,7 +1150,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "TreeWalker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "U2F", insecureContext: true, disabled: true},
+    {name: "U2F", insecureContext: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "UIEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!

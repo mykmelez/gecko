@@ -17,10 +17,10 @@
 #include "PLDHashTable.h"
 #include "nsIHttpChannel.h"
 #include "nsThreadUtils.h"
-#include "nsICommandManager.h"
 #include "mozilla/dom/HTMLSharedElement.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
+class nsCommandManager;
 class nsIURI;
 class nsIDocShell;
 class nsICachingChannel;
@@ -173,10 +173,7 @@ class nsHTMLDocument : public mozilla::dom::Document, public nsIHTMLDocument {
   void SetDesignMode(const nsAString& aDesignMode,
                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                      mozilla::ErrorResult& rv);
-  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because I haven't figured out how to teach the
-  // analysis that a MOZ_KnownLive(NonNull<T>) being passed as T& is OK.  See
-  // bug 1534383.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   bool ExecCommand(const nsAString& aCommandID, bool aDoShowUI,
                    const nsAString& aValue, nsIPrincipal& aSubjectPrincipal,
                    mozilla::ErrorResult& rv);
@@ -324,12 +321,15 @@ class nsHTMLDocument : public mozilla::dom::Document, public nsIHTMLDocument {
   bool mWarnedWidthHeight;
 
   /* Midas implementation */
-  nsresult GetMidasCommandManager(nsICommandManager** aCommandManager);
+  nsCommandManager* GetMidasCommandManager();
 
-  nsCOMPtr<nsICommandManager> mMidasCommandManager;
+  RefPtr<nsCommandManager> mMidasCommandManager;
 
   nsresult TurnEditingOff();
-  nsresult EditingStateChanged();
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because this is called from all sorts
+  // of places, and I'm pretty sure the exact ExecCommand call it
+  // makes cannot actually run script.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult EditingStateChanged();
   void MaybeEditingStateChanged();
 
   uint32_t mContentEditableCount;

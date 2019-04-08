@@ -135,9 +135,14 @@ var gSync = {
     let label = this.syncStrings.GetStringFromName("syncnow.label");
     syncIcon.setAttribute("label", label);
     syncNow.setAttribute("label", label);
-    // We start with every menuitem hidden, so that we don't need to init
-    // the sync UI on windows like pageInfo.xul (see bug 1384856).
+    // We start with every menuitem hidden (except for the "setup sync" state),
+    // so that we don't need to init the sync UI on windows like pageInfo.xul
+    // (see bug 1384856).
+    // maybeUpdateUIState() also optimizes for this - if we should be in the
+    // "setup sync" state, that function assumes we are already in it and
+    // doesn't re-initialize the UI elements.
     document.getElementById("sync-setup").hidden = false;
+    document.getElementById("PanelUI-remotetabs-setupsync").hidden = false;
 
     for (let topic of this._obs) {
       Services.obs.addObserver(this, topic, true);
@@ -285,11 +290,13 @@ var gSync = {
       document.documentElement.removeAttribute("fxa_avatar_badged");
     }
 
+    this.enableSendTabIfValidTab();
+
     const anchor = document.getElementById("fxa-toolbar-menu-button");
     if (anchor.getAttribute("open") == "true") {
       PanelUI.hide();
     } else {
-      PanelUI.showSubView(viewId, anchor);
+      PanelUI.showSubView(viewId, anchor, aEvent);
     }
   },
 
@@ -338,6 +345,18 @@ var gSync = {
       document.getElementById("PanelUI-fxa").setAttribute("title", state.displayName ? state.displayName : defaultPanelTitle);
     }
     mainWindowEl.setAttribute("fxastatus", stateValue);
+  },
+
+  enableSendTabIfValidTab() {
+    // All tabs selected must be sendable for the Send Tab button to be enabled
+    // on the FxA menu.
+    let canSendAllURIs = gBrowser.selectedTabs.every(t => this.isSendableURI(t.linkedBrowser.currentURI.spec));
+
+    if (canSendAllURIs) {
+      document.getElementById("PanelUI-fxa-menu-sendtab-button").removeAttribute("disabled");
+    } else {
+      document.getElementById("PanelUI-fxa-menu-sendtab-button").setAttribute("disabled", true);
+    }
   },
 
   updatePanelPopup(state) {
@@ -461,11 +480,6 @@ var gSync = {
   openSendToDevicePromo() {
     let url = this.PRODUCT_INFO_BASE_URL;
     url += "send-tabs/?utm_source=" + Services.appinfo.name.toLowerCase();
-    switchToTabHavingURI(url, true, { replaceQueryString: true });
-  },
-
-  async openFxAChangeAvatar(entryPoint) {
-    const url = await FxAccounts.config.promiseChangeAvatarURI(entryPoint);
     switchToTabHavingURI(url, true, { replaceQueryString: true });
   },
 

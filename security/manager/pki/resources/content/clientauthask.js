@@ -88,13 +88,15 @@ function onLoad() {
                                 [cert.displayName, cert.serialNumber]);
     menuItemNode.setAttribute("value", i);
     menuItemNode.setAttribute("label", nickAndSerial); // This is displayed.
-    selectElement.firstChild.appendChild(menuItemNode);
+    selectElement.menupopup.appendChild(menuItemNode);
     if (i == 0) {
       selectElement.selectedItem = menuItemNode;
     }
   }
 
   setDetails();
+  document.addEventListener("dialogaccept", doOK);
+  document.addEventListener("dialogcancel", doCancel);
 
   Services.obs.notifyObservers(document.getElementById("certAuthAsk"),
                                "cert-dialog-loaded");
@@ -143,12 +145,10 @@ function doOK() {
   let index = parseInt(document.getElementById("nicknames").value);
   retVals.setPropertyAsUint32("selectedIndex", index);
   retVals.setPropertyAsBool("rememberSelection", rememberBox.checked);
-  return true;
 }
 
 function doCancel() {
   let retVals = window.arguments[5].QueryInterface(Ci.nsIWritablePropertyBag2);
   retVals.setPropertyAsBool("certChosen", false);
   retVals.setPropertyAsBool("rememberSelection", rememberBox.checked);
-  return true;
 }

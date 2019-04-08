@@ -409,7 +409,7 @@ var ActionBarHandler = {
         }
 
         // Close ActionBarHandler, then selectAll, and display handles.
-        ActionBarHandler._getSelectAllController(element, win).selectAll();
+        ActionBarHandler._getDocShell(win).doCommand("cmd_selectAll");
         UITelemetry.addEvent("action.1", "actionbar", null, "select_all");
       },
     },
@@ -474,7 +474,7 @@ var ActionBarHandler = {
       },
 
       action: function(element, win) {
-        ActionBarHandler._getEditor(element, win).copy();
+        ActionBarHandler._getDocShell(win).doCommand("cmd_copy");
 
         let msg = Strings.browser.GetStringFromName("selectionHelper.textCopied");
         Snackbars.show(msg, Snackbars.LENGTH_LONG);
@@ -733,6 +733,13 @@ var ActionBarHandler = {
   },
 
   /**
+   * Get current DocShell object.
+   */
+  _getDocShell: function(win) {
+    return win.docShell;
+  },
+
+  /**
    * Provides the currently selected text, for either an editable,
    * or for the default contentWindow.
    */
@@ -788,28 +795,6 @@ var ActionBarHandler = {
     }
 
     return win.docShell.editingSession.getEditorForWindow(win);
-  },
-
-  /**
-   * Returns a selection controller.
-   */
-  _getSelectionController: function(element = this._targetElement, win = this._contentWindow) {
-    if (this._isElementEditable(element)) {
-      return this._getEditor(element, win).selectionController;
-    }
-
-    return win.docShell.
-               QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsISelectionDisplay).
-               QueryInterface(Ci.nsISelectionController);
-  },
-
-  /**
-   * For selectAll(), provides the editor, or the default window selection Controller.
-   */
-  _getSelectAllController: function(element = this._targetElement, win = this._contentWindow) {
-    let editor = this._getEditor(element, win);
-    return (editor) ?
-      editor : this._getSelectionController(element, win);
   },
 
   /**

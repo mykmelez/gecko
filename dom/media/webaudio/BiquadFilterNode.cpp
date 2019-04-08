@@ -232,7 +232,10 @@ BiquadFilterNode::BiquadFilterNode(AudioContext* aContext)
           new AudioParam(this, BiquadFilterNodeEngine::DETUNE, "detune", 0.f)),
       mQ(new AudioParam(this, BiquadFilterNodeEngine::Q, "Q", 1.f)),
       mGain(new AudioParam(this, BiquadFilterNodeEngine::GAIN, "gain", 0.f)) {
-  uint64_t windowID = aContext->GetParentObject()->WindowID();
+  uint64_t windowID = 0;
+  if (aContext->GetParentObject()) {
+    windowID = aContext->GetParentObject()->WindowID();
+  }
   BiquadFilterNodeEngine* engine =
       new BiquadFilterNodeEngine(this, aContext->Destination(), windowID);
   mStream = AudioNodeStream::Create(
@@ -243,10 +246,6 @@ BiquadFilterNode::BiquadFilterNode(AudioContext* aContext)
 already_AddRefed<BiquadFilterNode> BiquadFilterNode::Create(
     AudioContext& aAudioContext, const BiquadFilterOptions& aOptions,
     ErrorResult& aRv) {
-  if (aAudioContext.CheckClosed(aRv)) {
-    return nullptr;
-  }
-
   RefPtr<BiquadFilterNode> audioNode = new BiquadFilterNode(&aAudioContext);
 
   audioNode->Initialize(aOptions, aRv);

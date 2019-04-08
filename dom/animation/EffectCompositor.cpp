@@ -20,6 +20,7 @@
 #include "mozilla/ComputedStyleInlines.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/LayerAnimationInfo.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ServoBindings.h"  // Servo_GetProperties_Overriding_Animation
 #include "mozilla/ServoStyleSet.h"
@@ -31,7 +32,6 @@
 #include "nsCSSProps.h"
 #include "nsDisplayItemTypes.h"
 #include "nsAtom.h"
-#include "nsIPresShell.h"
 #include "nsIPresShellInlines.h"
 #include "nsLayoutUtils.h"
 #include "nsTArray.h"
@@ -150,15 +150,8 @@ bool FindAnimationsForCompositor(
       AnimationPerformanceWarning::Type::None;
   if (!EffectCompositor::AllowCompositorAnimationsOnFrame(aFrame, warning)) {
     if (warning != AnimationPerformanceWarning::Type::None) {
-      // FIXME: Bug 1425837: We should set performance warning by a property set
-      // and write some test cases for this.
-      for (nsCSSPropertyID property : COMPOSITOR_ANIMATABLE_PROPERTY_LIST) {
-        if (!aPropertySet.HasProperty(property)) {
-          continue;
-        }
-        EffectCompositor::SetPerformanceWarning(
-            aFrame, property, AnimationPerformanceWarning(warning));
-      }
+      EffectCompositor::SetPerformanceWarning(
+          aFrame, aPropertySet, AnimationPerformanceWarning(warning));
     }
     return false;
   }
@@ -187,15 +180,8 @@ bool FindAnimationsForCompositor(
         effect->IsMatchForCompositor(aPropertySet, aFrame, *effects,
                                      effectWarning);
     if (effectWarning != AnimationPerformanceWarning::Type::None) {
-      // FIXME: Bug 1425837: We should set performance warning by a property set
-      // and write some test cases for this.
-      for (nsCSSPropertyID property : COMPOSITOR_ANIMATABLE_PROPERTY_LIST) {
-        if (!aPropertySet.HasProperty(property)) {
-          continue;
-        }
-        EffectCompositor::SetPerformanceWarning(
-            aFrame, property, AnimationPerformanceWarning(effectWarning));
-      }
+      EffectCompositor::SetPerformanceWarning(
+          aFrame, aPropertySet, AnimationPerformanceWarning(effectWarning));
     }
 
     if (matchResult ==
@@ -355,12 +341,16 @@ void EffectCompositor::ClearRestyleRequestsFor(Element* aElement) {
                                                        PseudoStyleType::before};
     PseudoElementHashEntry::KeyType afterPseudoKey = {aElement,
                                                       PseudoStyleType::after};
+    PseudoElementHashEntry::KeyType markerPseudoKey = {aElement,
+                                                       PseudoStyleType::marker};
 
     elementsToRestyle.Remove(notPseudoKey);
     elementsToRestyle.Remove(beforePseudoKey);
     elementsToRestyle.Remove(afterPseudoKey);
+    elementsToRestyle.Remove(markerPseudoKey);
   } else if (pseudoType == PseudoStyleType::before ||
-             pseudoType == PseudoStyleType::after) {
+             pseudoType == PseudoStyleType::after ||
+             pseudoType == PseudoStyleType::marker) {
     Element* parentElement = aElement->GetParentElement();
     MOZ_ASSERT(parentElement);
     PseudoElementHashEntry::KeyType key = {parentElement, pseudoType};
@@ -406,8 +396,7 @@ class EffectCompositeOrderComparator {
 
 bool EffectCompositor::GetServoAnimationRule(
     const dom::Element* aElement, PseudoStyleType aPseudoType,
-    CascadeLevel aCascadeLevel,
-    RawServoAnimationValueMapBorrowedMut aAnimationValues) {
+    CascadeLevel aCascadeLevel, RawServoAnimationValueMap* aAnimationValues) {
   MOZ_ASSERT(aAnimationValues);
   MOZ_ASSERT(mPresContext && mPresContext->IsDynamic(),
              "Should not be in print preview");
@@ -459,9 +448,13 @@ bool EffectCompositor::GetServoAnimationRule(
     return nsLayoutUtils::GetAfterPseudo(aElement);
   }
 
+  if (aPseudoType == PseudoStyleType::marker) {
+    return nsLayoutUtils::GetMarkerPseudo(aElement);
+  }
+
   MOZ_ASSERT_UNREACHABLE(
       "Should not try to get the element to restyle for "
-      "a pseudo other that :before or :after");
+      "a pseudo other that :before, :after or ::marker");
   return nullptr;
 }
 
@@ -535,7 +528,8 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame) {
 
   if (pseudoType != PseudoStyleType::NotPseudo &&
       pseudoType != PseudoStyleType::before &&
-      pseudoType != PseudoStyleType::after) {
+      pseudoType != PseudoStyleType::after &&
+      pseudoType != PseudoStyleType::marker) {
     return result;
   }
 
@@ -545,7 +539,8 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame) {
   }
 
   if (pseudoType == PseudoStyleType::before ||
-      pseudoType == PseudoStyleType::after) {
+      pseudoType == PseudoStyleType::after ||
+      pseudoType == PseudoStyleType::marker) {
     content = content->GetParent();
     if (!content) {
       return result;
@@ -709,16 +704,15 @@ void EffectCompositor::UpdateCascadeResults(EffectSet& aEffectSet,
 
 /* static */
 void EffectCompositor::SetPerformanceWarning(
-    const nsIFrame* aFrame, nsCSSPropertyID aProperty,
+    const nsIFrame* aFrame, const nsCSSPropertyIDSet& aPropertySet,
     const AnimationPerformanceWarning& aWarning) {
-  EffectSet* effects =
-      EffectSet::GetEffectSetForFrame(aFrame, nsCSSPropertyIDSet{aProperty});
+  EffectSet* effects = EffectSet::GetEffectSetForFrame(aFrame, aPropertySet);
   if (!effects) {
     return;
   }
 
   for (KeyframeEffect* effect : *effects) {
-    effect->SetPerformanceWarning(aProperty, aWarning);
+    effect->SetPerformanceWarning(aPropertySet, aWarning);
   }
 }
 
@@ -738,7 +732,8 @@ bool EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
   // of the root element later in this function, but for pseudo elements the
   // element in mElementsToRestyle is the parent of the pseudo.
   if (aRoot && (aRoot->IsGeneratedContentContainerForBefore() ||
-                aRoot->IsGeneratedContentContainerForAfter())) {
+                aRoot->IsGeneratedContentContainerForAfter() ||
+                aRoot->IsGeneratedContentContainerForMarker())) {
     aRoot = aRoot->GetParentElement();
   }
 
@@ -881,7 +876,8 @@ bool EffectCompositor::PreTraverse(dom::Element* aElement,
   bool found = false;
   if (aPseudoType != PseudoStyleType::NotPseudo &&
       aPseudoType != PseudoStyleType::before &&
-      aPseudoType != PseudoStyleType::after) {
+      aPseudoType != PseudoStyleType::after &&
+      aPseudoType != PseudoStyleType::marker) {
     return found;
   }
 

@@ -7,6 +7,7 @@
 #include "nsRangeFrame.h"
 
 #include "mozilla/EventStates.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TouchEvents.h"
 
 #include "gfxContext.h"
@@ -17,10 +18,10 @@
 #include "nsIContent.h"
 #include "mozilla/dom/Document.h"
 #include "nsNameSpaceManager.h"
-#include "nsIPresShell.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsPresContext.h"
+#include "nsPresContextInlines.h"
 #include "nsNodeInfoManager.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/ServoStyleSet.h"
@@ -269,8 +270,7 @@ void nsRangeFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     return;  // the native theme displays its own visual indication of focus
   }
 
-  aLists.Content()->AppendToTop(
-      MakeDisplayItem<nsDisplayRangeFocusRing>(aBuilder, this));
+  aLists.Content()->AppendNewToTop<nsDisplayRangeFocusRing>(aBuilder, this);
 }
 
 void nsRangeFrame::Reflow(nsPresContext* aPresContext,

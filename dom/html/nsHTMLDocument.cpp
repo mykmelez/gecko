@@ -8,8 +8,10 @@
 
 #include "nsIContentPolicy.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/HTMLAllCollection.h"
 #include "mozilla/dom/FeaturePolicyUtils.h"
+#include "nsCommandManager.h"
 #include "nsCOMPtr.h"
 #include "nsGlobalWindow.h"
 #include "nsString.h"
@@ -23,7 +25,6 @@
 #include "nsHTMLParts.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsGkAtoms.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsPIDOMWindow.h"
 #include "nsDOMString.h"
@@ -508,7 +509,7 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
   if (!viewSource && xhtml) {
     // We're parsing XHTML as XML, remember that.
     mType = eXHTML;
-    mCompatMode = eCompatibility_FullStandards;
+    SetCompatibilityMode(eCompatibility_FullStandards);
     loadAsHtml5 = false;
   }
 
@@ -526,8 +527,6 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
       }
     }
   }
-
-  CSSLoader()->SetCompatibilityMode(mCompatMode);
 
   nsresult rv = Document::StartDocumentLoad(aCommand, aChannel, aLoadGroup,
                                             aContainer, aDocListener, aReset);
@@ -781,10 +780,7 @@ void nsHTMLDocument::SetCompatibilityMode(nsCompatibility aMode) {
     return;
   }
   mCompatMode = aMode;
-  CSSLoader()->SetCompatibilityMode(mCompatMode);
-  if (nsPresContext* pc = GetPresContext()) {
-    pc->CompatibilityModeChanged();
-  }
+  CompatibilityModeChanged();
 }
 
 bool nsHTMLDocument::UseWidthDeviceWidthFallbackViewport() const {
@@ -1432,7 +1428,7 @@ void nsHTMLDocument::Close(ErrorResult& rv) {
   // above about reusing frames applies.
   //
   // XXXhsivonen keeping this around for bug 577508 / 253951 still :-(
-  if (GetShell()) {
+  if (GetPresShell()) {
     FlushPendingNotifications(FlushType::Layout);
   }
 }
@@ -1873,8 +1869,10 @@ void nsHTMLDocument::TearingDownEditor() {
     EditingState oldState = mEditingState;
     mEditingState = eTearingDown;
 
-    nsCOMPtr<nsIPresShell> presShell = GetShell();
-    if (!presShell) return;
+    RefPtr<PresShell> presShell = GetPresShell();
+    if (!presShell) {
+      return;
+    }
 
     nsTArray<RefPtr<StyleSheet>> agentSheets;
     presShell->GetAgentStyleSheets(agentSheets);
@@ -2018,7 +2016,7 @@ nsresult nsHTMLDocument::EditingStateChanged() {
     EditingState oldState = mEditingState;
     nsAutoEditingState push(this, eSettingUp);
 
-    nsCOMPtr<nsIPresShell> presShell = GetShell();
+    RefPtr<PresShell> presShell = GetPresShell();
     NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
 
     // Before making this window editable, we need to modify UA style sheet
@@ -2200,7 +2198,7 @@ void nsHTMLDocument::MaybeDispatchCheckKeyPressEventModelEvent() {
 }
 
 void nsHTMLDocument::SetKeyPressEventModel(uint16_t aKeyPressEventModel) {
-  nsIPresShell* presShell = GetShell();
+  PresShell* presShell = GetPresShell();
   if (!presShell) {
     return;
   }
@@ -2229,30 +2227,24 @@ void nsHTMLDocument::SetDesignMode(
   }
 }
 
-nsresult nsHTMLDocument::GetMidasCommandManager(nsICommandManager** aCmdMgr) {
-  // initialize return value
-  NS_ENSURE_ARG_POINTER(aCmdMgr);
-
+nsCommandManager* nsHTMLDocument::GetMidasCommandManager() {
   // check if we have it cached
   if (mMidasCommandManager) {
-    NS_ADDREF(*aCmdMgr = mMidasCommandManager);
-    return NS_OK;
+    return mMidasCommandManager;
   }
 
-  *aCmdMgr = nullptr;
-
   nsPIDOMWindowOuter* window = GetWindow();
-  if (!window) return NS_ERROR_FAILURE;
+  if (!window) {
+    return nullptr;
+  }
 
   nsIDocShell* docshell = window->GetDocShell();
-  if (!docshell) return NS_ERROR_FAILURE;
+  if (!docshell) {
+    return nullptr;
+  }
 
   mMidasCommandManager = docshell->GetCommandManager();
-  if (!mMidasCommandManager) return NS_ERROR_FAILURE;
-
-  NS_ADDREF(*aCmdMgr = mMidasCommandManager);
-
-  return NS_OK;
+  return mMidasCommandManager;
 }
 
 struct MidasCommand {
@@ -2545,9 +2537,8 @@ bool nsHTMLDocument::ExecCommand(const nsAString& commandID, bool doShowUI,
   }
 
   // get command manager and dispatch command to our window if it's acceptable
-  nsCOMPtr<nsICommandManager> cmdMgr;
-  GetMidasCommandManager(getter_AddRefs(cmdMgr));
-  if (!cmdMgr) {
+  RefPtr<nsCommandManager> commandManager = GetMidasCommandManager();
+  if (!commandManager) {
     rv.Throw(NS_ERROR_FAILURE);
     return false;
   }
@@ -2576,14 +2567,12 @@ bool nsHTMLDocument::ExecCommand(const nsAString& commandID, bool doShowUI,
   }
 
   // Return false for disabled commands (bug 760052)
-  bool enabled = false;
-  cmdMgr->IsCommandEnabled(cmdToDispatch.get(), window, &enabled);
-  if (!enabled) {
+  if (!commandManager->IsCommandEnabled(cmdToDispatch, window)) {
     return false;
   }
 
   if (!isBool && paramStr.IsEmpty()) {
-    rv = cmdMgr->DoCommand(cmdToDispatch.get(), nullptr, window);
+    rv = commandManager->DoCommand(cmdToDispatch.get(), nullptr, window);
   } else {
     // we have a command that requires a parameter, create params
     RefPtr<nsCommandParams> params = new nsCommandParams();
@@ -2602,7 +2591,7 @@ bool nsHTMLDocument::ExecCommand(const nsAString& commandID, bool doShowUI,
     if (rv.Failed()) {
       return false;
     }
-    rv = cmdMgr->DoCommand(cmdToDispatch.get(), params, window);
+    rv = commandManager->DoCommand(cmdToDispatch.get(), params, window);
   }
 
   return !rv.Failed();
@@ -2635,9 +2624,8 @@ bool nsHTMLDocument::QueryCommandEnabled(const nsAString& commandID,
   }
 
   // get command manager and dispatch command to our window if it's acceptable
-  nsCOMPtr<nsICommandManager> cmdMgr;
-  GetMidasCommandManager(getter_AddRefs(cmdMgr));
-  if (!cmdMgr) {
+  RefPtr<nsCommandManager> commandManager = GetMidasCommandManager();
+  if (!commandManager) {
     rv.Throw(NS_ERROR_FAILURE);
     return false;
   }
@@ -2648,9 +2636,7 @@ bool nsHTMLDocument::QueryCommandEnabled(const nsAString& commandID,
     return false;
   }
 
-  bool retval;
-  rv = cmdMgr->IsCommandEnabled(cmdToDispatch.get(), window, &retval);
-  return retval;
+  return commandManager->IsCommandEnabled(cmdToDispatch, window);
 }
 
 bool nsHTMLDocument::QueryCommandIndeterm(const nsAString& commandID,
@@ -2666,9 +2652,8 @@ bool nsHTMLDocument::QueryCommandIndeterm(const nsAString& commandID,
   }
 
   // get command manager and dispatch command to our window if it's acceptable
-  nsCOMPtr<nsICommandManager> cmdMgr;
-  GetMidasCommandManager(getter_AddRefs(cmdMgr));
-  if (!cmdMgr) {
+  RefPtr<nsCommandManager> commandManager = GetMidasCommandManager();
+  if (!commandManager) {
     rv.Throw(NS_ERROR_FAILURE);
     return false;
   }
@@ -2680,7 +2665,7 @@ bool nsHTMLDocument::QueryCommandIndeterm(const nsAString& commandID,
   }
 
   RefPtr<nsCommandParams> params = new nsCommandParams();
-  rv = cmdMgr->GetCommandState(cmdToDispatch.get(), window, params);
+  rv = commandManager->GetCommandState(cmdToDispatch.get(), window, params);
   if (rv.Failed()) {
     return false;
   }
@@ -2706,9 +2691,8 @@ bool nsHTMLDocument::QueryCommandState(const nsAString& commandID,
   }
 
   // get command manager and dispatch command to our window if it's acceptable
-  nsCOMPtr<nsICommandManager> cmdMgr;
-  GetMidasCommandManager(getter_AddRefs(cmdMgr));
-  if (!cmdMgr) {
+  RefPtr<nsCommandManager> commandManager = GetMidasCommandManager();
+  if (!commandManager) {
     rv.Throw(NS_ERROR_FAILURE);
     return false;
   }
@@ -2726,7 +2710,7 @@ bool nsHTMLDocument::QueryCommandState(const nsAString& commandID,
   }
 
   RefPtr<nsCommandParams> params = new nsCommandParams();
-  rv = cmdMgr->GetCommandState(cmdToDispatch.get(), window, params);
+  rv = commandManager->GetCommandState(cmdToDispatch.get(), window, params);
   if (rv.Failed()) {
     return false;
   }
@@ -2794,9 +2778,8 @@ void nsHTMLDocument::QueryCommandValue(const nsAString& commandID,
   }
 
   // get command manager and dispatch command to our window if it's acceptable
-  nsCOMPtr<nsICommandManager> cmdMgr;
-  GetMidasCommandManager(getter_AddRefs(cmdMgr));
-  if (!cmdMgr) {
+  RefPtr<nsCommandManager> commandManager = GetMidasCommandManager();
+  if (!commandManager) {
     rv.Throw(NS_ERROR_FAILURE);
     return;
   }
@@ -2819,7 +2802,7 @@ void nsHTMLDocument::QueryCommandValue(const nsAString& commandID,
     if (rv.Failed()) {
       return;
     }
-    rv = cmdMgr->DoCommand(cmdToDispatch.get(), params, window);
+    rv = commandManager->DoCommand(cmdToDispatch.get(), params, window);
     if (rv.Failed()) {
       return;
     }
@@ -2832,7 +2815,7 @@ void nsHTMLDocument::QueryCommandValue(const nsAString& commandID,
     return;
   }
 
-  rv = cmdMgr->GetCommandState(cmdToDispatch.get(), window, params);
+  rv = commandManager->GetCommandState(cmdToDispatch.get(), window, params);
   if (rv.Failed()) {
     return;
   }

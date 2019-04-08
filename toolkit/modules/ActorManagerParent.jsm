@@ -97,7 +97,6 @@ var EXPORTED_SYMBOLS = ["ActorManagerParent"];
 
 const {ExtensionUtils} = ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 const {DefaultMap} = ExtensionUtils;
 
@@ -214,6 +213,31 @@ let ACTORS = {
         "DOM:WebManifest:fetchIcon",
         "DOM:WebManifest:hasManifestLink",
       ],
+    },
+  },
+
+  PictureInPicture: {
+    child: {
+      module: "resource://gre/actors/PictureInPictureChild.jsm",
+      events: {
+        "MozTogglePictureInPicture": {capture: true},
+      },
+
+      messages: [
+        "PictureInPicture:SetupPlayer",
+        "PictureInPicture:Play",
+        "PictureInPicture:Pause",
+      ],
+    },
+  },
+
+  PictureInPictureToggle: {
+    child: {
+      allFrames: true,
+      module: "resource://gre/actors/PictureInPictureChild.jsm",
+      events: {
+        "canplay": {capture: true, mozSystemGroup: true},
+      },
     },
   },
 
@@ -347,21 +371,6 @@ let ACTORS = {
     },
   },
 };
-
-if (AppConstants.NIGHTLY_BUILD) {
-  ACTORS.PictureInPicture = {
-    child: {
-      module: "resource://gre/actors/PictureInPictureChild.jsm",
-      events: {
-        "MozTogglePictureInPicture": {capture: true},
-      },
-
-      messages: [
-        "PictureInPicture:SetupPlayer",
-      ],
-    },
-  };
-}
 
 class ActorSet {
   constructor(group, actorSide) {

@@ -51,7 +51,8 @@ ToolbarKeyboardNavigator = {
       }
 
       // Skip invisible or disabled elements.
-      if (aNode.hidden || aNode.disabled) {
+      if (aNode.hidden || aNode.disabled
+          || aNode.style.visibility == "hidden") {
         return NodeFilter.FILTER_REJECT;
       }
       // This width check excludes the overflow button when there's no overflow.
@@ -110,8 +111,9 @@ ToolbarKeyboardNavigator = {
     // We could remove tabindex now, but even though the button keeps DOM
     // focus, a11y gets confused because the button reports as not being
     // focusable. This results in weirdness if the user switches windows and
-    // then switches back. Instead, remove tabindex when the button loses
-    // focus.
+    // then switches back. It also means that focus can't be restored to the
+    // button when a panel is closed. Instead, remove tabindex when the button
+    // loses focus.
     aButton.addEventListener("blur", this);
   },
 
@@ -119,6 +121,11 @@ ToolbarKeyboardNavigator = {
     if (document.activeElement == aEvent.target) {
       // This event was fired because the user switched windows. This button
       // will get focus again when the user returns.
+      return;
+    }
+    if (aEvent.target.getAttribute("open") == "true") {
+      // The button activated a panel. The button should remain
+      // focusable so that focus can be restored when the panel closes.
       return;
     }
     aEvent.target.removeEventListener("blur", this);
@@ -185,10 +192,12 @@ ToolbarKeyboardNavigator = {
 
     switch (aEvent.key) {
       case "ArrowLeft":
-        this.navigateButtons(aEvent.currentTarget, true);
+        // Previous if UI is LTR, next if UI is RTL.
+        this.navigateButtons(aEvent.currentTarget, !window.RTL_UI);
         break;
       case "ArrowRight":
-        this.navigateButtons(aEvent.currentTarget, false);
+        // Previous if UI is RTL, next if UI is LTR.
+        this.navigateButtons(aEvent.currentTarget, window.RTL_UI);
         break;
       default:
         return;

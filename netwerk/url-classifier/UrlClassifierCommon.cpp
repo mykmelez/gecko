@@ -383,7 +383,14 @@ void UrlClassifierCommon::AnnotateChannel(
   SetClassificationFlagsHelper(aChannel, aClassificationFlags,
                                isThirdPartyWithTopLevelWinURI);
 
-  if (isThirdPartyWithTopLevelWinURI || IsAllowListed(aChannel, aPurpose)) {
+  // We consider valid tracking flags (based on the current strict vs basic list
+  // prefs) and cryptomining (which is not considered as tracking).
+  bool validClassificationFlags =
+      IsTrackingClassificationFlag(aClassificationFlags) ||
+      IsCryptominingClassificationFlag(aClassificationFlags);
+
+  if (validClassificationFlags &&
+      (isThirdPartyWithTopLevelWinURI || IsAllowListed(aChannel, aPurpose))) {
     UrlClassifierCommon::NotifyChannelClassifierProtectionDisabled(
         aChannel, aLoadingState);
   }
@@ -457,7 +464,66 @@ bool UrlClassifierCommon::IsAllowListed(
 
 // static
 bool UrlClassifierCommon::IsTrackingClassificationFlag(uint32_t aFlag) {
-  return (aFlag & nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_TRACKING);
+  if (StaticPrefs::privacy_annotate_channels_strict_list_enabled()) {
+    return (
+        aFlag &
+        nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_STRICT_TRACKING);
+  }
+  return (aFlag &
+          nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_BASIC_TRACKING);
+}
+
+// static
+bool UrlClassifierCommon::IsCryptominingClassificationFlag(uint32_t aFlag) {
+  if (aFlag & nsIHttpChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING) {
+    return true;
+  }
+
+  if (StaticPrefs::privacy_annotate_channels_strict_list_enabled() &&
+      (aFlag &
+       nsIHttpChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING_CONTENT)) {
+    return true;
+  }
+
+  return false;
+}
+
+void UrlClassifierCommon::TablesToString(const nsTArray<nsCString>& aList,
+                                         nsACString& aString) {
+  aString.Truncate();
+
+  for (const nsCString& table : aList) {
+    if (!aString.IsEmpty()) {
+      aString.Append(",");
+    }
+    aString.Append(table);
+  }
+}
+
+uint32_t UrlClassifierCommon::TablesToClassificationFlags(
+    const nsTArray<nsCString>& aList,
+    const std::vector<ClassificationData>& aData, uint32_t aDefaultFlag) {
+  uint32_t flags = 0;
+  for (const nsCString& table : aList) {
+    flags |= TableToClassificationFlag(table, aData);
+  }
+
+  if (flags == 0) {
+    flags |= aDefaultFlag;
+  }
+
+  return flags;
+}
+
+uint32_t UrlClassifierCommon::TableToClassificationFlag(
+    const nsACString& aTable, const std::vector<ClassificationData>& aData) {
+  for (const ClassificationData& data : aData) {
+    if (StringBeginsWith(aTable, data.mPrefix)) {
+      return data.mFlag;
+    }
+  }
+
+  return 0;
 }
 
 }  // namespace net

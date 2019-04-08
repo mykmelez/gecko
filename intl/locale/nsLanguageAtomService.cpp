@@ -7,11 +7,13 @@
 #include "nsUConvPropertySearch.h"
 #include "nsUnicharUtils.h"
 #include "nsAtom.h"
+#include "nsGkAtoms.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "mozilla/ServoBindings.h"
+#include "mozilla/ServoUtils.h"
 
 using namespace mozilla;
 using mozilla::intl::OSPreferences;
@@ -181,11 +183,12 @@ nsStaticAtom* nsLanguageAtomService::GetUncachedLanguageGroup(
       } else {
         size_t foundIndex;
         const nsCString& script = loc.GetScript();
-        if (BinarySearchIf(kScriptLangGroup, 0, ArrayLength(kScriptLangGroup),
-                           [script](const auto& entry) -> int {
-                             return script.Compare(entry.mTag);
-                           },
-                           &foundIndex)) {
+        if (BinarySearchIf(
+                kScriptLangGroup, 0, ArrayLength(kScriptLangGroup),
+                [script](const auto& entry) -> int {
+                  return script.Compare(entry.mTag);
+                },
+                &foundIndex)) {
           return kScriptLangGroup[foundIndex].mAtom;
         }
       }

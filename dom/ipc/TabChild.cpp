@@ -22,7 +22,6 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/dom/MessageManagerBinding.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -32,6 +31,7 @@
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/dom/BrowserBridgeChild.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/layers/APZChild.h"
@@ -60,6 +60,7 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Unused.h"
+#include "nsBrowserStatusFilter.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsEmbedCID.h"
@@ -205,7 +206,7 @@ already_AddRefed<Document> TabChildBase::GetDocument() const {
 already_AddRefed<nsIPresShell> TabChildBase::GetPresShell() const {
   nsCOMPtr<nsIPresShell> result;
   if (nsCOMPtr<Document> doc = GetDocument()) {
-    result = doc->GetShell();
+    result = doc->GetPresShell();
   }
   return result.forget();
 }
@@ -381,7 +382,6 @@ TabChild::TabChild(ContentChild* aManager, const TabId& aTabId,
       mIgnoreKeyPressEvent(false),
       mHasValidInnerSize(false),
       mDestroyed(false),
-      mProgressListenerRegistered(false),
       mUniqueId(aTabId),
       mHasSiblings(false),
       mIsTransparent(false),
@@ -455,12 +455,12 @@ TabChild::Observe(nsISupports* aSubject, const char* aTopic,
       nsCOMPtr<Document> doc(GetDocument());
 
       if (subject == doc) {
-        nsCOMPtr<nsIPresShell> shell(doc->GetShell());
-        if (shell) {
-          shell->SetIsFirstPaint(true);
+        RefPtr<PresShell> presShell = doc->GetPresShell();
+        if (presShell) {
+          presShell->SetIsFirstPaint(true);
         }
 
-        APZCCallbackHelper::InitializeRootDisplayport(shell);
+        APZCCallbackHelper::InitializeRootDisplayport(presShell);
       }
     }
   }
@@ -478,7 +478,7 @@ void TabChild::ContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
 
 void TabChild::SetTargetAPZC(
     uint64_t aInputBlockId,
-    const nsTArray<ScrollableLayerGuid>& aTargets) const {
+    const nsTArray<SLGuidAndRenderRoot>& aTargets) const {
   if (mApzcTreeManager) {
     mApzcTreeManager->SetTargetAPZC(aInputBlockId, aTargets);
   }
@@ -499,17 +499,15 @@ bool TabChild::DoUpdateZoomConstraints(
     return false;
   }
 
-  ScrollableLayerGuid guid =
-      ScrollableLayerGuid(mLayersId, aPresShellId, aViewId);
+  SLGuidAndRenderRoot guid = SLGuidAndRenderRoot(
+      mLayersId, aPresShellId, aViewId, gfxUtils::GetContentRenderRoot());
 
   mApzcTreeManager->UpdateZoomConstraints(guid, aConstraints);
   return true;
 }
 
 nsresult TabChild::Init(mozIDOMWindowProxy* aParent) {
-  if (!mTabGroup) {
-    mTabGroup = TabGroup::GetFromActor(this);
-  }
+  MOZ_DIAGNOSTIC_ASSERT(mTabGroup);
 
   nsCOMPtr<nsIWidget> widget = nsIWidget::CreatePuppetWidget(this);
   mPuppetWidget = static_cast<PuppetWidget*>(widget.get());
@@ -540,11 +538,24 @@ nsresult TabChild::Init(mozIDOMWindowProxy* aParent) {
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
   MOZ_ASSERT(docShell);
 
-  nsCOMPtr<nsIWebProgress> webProgress = do_QueryInterface(docShell);
-  nsresult rv = webProgress->AddProgressListener(
-      this, nsIWebProgress::NOTIFY_CONTENT_BLOCKING);
+  const uint32_t notifyMask =
+      nsIWebProgress::NOTIFY_PROGRESS | nsIWebProgress::NOTIFY_STATUS |
+      nsIWebProgress::NOTIFY_REFRESH | nsIWebProgress::NOTIFY_CONTENT_BLOCKING;
+
+  mStatusFilter = new nsBrowserStatusFilter();
+
+  RefPtr<nsIEventTarget> eventTarget =
+      TabGroup()->EventTargetFor(TaskCategory::Network);
+
+  mStatusFilter->SetTarget(eventTarget);
+  nsresult rv = mStatusFilter->AddProgressListener(this, notifyMask);
   NS_ENSURE_SUCCESS(rv, rv);
-  mProgressListenerRegistered = true;
+
+  {
+    nsCOMPtr<nsIWebProgress> webProgress = do_QueryInterface(docShell);
+    rv = webProgress->AddProgressListener(mStatusFilter, notifyMask);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
 
   docShell->SetAffectPrivateSessionLifetime(
       mChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_LIFETIME);
@@ -634,11 +645,13 @@ void TabChild::UpdateFrameType() {
 NS_IMPL_CYCLE_COLLECTION_CLASS(TabChild)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(TabChild, TabChildBase)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(TabChild, TabChildBase)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStatusFilter)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebNav)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowsingContext)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -930,6 +943,16 @@ void TabChild::DestroyWindow() {
     mBrowsingContext = nullptr;
   }
 
+  if (mStatusFilter) {
+    if (nsCOMPtr<nsIWebProgress> webProgress =
+            do_QueryInterface(WebNavigation())) {
+      webProgress->RemoveProgressListener(mStatusFilter);
+    }
+
+    mStatusFilter->RemoveProgressListener(this);
+    mStatusFilter = nullptr;
+  }
+
   if (mCoalescedMouseEventFlusher) {
     mCoalescedMouseEventFlusher->RemoveObserver();
     mCoalescedMouseEventFlusher = nullptr;
@@ -962,14 +985,6 @@ void TabChild::DestroyWindow() {
       sTabChildren = nullptr;
     }
     mLayersId = layers::LayersId{0};
-  }
-
-  if (mProgressListenerRegistered) {
-    nsCOMPtr<nsIWebProgress> webProgress = do_QueryInterface(WebNavigation());
-    if (webProgress) {
-      webProgress->RemoveProgressListener(this);
-      mProgressListenerRegistered = false;
-    }
   }
 }
 
@@ -1238,7 +1253,8 @@ void TabChild::HandleDoubleTap(const CSSPoint& aPoint,
   if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(
           document->GetDocumentElement(), &presShellId, &viewId) &&
       mApzcTreeManager) {
-    ScrollableLayerGuid guid(mLayersId, presShellId, viewId);
+    SLGuidAndRenderRoot guid(mLayersId, presShellId, viewId,
+                             gfxUtils::GetContentRenderRoot());
 
     mApzcTreeManager->ZoomToRect(guid, zoomToRect, DEFAULT_BEHAVIOR);
   }
@@ -1324,8 +1340,9 @@ bool TabChild::NotifyAPZStateChange(
 
 void TabChild::StartScrollbarDrag(
     const layers::AsyncDragMetrics& aDragMetrics) {
-  ScrollableLayerGuid guid(mLayersId, aDragMetrics.mPresShellId,
-                           aDragMetrics.mViewId);
+  SLGuidAndRenderRoot guid(mLayersId, aDragMetrics.mPresShellId,
+                           aDragMetrics.mViewId,
+                           gfxUtils::GetContentRenderRoot());
 
   if (mApzcTreeManager) {
     mApzcTreeManager->StartScrollbarDrag(guid, aDragMetrics);
@@ -1335,7 +1352,8 @@ void TabChild::StartScrollbarDrag(
 void TabChild::ZoomToRect(const uint32_t& aPresShellId,
                           const ScrollableLayerGuid::ViewID& aViewId,
                           const CSSRect& aRect, const uint32_t& aFlags) {
-  ScrollableLayerGuid guid(mLayersId, aPresShellId, aViewId);
+  SLGuidAndRenderRoot guid(mLayersId, aPresShellId, aViewId,
+                           gfxUtils::GetContentRenderRoot());
 
   if (mApzcTreeManager) {
     mApzcTreeManager->ZoomToRect(guid, aRect, aFlags);
@@ -2030,20 +2048,6 @@ PFilePickerChild* TabChild::AllocPFilePickerChild(const nsString&,
 bool TabChild::DeallocPFilePickerChild(PFilePickerChild* actor) {
   nsFilePickerProxy* filePicker = static_cast<nsFilePickerProxy*>(actor);
   NS_RELEASE(filePicker);
-  return true;
-}
-
-auto TabChild::AllocPIndexedDBPermissionRequestChild(
-    const Principal& aPrincipal) -> PIndexedDBPermissionRequestChild* {
-  MOZ_CRASH(
-      "PIndexedDBPermissionRequestChild actors should always be created "
-      "manually!");
-}
-
-bool TabChild::DeallocPIndexedDBPermissionRequestChild(
-    PIndexedDBPermissionRequestChild* aActor) {
-  MOZ_ASSERT(aActor);
-  delete aActor;
   return true;
 }
 
@@ -3284,7 +3288,22 @@ NS_IMETHODIMP TabChild::OnProgressChange(nsIWebProgress* aWebProgress,
                                          int32_t aMaxSelfProgress,
                                          int32_t aCurTotalProgress,
                                          int32_t aMaxTotalProgress) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!IPCOpen()) {
+    return NS_OK;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  RequestData requestData;
+
+  nsresult rv = PrepareProgressListenerData(aWebProgress, aRequest,
+                                            webProgressData, requestData);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  Unused << SendOnProgressChange(webProgressData, requestData, aCurSelfProgress,
+                                 aMaxSelfProgress, aCurTotalProgress,
+                                 aMaxTotalProgress);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP TabChild::OnLocationChange(nsIWebProgress* aWebProgress,
@@ -3296,8 +3315,25 @@ NS_IMETHODIMP TabChild::OnLocationChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP TabChild::OnStatusChange(nsIWebProgress* aWebProgress,
                                        nsIRequest* aRequest, nsresult aStatus,
                                        const char16_t* aMessage) {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!IPCOpen()) {
+    return NS_OK;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  RequestData requestData;
+
+  nsresult rv = PrepareProgressListenerData(aWebProgress, aRequest,
+                                            webProgressData, requestData);
+
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  const nsString message(aMessage);
+
+  Unused << SendOnStatusChange(webProgressData, requestData, aStatus, message);
+
+  return NS_OK;
 }
+
 NS_IMETHODIMP TabChild::OnSecurityChange(nsIWebProgress* aWebProgress,
                                          nsIRequest* aRequest,
                                          uint32_t aState) {
@@ -3306,47 +3342,72 @@ NS_IMETHODIMP TabChild::OnSecurityChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP TabChild::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
                                                nsIRequest* aRequest,
                                                uint32_t aEvent) {
-  WebProgressData webProgressData;
+  if (!IPCOpen()) {
+    return NS_OK;
+  }
+
+  Maybe<WebProgressData> webProgressData;
   RequestData requestData;
   nsresult rv = PrepareProgressListenerData(aWebProgress, aRequest,
                                             webProgressData, requestData);
   NS_ENSURE_SUCCESS(rv, rv);
+  Unused << SendOnContentBlockingEvent(webProgressData, requestData, aEvent);
 
-  Maybe<WebProgressData> maybeWebProgressData;
-  if (aWebProgress) {
-    maybeWebProgressData.emplace(webProgressData);
-  }
-  Unused << SendOnContentBlockingEvent(maybeWebProgressData, requestData,
-                                       aEvent);
+  return NS_OK;
+}
+
+NS_IMETHODIMP TabChild::OnProgressChange64(nsIWebProgress* aWebProgress,
+                                           nsIRequest* aRequest,
+                                           int64_t aCurSelfProgress,
+                                           int64_t aMaxSelfProgress,
+                                           int64_t aCurTotalProgress,
+                                           int64_t aMaxTotalProgress) {
+  // All the events we receive are filtered through an nsBrowserStatusFilter,
+  // which accepts ProgressChange64 events, but truncates the progress values to
+  // uint32_t and calls OnProgressChange.
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP TabChild::OnRefreshAttempted(nsIWebProgress* aWebProgress,
+                                           nsIURI* aRefreshURI, int32_t aMillis,
+                                           bool aSameURI, bool* aOut) {
+  NS_ENSURE_ARG_POINTER(aOut);
+  *aOut = true;
 
   return NS_OK;
 }
 
 nsresult TabChild::PrepareProgressListenerData(
     nsIWebProgress* aWebProgress, nsIRequest* aRequest,
-    WebProgressData& aWebProgressData, RequestData& aRequestData) {
+    Maybe<WebProgressData>& aWebProgressData, RequestData& aRequestData) {
   if (aWebProgress) {
+    aWebProgressData.emplace();
+
     bool isTopLevel = false;
     nsresult rv = aWebProgress->GetIsTopLevel(&isTopLevel);
     NS_ENSURE_SUCCESS(rv, rv);
-    aWebProgressData.isTopLevel() = isTopLevel;
+    aWebProgressData->isTopLevel() = isTopLevel;
 
     bool isLoadingDocument = false;
     rv = aWebProgress->GetIsLoadingDocument(&isLoadingDocument);
     NS_ENSURE_SUCCESS(rv, rv);
-    aWebProgressData.isLoadingDocument() = isLoadingDocument;
+    aWebProgressData->isLoadingDocument() = isLoadingDocument;
 
     uint32_t loadType = 0;
     rv = aWebProgress->GetLoadType(&loadType);
     NS_ENSURE_SUCCESS(rv, rv);
-    aWebProgressData.loadType() = loadType;
+    aWebProgressData->loadType() = loadType;
 
-    uint64_t DOMWindowID = 0;
-    // The DOM Window ID getter here may throw if the inner or outer windows
+    uint64_t outerDOMWindowID = 0;
+    uint64_t innerDOMWindowID = 0;
+    // The DOM Window ID getters here may throw if the inner or outer windows
     // aren't created yet or are destroyed at the time we're making this call
     // but that isn't fatal so ignore the exceptions here.
-    Unused << aWebProgress->GetDOMWindowID(&DOMWindowID);
-    aWebProgressData.DOMWindowID() = DOMWindowID;
+    Unused << aWebProgress->GetDOMWindowID(&outerDOMWindowID);
+    aWebProgressData->outerDOMWindowID() = outerDOMWindowID;
+
+    Unused << aWebProgress->GetInnerDOMWindowID(&innerDOMWindowID);
+    aWebProgressData->innerDOMWindowID() = innerDOMWindowID;
   }
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);

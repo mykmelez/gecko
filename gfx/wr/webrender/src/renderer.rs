@@ -75,7 +75,7 @@ use prim_store::DeferredResolve;
 use profiler::{BackendProfileCounters, FrameProfileCounters, TimeProfileCounter,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
 use profiler::{Profiler, ChangeIndicator};
-use device::query::GpuProfiler;
+use device::query::{GpuProfiler, GpuDebugMethod};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use record::ApiRecordingReceiver;
 use render_backend::{FrameId, RenderBackend};
@@ -88,7 +88,7 @@ use util::drain_filter;
 
 use std;
 use std::cmp;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::collections::hash_map::Entry;
 use std::f32;
 use std::marker::PhantomData;
@@ -104,7 +104,7 @@ use std::cell::RefCell;
 use texture_cache::TextureCache;
 use thread_profiler::{register_thread_with_profiler, write_profile};
 use tiling::{AlphaRenderTarget, ColorRenderTarget};
-use tiling::{BlitJob, BlitJobSource, RenderPass, RenderPassKind, RenderTargetList};
+use tiling::{BlitJob, BlitJobSource, RenderPassKind, RenderTargetList};
 use tiling::{Frame, RenderTarget, RenderTargetKind, TextureCacheRenderTarget};
 #[cfg(not(feature = "pathfinder"))]
 use tiling::GlyphJob;
@@ -1595,6 +1595,255 @@ pub struct RendererVAOs {
     resolve_vao: VAO,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A handle to a screenshot that is being asynchronously captured and scaled.
+pub struct AsyncScreenshotHandle(usize);
+
+/// An asynchronously captured screenshot bound to a PBO which has not yet been mapped for copying.
+struct AsyncScreenshot {
+    /// The PBO that will contain the screenshot data.
+    pbo: PBO,
+    /// The size of the screenshot.
+    screenshot_size: DeviceIntSize,
+    /// Thge image format of the screenshot.
+    image_format: ImageFormat,
+}
+
+/// Renderer infrastructure for capturing screenshots and scaling them asynchronously.
+struct AsyncScreenshotGrabber {
+    /// The textures used to scale screenshots.
+    scaling_textures: Vec<Texture>,
+    /// PBOs available to be used for screenshot readback.
+    available_pbos: Vec<PBO>,
+    /// PBOs containing screenshots that are awaiting readback.
+    awaiting_readback: HashMap<AsyncScreenshotHandle, AsyncScreenshot>,
+    /// The handle for the net PBO that will be inserted into `in_use_pbos`.
+    next_pbo_handle: usize,
+}
+
+impl Default for AsyncScreenshotGrabber {
+    fn default() -> Self {
+        return AsyncScreenshotGrabber {
+            scaling_textures: Vec::new(),
+            available_pbos: Vec::new(),
+            awaiting_readback: HashMap::new(),
+            next_pbo_handle: 1,
+        }
+    }
+}
+
+impl AsyncScreenshotGrabber {
+    /// Deinitialize the allocated textures and PBOs.
+    pub fn deinit(self, device: &mut Device) {
+        for texture in self.scaling_textures {
+            device.delete_texture(texture);
+        }
+
+        for pbo in self.available_pbos {
+            device.delete_pbo(pbo);
+        }
+
+        for (_, async_screenshot) in self.awaiting_readback {
+            device.delete_pbo(async_screenshot.pbo);
+        }
+    }
+
+    /// Take a screenshot and scale it asynchronously.
+    ///
+    /// The returned handle can be used to access the mapped screenshot data via
+    /// `map_and_recycle_screenshot`.
+    /// The returned size is the size of the screenshot.
+    pub fn get_screenshot(
+        &mut self,
+        device: &mut Device,
+        window_rect: DeviceIntRect,
+        buffer_size: DeviceIntSize,
+        image_format: ImageFormat,
+    ) -> (AsyncScreenshotHandle, DeviceIntSize) {
+        let scale = (buffer_size.width as f32 / window_rect.size.width as f32)
+            .min(buffer_size.height as f32 / window_rect.size.height as f32);
+        let screenshot_size = (window_rect.size.to_f32() * scale).round().to_i32();
+        let required_size = buffer_size.area() as usize
+            * image_format.bytes_per_pixel() as usize;
+
+        assert!(screenshot_size.width <= buffer_size.width);
+        assert!(screenshot_size.height <= buffer_size.height);
+
+        let pbo = match self.available_pbos.pop() {
+            Some(pbo) => {
+                assert_eq!(pbo.get_reserved_size(), required_size);
+                pbo
+            }
+
+            None => device.create_pbo_with_size(required_size),
+        };
+
+        self.scale_screenshot(
+            device,
+            ReadTarget::Default,
+            window_rect,
+            buffer_size,
+            screenshot_size,
+            image_format,
+            0,
+        );
+
+        device.read_pixels_into_pbo(
+            ReadTarget::Texture {
+                texture: &self.scaling_textures[0],
+                layer: 0 as _,
+            },
+            DeviceIntRect::new(DeviceIntPoint::new(0, 0), screenshot_size),
+            image_format,
+            &pbo,
+        );
+
+        let handle = AsyncScreenshotHandle(self.next_pbo_handle);
+        self.next_pbo_handle += 1;
+
+        self.awaiting_readback.insert(handle, AsyncScreenshot {
+            pbo,
+            screenshot_size,
+            image_format,
+        });
+
+        (handle, screenshot_size)
+    }
+
+    /// Take the screenshot in the given `ReadTarget` and scale it to `dest_size` recursively.
+    ///
+    /// Each scaling operation scales only by a factor of two to preserve quality.
+    ///
+    /// Textures are scaled such that `scaling_textures[n]` is half the size of
+    /// `scaling_textures[n+1]`.
+    ///
+    /// After the scaling completes, the final screenshot will be in
+    /// `scaling_textures[0]`.
+    fn scale_screenshot(
+        &mut self,
+        device: &mut Device,
+        read_target: ReadTarget,
+        read_target_rect: DeviceIntRect,
+        buffer_size: DeviceIntSize,
+        dest_size: DeviceIntSize,
+        image_format: ImageFormat,
+        level: usize,
+    ) {
+        let texture_size = buffer_size * (1 << level);
+        if level == self.scaling_textures.len() {
+            let texture = device.create_texture(
+                TextureTarget::Default,
+                image_format,
+                texture_size.width,
+                texture_size.height,
+                TextureFilter::Linear,
+                Some(RenderTargetInfo { has_depth: false }),
+                1,
+            );
+            self.scaling_textures.push(texture);
+        } else {
+            let current_texture_size = self.scaling_textures[level].get_dimensions();
+            assert_eq!(current_texture_size.width, texture_size.width);
+            assert_eq!(current_texture_size.height, texture_size.height);
+        }
+
+        let (read_target, read_target_rect) = if read_target_rect.size.width > 2 * dest_size.width {
+            self.scale_screenshot(
+                device,
+                read_target,
+                read_target_rect,
+                buffer_size,
+                dest_size * 2,
+                image_format,
+                level + 1,
+            );
+
+            (
+                ReadTarget::Texture {
+                    texture: &self.scaling_textures[level + 1],
+                    layer: 0 as _,
+                },
+                DeviceIntRect::new(
+                    DeviceIntPoint::new(0, 0),
+                    dest_size * 2,
+                ),
+            )
+        } else {
+            (read_target, read_target_rect)
+        };
+
+        let draw_target = DrawTarget::Texture {
+            texture: &self.scaling_textures[level],
+            layer: 0 as _,
+            with_depth: false,
+        };
+
+        let draw_target_rect = draw_target.to_framebuffer_rect(
+            DeviceIntRect::new(DeviceIntPoint::new(0, 0), dest_size),
+        );
+
+        let read_target_rect = FramebufferIntRect::from_untyped(&read_target_rect.to_untyped());
+
+        if level == 0 {
+            device.blit_render_target_invert_y(
+                read_target,
+                read_target_rect,
+                draw_target,
+                draw_target_rect,
+            );
+        } else {
+            device.blit_render_target(
+                read_target,
+                read_target_rect,
+                draw_target,
+                draw_target_rect,
+                TextureFilter::Linear,
+            );
+        }
+
+    }
+
+    /// Map the contents of the screenshot given by the handle and copy it into the given buffer.
+    pub fn map_and_recycle_screenshot(
+        &mut self,
+        device: &mut Device,
+        handle: AsyncScreenshotHandle,
+        dst_buffer: &mut [u8],
+        dst_stride: usize,
+    ) -> bool {
+        let AsyncScreenshot {
+            pbo,
+            screenshot_size,
+            image_format,
+        } = match self.awaiting_readback.remove(&handle) {
+            Some(async_screenshots) => async_screenshots,
+            None => return false,
+        };
+
+        let success = if let Some(bound_pbo) = device.map_pbo_for_readback(&pbo) {
+            let src_buffer = &bound_pbo.data;
+            let src_stride = screenshot_size.width as usize
+                * image_format.bytes_per_pixel() as usize;
+
+            for (src_slice, dst_slice) in src_buffer
+                .chunks(src_stride)
+                .zip(dst_buffer.chunks_mut(dst_stride))
+                .take(screenshot_size.height as usize)
+            {
+                dst_slice[..src_stride].copy_from_slice(src_slice);
+            }
+
+            true
+        } else {
+            false
+        };
+
+        self.available_pbos.push(pbo);
+        success
+    }
+}
+
 /// The renderer is responsible for submitting to the GPU the work prepared by the
 /// RenderBackend.
 ///
@@ -1676,6 +1925,8 @@ pub struct Renderer {
 
     pub renderer_errors: Vec<RendererError>,
 
+    async_screenshots: Option<AsyncScreenshotGrabber>,
+
     /// List of profile results from previous frames. Can be retrieved
     /// via get_frame_profiles().
     cpu_profiles: VecDeque<CpuProfile>,
@@ -1747,7 +1998,8 @@ impl Renderer {
         gl: Rc<gl::Gl>,
         notifier: Box<RenderNotifier>,
         mut options: RendererOptions,
-        shaders: Option<&mut WrShaders>
+        shaders: Option<&mut WrShaders>,
+        start_size: FramebufferIntSize,
     ) -> Result<(Self, RenderApiSender), RendererError> {
         HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
 
@@ -2050,7 +2302,12 @@ impl Renderer {
             let texture_cache = TextureCache::new(
                 max_texture_size,
                 max_texture_layers,
-                TileCache::tile_dimensions(config.testing),
+                if config.enable_picture_caching {
+                    Some(TileCache::tile_dimensions(config.testing))
+                } else {
+                    None
+                },
+                start_size,
             );
 
             let resource_cache = ResourceCache::new(
@@ -2082,8 +2339,17 @@ impl Renderer {
             }
         })?;
 
-        let ext_debug_marker = device.supports_extension("GL_EXT_debug_marker");
-        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()), ext_debug_marker);
+        let debug_support = if device.supports_extension("GL_KHR_debug") {
+            GpuDebugMethod::KHR
+        } else if device.supports_extension("GL_EXT_debug_marker") {
+            GpuDebugMethod::MarkerEXT
+        } else {
+            GpuDebugMethod::None
+        };
+
+        info!("using {:?}", debug_support);
+
+        let gpu_profile = GpuProfiler::new(Rc::clone(device.rc_gl()), debug_support);
         #[cfg(feature = "capture")]
         let read_fbo = device.create_fbo();
 
@@ -2142,6 +2408,7 @@ impl Renderer {
             texture_cache_upload_pbo,
             texture_resolver,
             renderer_errors: Vec::new(),
+            async_screenshots: None,
             #[cfg(feature = "capture")]
             read_fbo,
             #[cfg(feature = "replay")]
@@ -2184,11 +2451,6 @@ impl Renderer {
         }
     }
 
-    /// Returns the Epoch of the current frame in a pipeline.
-    pub fn current_epoch(&self, pipeline_id: PipelineId) -> Option<Epoch> {
-        self.pipeline_info.epochs.get(&pipeline_id).cloned()
-    }
-
     pub fn flush_pipeline_info(&mut self) -> PipelineInfo {
         mem::replace(&mut self.pipeline_info, PipelineInfo::default())
     }
@@ -2208,8 +2470,8 @@ impl Renderer {
         while let Ok(msg) = self.result_rx.try_recv() {
             match msg {
                 ResultMsg::PublishPipelineInfo(mut pipeline_info) => {
-                    for (pipeline_id, epoch) in pipeline_info.epochs {
-                        self.pipeline_info.epochs.insert(pipeline_id, epoch);
+                    for ((pipeline_id, document_id), epoch) in pipeline_info.epochs {
+                        self.pipeline_info.epochs.insert((pipeline_id, document_id), epoch);
                     }
                     self.pipeline_info.removed_pipelines.extend(pipeline_info.removed_pipelines.drain(..));
                 }
@@ -2341,13 +2603,64 @@ impl Renderer {
         }
     }
 
+    /// Take a screenshot and scale it asynchronously.
+    ///
+    /// The returned handle can be used to access the mapped screenshot data via
+    /// `map_and_recycle_screenshot`.
+    /// The returned size is the size of the screenshot.
+    pub fn get_screenshot_async(
+        &mut self,
+        window_rect: DeviceIntRect,
+        buffer_size: DeviceIntSize,
+        image_format: ImageFormat,
+    ) -> (AsyncScreenshotHandle, DeviceIntSize) {
+        self.device.begin_frame();
+
+        let handle = self.async_screenshots
+            .get_or_insert_with(AsyncScreenshotGrabber::default)
+            .get_screenshot(&mut self.device,
+                            window_rect,
+                            buffer_size,
+                            image_format);
+
+        self.device.end_frame();
+
+        handle
+    }
+
+    /// Map the contents of the screenshot given by the handle and copy it into the given buffer.
+    pub fn map_and_recycle_screenshot(
+        &mut self,
+        handle: AsyncScreenshotHandle,
+        dst_buffer: &mut [u8],
+        dst_stride: usize,
+    ) -> bool {
+        if let Some(async_screenshots) = self.async_screenshots.as_mut() {
+            async_screenshots.map_and_recycle_screenshot(
+                &mut self.device,
+                handle,
+                dst_buffer,
+                dst_stride,
+            )
+        } else {
+            false
+        }
+    }
+
+    pub fn release_profiler_structures(&mut self) {
+        if let Some(async_screenshots) = self.async_screenshots.take() {
+            self.device.begin_frame();
+            async_screenshots.deinit(&mut self.device);
+            self.device.end_frame();
+        }
+    }
+
     #[cfg(not(feature = "debugger"))]
     fn get_screenshot_for_debugger(&mut self) -> String {
         // Avoid unused param warning.
         let _ = &self.debug_server;
         String::new()
     }
-
 
     #[cfg(feature = "debugger")]
     fn get_screenshot_for_debugger(&mut self) -> String {
@@ -2607,32 +2920,6 @@ impl Renderer {
         (cpu_profiles, gpu_profiles)
     }
 
-    /// Returns `true` if the active rendered documents (that need depth buffer)
-    /// intersect on the main framebuffer, in which case we don't clear
-    /// the whole depth and instead clear each document area separately.
-    fn are_documents_intersecting_depth(&self) -> bool {
-        let document_rects = self.active_documents
-            .iter()
-            .filter_map(|&(_, ref render_doc)| {
-                match render_doc.frame.passes.last() {
-                    Some(&RenderPass { kind: RenderPassKind::MainFramebuffer(ref target), .. })
-                        if target.needs_depth() => Some(render_doc.frame.framebuffer_rect),
-                    _ => None,
-                }
-            })
-            .collect::<SmallVec<[_; 3]>>();
-
-        for (i, rect) in document_rects.iter().enumerate() {
-            for other in &document_rects[i+1 ..] {
-                if rect.intersects(other) {
-                    return true
-                }
-            }
-        }
-
-        false
-    }
-
     pub fn notify_slow_frame(&mut self) {
         self.slow_frame_indicator.changed();
     }
@@ -2722,10 +3009,6 @@ impl Renderer {
         });
 
         profile_timers.cpu_time.profile(|| {
-            // If the documents don't intersect for depth, we can just do
-            // a single, global depth clear.
-            let clear_depth_per_doc = self.are_documents_intersecting_depth();
-
             //Note: another borrowck dance
             let mut active_documents = mem::replace(&mut self.active_documents, Vec::default());
             // sort by the document layer id
@@ -2736,6 +3019,7 @@ impl Renderer {
                 self.owned_external_images.iter().map(|(key, value)| (*key, value.clone()))
             );
 
+            let last_document_index = active_documents.len() - 1;
             for (doc_index, (_, RenderedDocument { ref mut frame, .. })) in active_documents.iter_mut().enumerate() {
                 frame.profile_counters.reset_targets();
                 self.prepare_gpu_cache(frame);
@@ -2743,41 +3027,12 @@ impl Renderer {
                     "Received frame depends on a later GPU cache epoch ({:?}) than one we received last via `UpdateGpuCache` ({:?})",
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
 
-                // Work out what color to clear the frame buffer for this document.
-                // The document's supplied clear color is used, unless:
-                //  (a) The document has no specified clear color AND
-                //  (b) We are rendering the first document.
-                // If both those conditions are true, the overall renderer
-                // clear color will be used, if specified.
-
-                // Get the default clear color from the renderer.
-                let mut fb_clear_color = if doc_index == 0 {
-                    self.clear_color
-                } else {
-                    None
-                };
-
-                // Override with document clear color if no overall clear
-                // color or not on the first document.
-                if fb_clear_color.is_none() {
-                    fb_clear_color = frame.background_color;
-                }
-
-                // Only clear the depth buffer for this document if this is
-                // the first document, or we need to clear depth per document.
-                let fb_clear_depth = if clear_depth_per_doc || doc_index == 0 {
-                    Some(1.0)
-                } else {
-                    None
-                };
-
                 self.draw_tile_frame(
                     frame,
                     framebuffer_size,
                     cpu_frame_id,
                     &mut results.stats,
-                    fb_clear_color,
-                    fb_clear_depth,
+                    doc_index == 0,
                 );
 
                 if let Some(_) = framebuffer_size {
@@ -2790,6 +3045,14 @@ impl Renderer {
                 let dirty_regions =
                     mem::replace(&mut frame.recorded_dirty_regions, Vec::new());
                 results.recorded_dirty_regions.extend(dirty_regions);
+
+                // If we're the last document, don't call end_pass here, because we'll
+                // be moving on to drawing the debug overlays. See the comment above
+                // the end_pass call in draw_tile_frame about debug draw overlays
+                // for a bit more context.
+                if doc_index != last_document_index {
+                    self.texture_resolver.end_pass(&mut self.device, None, None);
+                }
             }
 
             self.unlock_external_images();
@@ -4366,8 +4629,7 @@ impl Renderer {
         framebuffer_size: Option<FramebufferIntSize>,
         frame_id: GpuFrameId,
         stats: &mut RendererStats,
-        fb_clear_color: Option<ColorF>,
-        fb_clear_depth: Option<f32>,
+        clear_framebuffer: bool,
     ) {
         let _gm = self.gpu_profile.start_marker("tile frame draw");
 
@@ -4412,15 +4674,24 @@ impl Renderer {
                             ORTHO_FAR_PLANE,
                         );
 
+                        let draw_target = DrawTarget::Default {
+                            rect: frame.framebuffer_rect,
+                            total_size: framebuffer_size,
+                        };
+                        if clear_framebuffer {
+                            self.device.bind_draw_target(draw_target);
+                            self.device.enable_depth_write();
+                            self.device.clear_target(self.clear_color.map(|color| color.to_array()),
+                                                     Some(1.0),
+                                                     None);
+                        }
+
                         self.draw_color_target(
-                            DrawTarget::Default {
-                                rect: frame.framebuffer_rect,
-                                total_size: framebuffer_size,
-                            },
+                            draw_target,
                             target,
                             frame.content_origin,
-                            fb_clear_color.map(|color| color.to_array()),
-                            fb_clear_depth,
+                            None,
+                            None,
                             &frame.render_tasks,
                             &projection,
                             frame_id,
@@ -4927,11 +5198,11 @@ impl Renderer {
         let y0: f32 = 30.0;
         let mut y = y0;
         let mut text_width = 0.0;
-        for (pipeline, epoch) in  &self.pipeline_info.epochs {
+        for ((pipeline, document_id), epoch) in  &self.pipeline_info.epochs {
             y += dy;
             let w = debug_renderer.add_text(
                 x0, y,
-                &format!("{:?}: {:?}", pipeline, epoch),
+                &format!("({:?}, {:?}): {:?}", pipeline, document_id, epoch),
                 ColorU::new(255, 255, 0, 255),
                 None,
             ).size.width;
@@ -5047,6 +5318,11 @@ impl Renderer {
         if let Ok(shaders) = Rc::try_unwrap(self.shaders) {
             shaders.into_inner().deinit(&mut self.device);
         }
+
+        if let Some(async_screenshots) = self.async_screenshots.take() {
+            async_screenshots.deinit(&mut self.device);
+        }
+
         #[cfg(feature = "capture")]
         self.device.delete_fbo(self.read_fbo);
         #[cfg(feature = "replay")]
@@ -5220,11 +5496,11 @@ pub trait SceneBuilderHooks {
     /// This is called after each scene swap occurs. The PipelineInfo contains
     /// the updated epochs and pipelines removed in the new scene compared to
     /// the old scene.
-    fn post_scene_swap(&self, info: PipelineInfo, sceneswap_time: u64);
+    fn post_scene_swap(&self, document_id: DocumentId, info: PipelineInfo, sceneswap_time: u64);
     /// This is called after a resource update operation on the scene builder
     /// thread, in the case where resource updates were applied without a scene
     /// build.
-    fn post_resource_update(&self);
+    fn post_resource_update(&self, document_id: DocumentId);
     /// This is called after a scene build completes without any changes being
     /// made. We guarantee that each pre_scene_build call will be matched with
     /// exactly one of post_scene_swap, post_resource_update or
@@ -5250,14 +5526,14 @@ pub trait AsyncPropertySampler {
     /// This is called for each transaction with the generate_frame flag set
     /// (i.e. that will trigger a render). The list of frame messages returned
     /// are processed as though they were part of the original transaction.
-    fn sample(&self) -> Vec<FrameMsg>;
+    fn sample(&self, document_id: DocumentId) -> Vec<FrameMsg>;
     /// This is called exactly once, when the render backend thread is about to
     /// terminate.
     fn deregister(&self);
 }
 
-/// Flags that control how shaders are pre-cached, if at all.
 bitflags! {
+    /// Flags that control how shaders are pre-cached, if at all.
     #[derive(Default)]
     pub struct ShaderPrecacheFlags: u32 {
         /// Needed for const initialization
@@ -5450,8 +5726,8 @@ impl OutputImageHandler for () {
 
 #[derive(Default)]
 pub struct PipelineInfo {
-    pub epochs: FastHashMap<PipelineId, Epoch>,
-    pub removed_pipelines: Vec<PipelineId>,
+    pub epochs: FastHashMap<(PipelineId, DocumentId), Epoch>,
+    pub removed_pipelines: Vec<(PipelineId, DocumentId)>,
 }
 
 impl Renderer {

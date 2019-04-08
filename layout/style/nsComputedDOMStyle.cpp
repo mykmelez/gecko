@@ -12,11 +12,13 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/FontPropertyTypes.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPtr.h"
 
 #include "nsError.h"
 #include "nsIFrame.h"
 #include "nsIFrameInlines.h"
+#include "nsIPresShellInlines.h"
 #include "mozilla/ComputedStyle.h"
 #include "nsIScrollableFrame.h"
 #include "nsContentUtils.h"
@@ -99,17 +101,17 @@ already_AddRefed<CSSValue> GetBackgroundList(
 // Whether aDocument needs to restyle for aElement
 static bool DocumentNeedsRestyle(const Document* aDocument, Element* aElement,
                                  nsAtom* aPseudo) {
-  nsIPresShell* shell = aDocument->GetShell();
-  if (!shell) {
+  PresShell* presShell = aDocument->GetPresShell();
+  if (!presShell) {
     return true;
   }
 
-  nsPresContext* presContext = shell->GetPresContext();
+  nsPresContext* presContext = presShell->GetPresContext();
   MOZ_ASSERT(presContext);
 
   // Unfortunately we don't know if the sheet change affects mElement or not, so
   // just assume it will and that we need to flush normally.
-  ServoStyleSet* styleSet = shell->StyleSet();
+  ServoStyleSet* styleSet = presShell->StyleSet();
   if (styleSet->StyleSheetsHaveChanged()) {
     return true;
   }
@@ -133,6 +135,10 @@ static bool DocumentNeedsRestyle(const Document* aDocument, Element* aElement,
       }
     } else if (aPseudo == nsCSSPseudoElements::after()) {
       if (EffectSet::GetEffectSet(aElement, PseudoStyleType::after)) {
+        return true;
+      }
+    } else if (aPseudo == nsCSSPseudoElements::marker()) {
+      if (EffectSet::GetEffectSet(aElement, PseudoStyleType::marker)) {
         return true;
       }
     }
@@ -526,6 +532,8 @@ already_AddRefed<ComputedStyle> nsComputedDOMStyle::DoGetComputedStyleNoFlush(
       element = nsLayoutUtils::GetBeforePseudo(aElement);
     } else if (aPseudo == nsCSSPseudoElements::after()) {
       element = nsLayoutUtils::GetAfterPseudo(aElement);
+    } else if (aPseudo == nsCSSPseudoElements::marker()) {
+      element = nsLayoutUtils::GetMarkerPseudo(aElement);
     } else if (!aPseudo) {
       element = aElement;
     }
@@ -564,8 +572,9 @@ nsComputedDOMStyle::GetUnanimatedComputedStyleNoFlush(Element* aElement,
   }
 
   PseudoStyleType pseudoType = GetPseudoType(aPseudo);
-  nsIPresShell* shell = aElement->OwnerDoc()->GetShell();
-  MOZ_ASSERT(shell, "How in the world did we get a style a few lines above?");
+  PresShell* presShell = aElement->OwnerDoc()->GetPresShell();
+  MOZ_ASSERT(presShell,
+             "How in the world did we get a style a few lines above?");
 
   Element* elementOrPseudoElement =
       EffectCompositor::GetElementToRestyle(aElement, pseudoType);
@@ -573,8 +582,8 @@ nsComputedDOMStyle::GetUnanimatedComputedStyleNoFlush(Element* aElement,
     return nullptr;
   }
 
-  return shell->StyleSet()->GetBaseContextForElement(elementOrPseudoElement,
-                                                     style);
+  return presShell->StyleSet()->GetBaseContextForElement(elementOrPseudoElement,
+                                                         style);
 }
 
 nsMargin nsComputedDOMStyle::GetAdjustedValuesForBoxSizing() {
@@ -821,7 +830,7 @@ void nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush) {
     }
   }
 
-  mPresShell = document->GetShell();
+  mPresShell = document->GetPresShell();
   if (!mPresShell || !mPresShell->GetPresContext()) {
     ClearComputedStyle();
     return;
@@ -863,14 +872,19 @@ void nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush) {
 
     if (!mPseudo) {
       mOuterFrame = mElement->GetPrimaryFrame();
-    } else if (mPseudo == nsCSSPseudoElements::before() ||
-               mPseudo == nsCSSPseudoElements::after()) {
-      nsAtom* property = mPseudo == nsCSSPseudoElements::before()
-                             ? nsGkAtoms::beforePseudoProperty
-                             : nsGkAtoms::afterPseudoProperty;
-
-      auto* pseudo = static_cast<Element*>(mElement->GetProperty(property));
-      mOuterFrame = pseudo ? pseudo->GetPrimaryFrame() : nullptr;
+    } else {
+      nsAtom* property = nullptr;
+      if (mPseudo == nsCSSPseudoElements::before()) {
+        property = nsGkAtoms::beforePseudoProperty;
+      } else if (mPseudo == nsCSSPseudoElements::after()) {
+        property = nsGkAtoms::afterPseudoProperty;
+      } else if (mPseudo == nsCSSPseudoElements::marker()) {
+        property = nsGkAtoms::markerPseudoProperty;
+      }
+      if (property) {
+        auto* pseudo = static_cast<Element*>(mElement->GetProperty(property));
+        mOuterFrame = pseudo ? pseudo->GetPrimaryFrame() : nullptr;
+      }
     }
 
     mInnerFrame = mOuterFrame;
@@ -1027,13 +1041,13 @@ void nsComputedDOMStyle::SetToRGBAColor(nsROCSSPrimitiveValue* aValue,
 }
 
 void nsComputedDOMStyle::SetValueFromComplexColor(
-    nsROCSSPrimitiveValue* aValue, const StyleComplexColor& aColor) {
-  SetToRGBAColor(aValue, aColor.CalcColor(mComputedStyle));
+    nsROCSSPrimitiveValue* aValue, const mozilla::StyleColor& aColor) {
+  SetToRGBAColor(aValue, aColor.CalcColor(*mComputedStyle));
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetColor() {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, StyleColor()->mColor);
+  SetToRGBAColor(val, StyleColor()->mColor.ToColor());
   return val.forget();
 }
 
@@ -1048,15 +1062,6 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetColumnCount() {
     val->SetNumber(column->mColumnCount);
   }
 
-  return val.forget();
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetColumnWidth() {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  // XXX fix the auto case. When we actually have a column frame, I think
-  // we should return the computed column width.
-  SetValueToCoord(val, StyleColumn()->mColumnWidth, true);
   return val.forget();
 }
 
@@ -1844,24 +1849,21 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetScrollSnapPointsY() {
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetScrollbarColor() {
   const nsStyleUI* ui = StyleUI();
-  MOZ_ASSERT(
-      ui->mScrollbarFaceColor.IsAuto() == ui->mScrollbarTrackColor.IsAuto(),
-      "Whether the two colors are auto should be identical");
-
-  if (ui->mScrollbarFaceColor.IsAuto()) {
+  if (ui->mScrollbarColor.IsAuto()) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
     val->SetIdent(eCSSKeyword_auto);
     return val.forget();
   }
 
   RefPtr<nsDOMCSSValueList> list = GetROCSSValueList(false);
-  auto put = [this, &list](const StyleComplexColor& color) {
+  auto put = [this, &list](const mozilla::StyleColor& color) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
     SetValueFromComplexColor(val, color);
     list->AppendCSSValue(val.forget());
   };
-  put(ui->mScrollbarFaceColor);
-  put(ui->mScrollbarTrackColor);
+  auto& colors = ui->mScrollbarColor.AsColors();
+  put(colors.thumb);
+  put(colors.track);
   return list.forget();
 }
 
@@ -1988,7 +1990,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecoration() {
 
   bool isInitialStyle =
       textReset->mTextDecorationStyle == NS_STYLE_TEXT_DECORATION_STYLE_SOLID;
-  StyleComplexColor color = textReset->mTextDecorationColor;
+  const mozilla::StyleColor& color = textReset->mTextDecorationColor;
 
   RefPtr<nsROCSSPrimitiveValue> textDecorationLine = new nsROCSSPrimitiveValue;
 
@@ -2139,7 +2141,11 @@ static_assert(NS_STYLE_UNICODE_BIDI_NORMAL == 0,
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetCaretColor() {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueFromComplexColor(val, StyleUI()->mCaretColor);
+  if (StyleUI()->mCaretColor.IsAuto()) {
+    SetToRGBAColor(val, StyleColor()->mColor.ToColor());
+  } else {
+    SetValueFromComplexColor(val, StyleUI()->mCaretColor.AsColor());
+  }
   return val.forget();
 }
 

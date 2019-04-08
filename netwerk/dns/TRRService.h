@@ -52,6 +52,7 @@ class TRRService : public nsIObserver,
   bool IsTRRBlacklisted(const nsACString &aHost,
                         const nsACString &aOriginSuffix, bool aPrivateBrowsing,
                         bool aParentsToo);
+  bool IsExcludedFromTRR(const nsACString &aHost);
 
   bool MaybeBootstrap(const nsACString &possible, nsACString &result);
   enum TrrOkay { OKAY_NORMAL = 0, OKAY_TIMEOUT = 1, OKAY_BAD = 2 };
@@ -95,6 +96,9 @@ class TRRService : public nsIObserver,
   // lock while creating it and while accessing it off the main thread.
   RefPtr<DataStorage> mTRRBLStorage;
   Atomic<bool, Relaxed> mClearTRRBLStorage;
+
+  // A set of domains that we should not use TRR for.
+  nsTHashtable<nsCStringHashKey> mExcludedDomains;
 
   enum ConfirmationState {
     CONFIRM_INIT = 0,

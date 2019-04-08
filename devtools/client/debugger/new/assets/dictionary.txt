@@ -175,7 +175,6 @@ ImmutableJS
 Fennec
 v59
 tabIndex
-react-inlinesvg
 findClosestScope
 findClosestFunction
 paren
@@ -214,3 +213,4 @@ TravisCI
 Homebrew
 30-60minutes
 myScriptFunction
+strict-ssl

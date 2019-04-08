@@ -375,7 +375,7 @@ bool RealmPrivate::TryParseLocationURI(RealmPrivate::LocationHint aLocationHint,
 
 static bool PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal) {
   // System principal gets a free pass.
-  if (nsXPConnect::SecurityManager()->IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     return true;
   }
 
@@ -1137,9 +1137,6 @@ void XPCJSRuntime::Shutdown(JSContext* cx) {
   mWrappedJSMap->ShutdownMarker();
   delete mWrappedJSMap;
   mWrappedJSMap = nullptr;
-
-  delete mWrappedJSClassMap;
-  mWrappedJSClassMap = nullptr;
 
   delete mIID2NativeInterfaceMap;
   mIID2NativeInterfaceMap = nullptr;
@@ -2750,8 +2747,8 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
     case JS_TELEMETRY_GC_MARK_RATE:
       Telemetry::Accumulate(Telemetry::GC_MARK_RATE, sample);
       break;
-    case JS_TELEMETRY_DEPRECATED_STRING_GENERICS:
-      Telemetry::Accumulate(Telemetry::JS_DEPRECATED_STRING_GENERICS, sample);
+    case JS_TELEMETRY_DEPRECATED_ARRAY_GENERICS:
+      Telemetry::Accumulate(Telemetry::JS_DEPRECATED_ARRAY_GENERICS, sample);
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");
@@ -2794,10 +2791,9 @@ static void DestroyRealm(JSFreeOp* fop, JS::Realm* realm) {
 static bool PreserveWrapper(JSContext* cx, JS::Handle<JSObject*> obj) {
   MOZ_ASSERT(cx);
   MOZ_ASSERT(obj);
-  MOZ_ASSERT(IS_WN_REFLECTOR(obj) || mozilla::dom::IsDOMObject(obj));
+  MOZ_ASSERT(mozilla::dom::IsDOMObject(obj));
 
-  return mozilla::dom::IsDOMObject(obj) &&
-         mozilla::dom::TryPreserveWrapper(obj);
+  return mozilla::dom::TryPreserveWrapper(obj);
 }
 
 static nsresult ReadSourceFromFilename(JSContext* cx, const char* filename,
@@ -2925,8 +2921,6 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 XPCJSRuntime::XPCJSRuntime(JSContext* aCx)
     : CycleCollectedJSRuntime(aCx),
       mWrappedJSMap(JSObject2WrappedJSMap::newMap(XPC_JS_MAP_LENGTH)),
-      mWrappedJSClassMap(
-          IID2WrappedJSClassMap::newMap(XPC_JS_CLASS_MAP_LENGTH)),
       mIID2NativeInterfaceMap(
           IID2NativeInterfaceMap::newMap(XPC_NATIVE_INTERFACE_MAP_LENGTH)),
       mClassInfo2NativeSetMap(
@@ -3148,18 +3142,6 @@ void XPCJSRuntime::DebugDump(int16_t depth) {
   depth--;
   XPC_LOG_ALWAYS(("XPCJSRuntime @ %p", this));
   XPC_LOG_INDENT();
-
-  XPC_LOG_ALWAYS(("mWrappedJSClassMap @ %p with %d wrapperclasses(s)",
-                  mWrappedJSClassMap, mWrappedJSClassMap->Count()));
-  // iterate wrappersclasses...
-  if (depth && mWrappedJSClassMap->Count()) {
-    XPC_LOG_INDENT();
-    for (auto i = mWrappedJSClassMap->Iter(); !i.Done(); i.Next()) {
-      auto entry = static_cast<IID2WrappedJSClassMap::Entry*>(i.Get());
-      entry->value->DebugDump(depth);
-    }
-    XPC_LOG_OUTDENT();
-  }
 
   // iterate wrappers...
   XPC_LOG_ALWAYS(("mWrappedJSMap @ %p with %d wrappers(s)", mWrappedJSMap,

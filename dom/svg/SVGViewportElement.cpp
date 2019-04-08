@@ -26,7 +26,6 @@
 #include "nsError.h"
 #include "nsGkAtoms.h"
 #include "nsIFrame.h"
-#include "nsIPresShell.h"
 #include "nsISVGSVGFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsStyleUtil.h"
@@ -311,7 +310,7 @@ bool SVGViewportElement::HasValidDimensions() const {
            mLengthAttributes[ATTR_HEIGHT].GetAnimValInSpecifiedUnits() > 0));
 }
 
-SVGViewBox* SVGViewportElement::GetViewBox() { return &mViewBox; }
+SVGAnimatedViewBox* SVGViewportElement::GetViewBox() { return &mViewBox; }
 
 SVGAnimatedPreserveAspectRatio* SVGViewportElement::GetPreserveAspectRatio() {
   return &mPreserveAspectRatio;

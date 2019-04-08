@@ -31,37 +31,7 @@
 #include "vm/JSAtom-inl.h"
 #include "vm/ObjectOperations-inl.h"  // js::MaybeHasInterestingSymbolProperty
 #include "vm/Realm-inl.h"
-#include "vm/ShapedObject-inl.h"
 #include "vm/TypeInference-inl.h"
-
-namespace js {
-
-// This is needed here for ensureShape() below.
-inline bool MaybeConvertUnboxedObjectToNative(JSContext* cx, JSObject* obj) {
-  if (obj->is<UnboxedPlainObject>()) {
-    return UnboxedPlainObject::convertToNative(cx, obj);
-  }
-  return true;
-}
-
-}  // namespace js
-
-inline js::Shape* JSObject::maybeShape() const {
-  if (!is<js::ShapedObject>()) {
-    return nullptr;
-  }
-
-  return as<js::ShapedObject>().shape();
-}
-
-inline js::Shape* JSObject::ensureShape(JSContext* cx) {
-  if (!js::MaybeConvertUnboxedObjectToNative(cx, this)) {
-    return nullptr;
-  }
-  js::Shape* shape = maybeShape();
-  MOZ_ASSERT(shape);
-  return shape;
-}
 
 inline void JSObject::finalize(js::FreeOp* fop) {
   js::probes::FinalizeObject(this);
@@ -160,7 +130,7 @@ js::NativeObject::updateDictionaryListPointerAfterMinorGC(NativeObject* old) {
 inline void JSObject::setGroup(js::ObjectGroup* group) {
   MOZ_RELEASE_ASSERT(group);
   MOZ_ASSERT(!isSingleton());
-  MOZ_ASSERT(compartment() == group->compartment());
+  MOZ_ASSERT(maybeCCWRealm() == group->realm());
   group_ = group;
 }
 
@@ -245,10 +215,7 @@ inline js::GlobalObject& JSObject::nonCCWGlobal() const {
 
 inline bool JSObject::hasAllFlags(js::BaseShape::Flag flags) const {
   MOZ_ASSERT(flags);
-  if (js::Shape* shape = maybeShape()) {
-    return shape->hasAllObjectFlags(flags);
-  }
-  return false;
+  return shape()->hasAllObjectFlags(flags);
 }
 
 inline bool JSObject::nonProxyIsExtensible() const {
@@ -271,19 +238,10 @@ inline bool JSObject::hasUncacheableProto() const {
 }
 
 MOZ_ALWAYS_INLINE bool JSObject::maybeHasInterestingSymbolProperty() const {
-  const js::NativeObject* nobj;
   if (isNative()) {
-    nobj = &as<js::NativeObject>();
-  } else if (is<js::UnboxedPlainObject>()) {
-    nobj = as<js::UnboxedPlainObject>().maybeExpando();
-    if (!nobj) {
-      return false;
-    }
-  } else {
-    return true;
+    return as<js::NativeObject>().hasInterestingSymbol();
   }
-
-  return nobj->hasInterestingSymbol();
+  return true;
 }
 
 inline bool JSObject::staticPrototypeIsImmutable() const {
@@ -397,6 +355,33 @@ MOZ_ALWAYS_INLINE bool ToPropertyKey(JSContext* cx, HandleValue argument,
 inline bool IsInternalFunctionObject(JSObject& funobj) {
   JSFunction& fun = funobj.as<JSFunction>();
   return fun.isInterpreted() && !fun.environment();
+}
+
+inline gc::InitialHeap GetInitialHeap(NewObjectKind newKind,
+                                      const Class* clasp) {
+  if (newKind == NurseryAllocatedProxy) {
+    MOZ_ASSERT(clasp->isProxy());
+    MOZ_ASSERT(clasp->hasFinalize());
+    MOZ_ASSERT(!CanNurseryAllocateFinalizedClass(clasp));
+    return gc::DefaultHeap;
+  }
+  if (newKind != GenericObject) {
+    return gc::TenuredHeap;
+  }
+  if (clasp->hasFinalize() && !CanNurseryAllocateFinalizedClass(clasp)) {
+    return gc::TenuredHeap;
+  }
+  return gc::DefaultHeap;
+}
+
+inline gc::InitialHeap GetInitialHeap(NewObjectKind newKind,
+                                      ObjectGroup* group) {
+  AutoSweepObjectGroup sweep(group);
+  if (group->shouldPreTenure(sweep)) {
+    return gc::TenuredHeap;
+  }
+
+  return GetInitialHeap(newKind, group->clasp());
 }
 
 /*

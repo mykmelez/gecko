@@ -4,6 +4,7 @@
 
 var Fingerprinting = {
   PREF_ENABLED: "privacy.trackingprotection.fingerprinting.enabled",
+  reportBreakageLabel: "fingerprinting",
   telemetryIdentifier: "fp",
 
   strings: {
@@ -116,6 +117,7 @@ var Fingerprinting = {
 
 var Cryptomining = {
   PREF_ENABLED: "privacy.trackingprotection.cryptomining.enabled",
+  reportBreakageLabel: "cryptomining",
   telemetryIdentifier: "cm",
 
   strings: {
@@ -821,8 +823,12 @@ var ContentBlocking = {
 
     get appMenuTooltip() {
       delete this.appMenuTooltip;
+      if (AppConstants.platform == "win") {
+        return this.appMenuTooltip =
+          gNavigatorBundle.getString("contentBlocking.tooltipWin");
+      }
       return this.appMenuTooltip =
-        gNavigatorBundle.getString("contentBlocking.tooltip");
+        gNavigatorBundle.getString("contentBlocking.tooltipOther");
     },
 
     get activeTooltipText() {
@@ -980,6 +986,8 @@ var ContentBlocking = {
     body += `${ThirdPartyCookies.PREF_ENABLED}: ${Services.prefs.getIntPref(ThirdPartyCookies.PREF_ENABLED)}\n`;
     body += `network.cookie.lifetimePolicy: ${Services.prefs.getIntPref("network.cookie.lifetimePolicy")}\n`;
     body += `privacy.restrict3rdpartystorage.expiration: ${Services.prefs.getIntPref("privacy.restrict3rdpartystorage.expiration")}\n`;
+    body += `${Fingerprinting.PREF_ENABLED}: ${Services.prefs.getBoolPref(Fingerprinting.PREF_ENABLED)}\n`;
+    body += `${Cryptomining.PREF_ENABLED}: ${Services.prefs.getBoolPref(Cryptomining.PREF_ENABLED)}\n`;
 
     let comments = document.getElementById("identity-popup-breakageReportView-collection-comments");
     body += "\n**Comments**\n" + comments.value;
@@ -1052,7 +1060,10 @@ var ContentBlocking = {
     Services.telemetry.getHistogramById("FINGERPRINTERS_BLOCKED_COUNT").add(value);
   },
 
+  // This triggers from top level location changes.
   onLocationChange() {
+    // Reset blocking and exception status so that we can send telemetry
+    this.hadShieldState = false;
     let baseURI = this._baseURIForChannelClassifier;
 
     // Don't deal with about:, file: etc.
@@ -1065,6 +1076,7 @@ var ContentBlocking = {
     // Add to telemetry per page load as a baseline measurement.
     this.fingerprintersHistogramAdd("pageLoad");
     this.cryptominersHistogramAdd("pageLoad");
+    this.shieldHistogramAdd(0);
   },
 
   onContentBlockingEvent(event, webProgress, isSimulated) {
@@ -1111,7 +1123,7 @@ var ContentBlocking = {
 
       if (!isBrowserPrivate) {
         let introCount = Services.prefs.getIntPref(this.prefIntroCount);
-        if (introCount < this.MAX_INTROS) {
+        if (introCount < this.MAX_INTROS && !this.anyOtherWindowHasTour()) {
           Services.prefs.setIntPref(this.prefIntroCount, ++introCount);
           Services.prefs.savePrefFile(null);
           this.showIntroPanel();
@@ -1143,13 +1155,18 @@ var ContentBlocking = {
 
     if (hasException) {
       this.iconBox.setAttribute("tooltiptext", this.strings.disabledTooltipText);
-      this.shieldHistogramAdd(1);
+      if (!this.hadShieldState && !isSimulated) {
+        this.hadShieldState = true;
+        this.shieldHistogramAdd(1);
+      }
     } else if (anyBlocking) {
       this.iconBox.setAttribute("tooltiptext", this.strings.activeTooltipText);
-      this.shieldHistogramAdd(2);
+      if (!this.hadShieldState && !isSimulated) {
+        this.hadShieldState = true;
+        this.shieldHistogramAdd(2);
+      }
     } else {
       this.iconBox.removeAttribute("tooltiptext");
-      this.shieldHistogramAdd(0);
     }
 
     // We report up to one instance of fingerprinting and cryptomining
@@ -1170,6 +1187,16 @@ var ContentBlocking = {
     } else if (cryptominingAllowing) {
       this.cryptominersHistogramAdd("allowed");
     }
+  },
+
+  // Check if any existing window has a UItour initiated, both showing and hidden.
+  anyOtherWindowHasTour() {
+    for (let win of BrowserWindowTracker.orderedWindows) {
+      if (win != window && UITour.tourBrowsersByWindow.has(win)) {
+        return true;
+      }
+    }
+    return false;
   },
 
   disableForCurrentPage() {

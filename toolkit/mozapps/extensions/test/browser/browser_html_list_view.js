@@ -2,22 +2,6 @@
 
 let promptService;
 
-let gManagerWindow;
-let gCategoryUtilities;
-
-async function loadInitialView(type) {
-  gManagerWindow = await open_manager(null);
-  gCategoryUtilities = new CategoryUtilities(gManagerWindow);
-  await gCategoryUtilities.openType(type);
-
-  let browser = gManagerWindow.document.getElementById("html-view-browser");
-  return browser.contentWindow;
-}
-
-function closeView() {
-  return close_manager(gManagerWindow);
-}
-
 const SECTION_INDEXES = {
   enabled: 0,
   disabled: 1,
@@ -357,6 +341,9 @@ add_task(async function testThemeList() {
   let enabledSection = getSection(doc, "enabled");
   let disabledSection = getSection(doc, "disabled");
 
+  await TestUtils.waitForCondition(() =>
+      enabledSection.querySelectorAll("addon-card").length == 1);
+
   is(card.parentNode, enabledSection,
      "The new theme card is in the enabled section");
   is(enabledSection.querySelectorAll("addon-card").length,
@@ -365,6 +352,9 @@ add_task(async function testThemeList() {
   let themesChanged = waitForThemeChange(list);
   card.querySelector('[action="toggle-disabled"]').click();
   await themesChanged;
+
+  await TestUtils.waitForCondition(() =>
+      enabledSection.querySelectorAll("addon-card").length == 1);
 
   is(card.parentNode, disabledSection,
      "The card is now in the disabled section");
@@ -412,6 +402,9 @@ add_task(async function testBuiltInThemeButtons() {
   darkButtons.toggleDisabled.click();
   await themesChanged;
 
+  await TestUtils.waitForCondition(() =>
+      enabledSection.querySelectorAll("addon-card").length == 1);
+
   // Check the buttons.
   is(defaultButtons.toggleDisabled.hidden, false, "Enable is visible");
   is(defaultButtons.remove.hidden, true, "Remove is hidden");
@@ -422,6 +415,9 @@ add_task(async function testBuiltInThemeButtons() {
   themesChanged = waitForThemeChange(list);
   darkButtons.toggleDisabled.click();
   await themesChanged;
+
+  await TestUtils.waitForCondition(() =>
+      enabledSection.querySelectorAll("addon-card").length == 1);
 
   // The themes are back to their starting posititons.
   is(defaultTheme.parentNode, enabledSection, "Default is enabled");

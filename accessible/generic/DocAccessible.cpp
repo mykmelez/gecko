@@ -19,9 +19,9 @@
 #include "TreeWalker.h"
 #include "xpcAccessibleDocument.h"
 
+#include "nsCommandManager.h"
 #include "nsContentUtils.h"
 #include "nsIMutableArray.h"
-#include "nsICommandManager.h"
 #include "nsIDocShell.h"
 #include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
@@ -30,7 +30,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsImageFrame.h"
 #include "nsIPersistentProperties2.h"
-#include "nsIPresShell.h"
 #include "nsIServiceManager.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
@@ -43,6 +42,7 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/DocumentType.h"
@@ -466,8 +466,10 @@ nsRect DocAccessible::RelativeBounds(nsIFrame** aRelativeFrame) const {
 
   nsRect bounds;
   while (document) {
-    nsIPresShell* presShell = document->GetShell();
-    if (!presShell) return nsRect();
+    mozilla::PresShell* presShell = document->GetPresShell();
+    if (!presShell) {
+      return nsRect();
+    }
 
     nsRect scrollPort;
     nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
@@ -503,7 +505,7 @@ nsresult DocAccessible::AddEventListeners() {
   // We want to add a command observer only if the document is content and has
   // an editor.
   if (docShell->ItemType() == nsIDocShellTreeItem::typeContent) {
-    nsCOMPtr<nsICommandManager> commandManager = docShell->GetCommandManager();
+    RefPtr<nsCommandManager> commandManager = docShell->GetCommandManager();
     if (commandManager)
       commandManager->AddCommandObserver(this, "obs_documentCreated");
   }
@@ -531,8 +533,7 @@ nsresult DocAccessible::RemoveEventListeners() {
 
     if (docShell) {
       if (docShell->ItemType() == nsIDocShellTreeItem::typeContent) {
-        nsCOMPtr<nsICommandManager> commandManager =
-            docShell->GetCommandManager();
+        RefPtr<nsCommandManager> commandManager = docShell->GetCommandManager();
         if (commandManager) {
           commandManager->RemoveCommandObserver(this, "obs_documentCreated");
         }
@@ -1130,10 +1131,28 @@ Accessible* DocAccessible::GetAccessibleByUniqueIDInSubtree(void* aUniqueID) {
 
 Accessible* DocAccessible::GetAccessibleOrContainer(nsINode* aNode,
                                                     int aARIAHiddenFlag) const {
-  if (!aNode || !aNode->GetComposedDoc()) return nullptr;
+  if (!aNode || !aNode->GetComposedDoc()) {
+    return nullptr;
+  }
 
-  for (nsINode* currNode = aNode; currNode;
-       currNode = currNode->GetFlattenedTreeParentNode()) {
+  nsINode* currNode = nullptr;
+  if (aNode->IsShadowRoot()) {
+    // This can happen, for example, when called within
+    // SelectionManager::ProcessSelectionChanged due to focusing a direct
+    // child of a shadow root.
+    // GetFlattenedTreeParent works on children of a shadow root, but not the
+    // shadow root itself.
+    const dom::ShadowRoot* shadowRoot = dom::ShadowRoot::FromNode(aNode);
+    currNode = shadowRoot->GetHost();
+    if (!currNode) {
+      return nullptr;
+    }
+  } else {
+    currNode = aNode;
+  }
+
+  MOZ_ASSERT(currNode);
+  for (; currNode; currNode = currNode->GetFlattenedTreeParentNode()) {
     // No container if is inside of aria-hidden subtree.
     if (aARIAHiddenFlag == eNoContainerIfARIAHidden && currNode->IsElement() &&
         aria::HasDefinedARIAHidden(currNode->AsElement())) {

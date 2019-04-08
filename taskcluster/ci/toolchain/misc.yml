@@ -60,7 +60,7 @@ linux64-hfsplus:
             - 'taskcluster/scripts/misc/tooltool-download.sh'
         toolchain-artifact: public/build/hfsplus-tools.tar.xz
     toolchains:
-        - linux64-clang-7
+        - linux64-clang-8
 
 linux64-libdmg:
     description: "libdmg-hfsplus toolchain build"
@@ -117,4 +117,4 @@ wrench-deps:
             - 'taskcluster/scripts/misc/tooltool-download.sh'
         toolchain-artifact: public/build/wrench-deps.tar.bz2
     toolchains:
-        - linux64-rust-1.32  # whatever m-c is built with
+        - linux64-rust-1.33  # whatever m-c is built with

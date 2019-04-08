@@ -284,7 +284,8 @@ OCSPRequest::Run() {
   }
 
   nsCOMPtr<nsIInputStream> uploadStream;
-  rv = NS_NewByteInputStream(getter_AddRefs(uploadStream), mPOSTData);
+  rv = NS_NewByteInputStream(getter_AddRefs(uploadStream), mPOSTData,
+                             NS_ASSIGNMENT_COPY);
   if (NS_FAILED(rv)) {
     return NotifyDone(rv, lock);
   }
@@ -1329,7 +1330,8 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     msg.AppendLiteral(" : server does not support RFC 5746, see CVE-2009-3555");
 
     nsContentUtils::LogSimpleConsoleError(
-        msg, "SSL", !!infoObject->GetOriginAttributes().mPrivateBrowsingId);
+        msg, "SSL", !!infoObject->GetOriginAttributes().mPrivateBrowsingId,
+        true /* from chrome context */);
   }
 
   infoObject->NoteTimeUntilReady();

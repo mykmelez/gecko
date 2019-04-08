@@ -13,7 +13,8 @@ import actions from "../../actions";
 import {
   getExpressions,
   getExpressionError,
-  getAutocompleteMatchset
+  getAutocompleteMatchset,
+  getThreadContext
 } from "../../selectors";
 import { getValue } from "../../utils/expressions";
 import { createObjectClient } from "../../client/firefox";
@@ -22,7 +23,7 @@ import { CloseButton } from "../shared/Button";
 import { debounce } from "lodash";
 
 import type { List } from "immutable";
-import type { Expression } from "../../types";
+import type { Expression, ThreadContext } from "../../types";
 
 import "./Expressions.css";
 
@@ -36,6 +37,7 @@ type State = {
 };
 
 type Props = {
+  cx: ThreadContext,
   expressions: List<Expression>,
   expressionError: boolean,
   showInput: boolean,
@@ -49,7 +51,9 @@ type Props = {
   updateExpression: typeof actions.updateExpression,
   deleteExpression: typeof actions.deleteExpression,
   openLink: typeof actions.openLink,
-  openElementInInspector: typeof actions.openElementInInspectorCommand
+  openElementInInspector: typeof actions.openElementInInspectorCommand,
+  highlightDomElement: typeof actions.highlightDomElement,
+  unHighlightDomElement: typeof actions.unHighlightDomElement
 };
 
 class Expressions extends Component<Props, State> {
@@ -71,10 +75,10 @@ class Expressions extends Component<Props, State> {
   }
 
   componentDidMount() {
-    const { expressions, evaluateExpressions, showInput } = this.props;
+    const { cx, expressions, evaluateExpressions, showInput } = this.props;
 
     if (expressions.size > 0) {
-      evaluateExpressions();
+      evaluateExpressions(cx);
     }
 
     // Ensures that the input is focused when the "+"
@@ -159,7 +163,7 @@ class Expressions extends Component<Props, State> {
 
   findAutocompleteMatches = debounce((value, selectionStart) => {
     const { autocomplete } = this.props;
-    autocomplete(value, selectionStart);
+    autocomplete(this.props.cx, value, selectionStart);
   }, 250);
 
   handleKeyDown = (e: SyntheticKeyboardEvent<HTMLInputElement>) => {
@@ -190,7 +194,11 @@ class Expressions extends Component<Props, State> {
     e.preventDefault();
     e.stopPropagation();
 
-    this.props.updateExpression(this.state.inputValue, expression);
+    this.props.updateExpression(
+      this.props.cx,
+      this.state.inputValue,
+      expression
+    );
     this.hideInput();
   };
 
@@ -200,7 +208,7 @@ class Expressions extends Component<Props, State> {
     e.stopPropagation();
 
     this.props.clearExpressionError();
-    await this.props.addExpression(this.state.inputValue);
+    await this.props.addExpression(this.props.cx, this.state.inputValue);
     this.setState({
       editing: false,
       editIndex: -1,
@@ -215,7 +223,14 @@ class Expressions extends Component<Props, State> {
   };
 
   renderExpression = (expression: Expression, index: number) => {
-    const { expressionError, openLink, openElementInInspector } = this.props;
+    const {
+      expressionError,
+      openLink,
+      openElementInInspector,
+      highlightDomElement,
+      unHighlightDomElement
+    } = this.props;
+
     const { editing, editIndex } = this.state;
     const { input, updating } = expression;
     const isEditingExpr = editing && editIndex === index;
@@ -253,6 +268,8 @@ class Expressions extends Component<Props, State> {
             createObjectClient={grip => createObjectClient(grip)}
             onDOMNodeClick={grip => openElementInInspector(grip)}
             onInspectIconClick={grip => openElementInInspector(grip)}
+            onDOMNodeMouseOver={grip => highlightDomElement(grip)}
+            onDOMNodeMouseOut={grip => unHighlightDomElement(grip)}
           />
           <div className="expression-container__close-btn">
             <CloseButton
@@ -366,6 +383,7 @@ class Expressions extends Component<Props, State> {
 
 const mapStateToProps = state => {
   return {
+    cx: getThreadContext(state),
     autocompleteMatches: getAutocompleteMatchset(state),
     expressions: getExpressions(state),
     expressionError: getExpressionError(state)
@@ -383,6 +401,8 @@ export default connect(
     updateExpression: actions.updateExpression,
     deleteExpression: actions.deleteExpression,
     openLink: actions.openLink,
-    openElementInInspector: actions.openElementInInspectorCommand
+    openElementInInspector: actions.openElementInInspectorCommand,
+    highlightDomElement: actions.highlightDomElement,
+    unHighlightDomElement: actions.unHighlightDomElement
   }
 )(Expressions);

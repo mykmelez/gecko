@@ -12,6 +12,7 @@
 #include "mozilla/dom/SVGRect.h"
 #include "mozilla/dom/SVGViewElement.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/SMILAnimationController.h"
 #include "mozilla/SMILTimeContainer.h"
 
@@ -319,7 +320,7 @@ void SVGSVGElement::SetCurrentScaleTranslate(float s, float x, float y) {
   // now dispatch the appropriate event if we are the root element
   Document* doc = GetUncomposedDoc();
   if (doc) {
-    nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
+    RefPtr<PresShell> presShell = doc->GetPresShell();
     if (presShell && IsRoot()) {
       nsEventStatus status = nsEventStatus_eIgnore;
       if (mPreviousScale == mCurrentScale) {
@@ -637,7 +638,7 @@ SVGViewElement* SVGSVGElement::GetCurrentViewElement() const {
   return nullptr;
 }
 
-const SVGViewBox& SVGSVGElement::GetViewBoxInternal() const {
+const SVGAnimatedViewBox& SVGSVGElement::GetViewBoxInternal() const {
   SVGViewElement* viewElement = GetCurrentViewElement();
 
   if (viewElement && viewElement->mViewBox.HasRect()) {

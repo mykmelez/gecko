@@ -80,7 +80,7 @@ l10n_description_schema = schema.extend({
         Required('job-name'): _by_platform(basestring),
 
         # Type of index
-        Optional('type'): basestring,
+        Optional('type'): _by_platform(basestring),
     },
     # Description of the localized task
     Required('description'): _by_platform(basestring),
@@ -221,10 +221,6 @@ def setup_nightly_dependency(config, jobs):
             job['dependencies'].update({
                 'repackage': job['dependent-tasks']['repackage'].label
             })
-        if job['attributes']['build_platform'].startswith('win'):
-            job['dependencies'].update({
-                'repackage-signing': job['dependent-tasks']['repackage-signing'].label
-            })
         yield job
 
 
@@ -249,6 +245,7 @@ def handle_keyed_by(config, jobs):
         "mozharness.script",
         "treeherder.tier",
         "treeherder.platform",
+        "index.type",
         "index.product",
         "index.job-name",
         "when.files-changed",
@@ -281,7 +278,8 @@ def handle_artifact_prefix(config, jobs):
 @transforms.add
 def all_locales_attribute(config, jobs):
     for job in jobs:
-        locales_platform = job['attributes']['build_platform'].replace("-nightly", "")
+        locales_platform = job['attributes']['build_platform'].replace("-shippable", "")
+        locales_platform = locales_platform.replace("-nightly", "")
         locales_platform = locales_platform.replace("-pgo", "")
         locales_with_changesets = parse_locales_file(job["locales-file"],
                                                      platform=locales_platform)

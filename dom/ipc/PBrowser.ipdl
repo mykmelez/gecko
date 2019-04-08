@@ -9,7 +9,6 @@ include protocol PColorPicker;
 include protocol PContent;
 include protocol PDocAccessible;
 include protocol PFilePicker;
-include protocol PIndexedDBPermissionRequest;
 include protocol PPluginWidget;
 include protocol PRemotePrintJob;
 include protocol PChildToParentStream;
@@ -109,7 +108,8 @@ struct WebProgressData
   bool isTopLevel;
   bool isLoadingDocument;
   uint32_t loadType;
-  uint64_t DOMWindowID;
+  uint64_t outerDOMWindowID;
+  uint64_t innerDOMWindowID;
 };
 
 struct RequestData
@@ -126,7 +126,6 @@ nested(upto inside_cpow) sync protocol PBrowser
     manages PColorPicker;
     manages PDocAccessible;
     manages PFilePicker;
-    manages PIndexedDBPermissionRequest;
     manages PPluginWidget;
     manages PPaymentRequest;
     manages PWindowGlobal;
@@ -441,7 +440,7 @@ parent:
      *       principals that can live in the content process should
      *       provided.
      */
-    async PIndexedDBPermissionRequest(Principal principal);
+    async IndexedDBPermissionRequest(Principal aPrincipal) returns (uint32_t permission);
 
     /**
      * window.open from inside <iframe mozbrowser> is special.  When the child
@@ -537,6 +536,15 @@ parent:
 
     async RegisterProtocolHandler(nsString scheme, nsIURI handlerURI, nsString title,
                                   nsIURI documentURI);
+
+    async OnProgressChange(WebProgressData? aWebProgressData,
+                           RequestData aRequestData, int32_t aCurSelfProgress,
+                           int32_t aMaxSelfProgress, int32_t aCurTotalProgress,
+                           int32_t aMaxTotalProgress);
+
+    async OnStatusChange(WebProgressData? aWebProgressData,
+                         RequestData aRequestData, nsresult aStatus,
+                         nsString aMessage);
 
     async OnContentBlockingEvent(WebProgressData? aWebProgressData,
                                  RequestData aRequestData, uint32_t aEvent);

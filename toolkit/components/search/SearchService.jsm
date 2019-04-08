@@ -723,7 +723,7 @@ function makeURI(aURLSpec, aCharset) {
 }
 
 /**
- * Wrapper function for nsIIOService::newChannel2.
+ * Wrapper function for nsIIOService::newChannel.
  * @param url
  *        The URL string from which to create an nsIChannel.
  * @returns an nsIChannel object, or null if the url is invalid.
@@ -799,14 +799,16 @@ function sanitizeName(aName) {
 }
 
 /**
- * Retrieve a pref from the search param branch.
+ * Retrieve a pref from the search param branch. Returns null if the
+ * preference is not found.
  *
  * @param prefName
  *        The name of the pref.
  **/
 function getMozParamPref(prefName) {
   let branch = Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF + "param.");
-  return encodeURIComponent(branch.getCharPref(prefName));
+  let prefValue = branch.getCharPref(prefName, null);
+  return prefValue ? encodeURIComponent(prefValue) : null;
 }
 
 /**
@@ -1078,7 +1080,9 @@ EngineURL.prototype = {
       if (param.mozparam) {
         if (param.condition == "pref") {
           let value = getMozParamPref(param.pref);
-          this.addParam(param.name, value);
+          if (value) {
+            this.addParam(param.name, value);
+          }
         }
         this._addMozParam(param);
       } else {
@@ -1708,7 +1712,9 @@ Engine.prototype = {
         }
         if (p.condition == "pref") {
           let value = getMozParamPref(p.pref);
-          url.addParam(p.name, value);
+          if (value) {
+            url.addParam(p.name, value);
+          }
           url._addMozParam(p);
         } else {
           url.addParam(p.name, p.value, p.purpose || undefined);
@@ -1841,13 +1847,13 @@ Engine.prototype = {
             // also requires a unique "name" which is not normally the case when @purpose is used.
             break;
           case "pref":
-            try {
-              value = getMozParamPref(param.getAttribute("pref"), value);
+            value = getMozParamPref(param.getAttribute("pref"), value);
+            if (value) {
               url.addParam(param.getAttribute("name"), value);
-              url._addMozParam({"pref": param.getAttribute("pref"),
-                                "name": param.getAttribute("name"),
-                                "condition": "pref"});
-            } catch (e) { }
+            }
+            url._addMozParam({"pref": param.getAttribute("pref"),
+                              "name": param.getAttribute("name"),
+                              "condition": "pref"});
             break;
           default:
             let engineLoc = this._location;
@@ -2481,12 +2487,22 @@ Engine.prototype = {
     let principal = Services.scriptSecurityManager
                             .createCodebasePrincipal(searchURI, attrs);
 
-    connector.speculativeConnect(searchURI, principal, callbacks);
+    try {
+      connector.speculativeConnect(searchURI, principal, callbacks);
+    } catch (e) {
+      // Can't setup speculative connection for this url, just ignore it.
+      Cu.reportError(e);
+    }
 
     if (this.supportsResponseType(URLTYPE_SUGGEST_JSON)) {
       let suggestURI = this.getSubmission("dummy", URLTYPE_SUGGEST_JSON).uri;
       if (suggestURI.prePath != searchURI.prePath)
-        connector.speculativeConnect(suggestURI, principal, callbacks);
+        try {
+          connector.speculativeConnect(suggestURI, principal, callbacks);
+        } catch (e) {
+          // Can't setup speculative connection for this url, just ignore it.
+          Cu.reportError(e);
+        }
     }
   },
 };
@@ -2751,7 +2767,7 @@ SearchService.prototype = {
    * @returns {Promise} A promise, resolved successfully if loading data
    * succeeds.
    */
-  async _loadEngines(cache) {
+  async _loadEngines(cache, isReload) {
     LOG("_loadEngines: start");
     Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "find-jar-engines");
     let chromeURIs = await this._findJAREngines();
@@ -2808,7 +2824,7 @@ SearchService.prototype = {
       let enginesFromDir = await this._loadEnginesFromDir(loadDir);
       enginesFromDir.forEach(this._addEngineToStore, this);
     }
-    let enginesFromURLs = await this._loadFromChromeURLs(chromeURIs);
+    let enginesFromURLs = await this._loadFromChromeURLs(chromeURIs, isReload);
     enginesFromURLs.forEach(this._addEngineToStore, this);
 
     LOG("_loadEngines: loading user-installed engines from the obsolete cache");
@@ -2842,7 +2858,7 @@ SearchService.prototype = {
     let prevCurrentEngine = this._currentEngine;
     this._currentEngine = null;
 
-    await this._loadEngines(await this._readCacheFile());
+    await this._loadEngines(await this._readCacheFile(), true);
     // Make sure the current list of engines is persisted.
     await this._buildCache();
 
@@ -3147,11 +3163,12 @@ SearchService.prototype = {
    * Loads engines from Chrome URLs asynchronously.
    *
    * @param aURLs a list of URLs.
+   * @param isReload is being called from maybeReloadEngines.
    *
    * @returns {Promise} A promise, resolved successfully if loading data
    * succeeds.
    */
-  async _loadFromChromeURLs(aURLs) {
+  async _loadFromChromeURLs(aURLs, isReload = false) {
     let engines = [];
     for (let url of aURLs) {
       try {
@@ -3159,6 +3176,12 @@ SearchService.prototype = {
         let uri = Services.io.newURI(url);
         let engine = new Engine(uri, true);
         await engine._initFromURI(uri);
+        // If there is an existing engine with the same name then update that engine.
+        // Only do this during reloads so it doesnt interfere with distribution
+        // engines
+        if (isReload && engine.name in this._engines) {
+          engine._engineToUpdate = this._engines[engine.name];
+        }
         engines.push(engine);
       } catch (ex) {
         LOG("_loadFromChromeURLs: failed to load engine: " + ex);

@@ -187,6 +187,13 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  MOZ_BITS_DOWNLOAD:
+#ifdef MOZ_BITS_DOWNLOAD
+  true,
+#else
+  false,
+#endif
+
   DEBUG:
 #ifdef DEBUG
   true,
@@ -305,7 +312,6 @@ this.AppConstants = Object.freeze({
   MOZ_BUILD_APP: "@MOZ_BUILD_APP@",
   MOZ_MACBUNDLE_NAME: "@MOZ_MACBUNDLE_NAME@",
   MOZ_UPDATE_CHANNEL: "@MOZ_UPDATE_CHANNEL@",
-  INSTALL_LOCALE: "@AB_CD@",
   MOZ_WIDGET_TOOLKIT: "@MOZ_WIDGET_TOOLKIT@",
   ANDROID_PACKAGE_NAME: "@ANDROID_PACKAGE_NAME@",
 

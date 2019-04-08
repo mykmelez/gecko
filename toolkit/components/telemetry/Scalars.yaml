@@ -95,9 +95,40 @@ browser.engagement:
     record_in_processes:
       - 'main'
 
+  max_concurrent_tab_pinned_count:
+    bug_numbers:
+      - 1505535
+    description: >
+      The count of maximum number of pinned tabs open during a subsession. This
+      includes private windows and the ones opened when starting the browser.
+    expires: never
+    kind: uint
+    notification_emails:
+      - bmiroglio@mozilla.com
+      - aoprea@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+  tab_pinned_event_count:
+    bug_numbers:
+      - 1505535
+    description: >
+      The count of tab pinned events per subsession, across all windows, after the
+      session has been restored. This includes tab pinned events from private windows.
+    expires: never
+    kind: uint
+    notification_emails:
+      - bmiroglio@mozilla.com
+      - aoprea@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
   total_uri_count:
     bug_numbers:
       - 1271313
+      - 1529232
     description: >
       The count of the total non-unique http(s) URIs visited in a subsession, including
       page reloads, after the session has been restored. This does not include background
@@ -106,9 +137,13 @@ browser.engagement:
     kind: uint
     notification_emails:
       - rweiss@mozilla.com
+      - loines@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - 'main'
+    record_into_store:
+      - 'main'
+      - 'pre-account'
 
   unfiltered_uri_count:
     bug_numbers:
@@ -854,13 +889,16 @@ mathml:
   doc_count:
     bug_numbers:
       - 1362187
+      - 1538985
     description: >
       The number of documents that contained enabled MathML elements.
-    expires: "63"
+    expires: "73"
     kind: uint
     notification_emails:
-      - gsquelart@mozilla.com
-    release_channel_collection: opt-in
+      - emilio@mozilla.com
+      - fredw@igalia.com
+      - dev-tech-layout@lists.mozilla.org
+    release_channel_collection: opt-out
     record_in_processes:
       - 'content'
 
@@ -1044,6 +1082,49 @@ dom.contentprocess:
     kind: uint
     notification_emails:
       - spohl@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  os_priority_lowered:
+    bug_numbers:
+      - 1538987
+    description: >
+      The number of times a content process has had its OS priority lowered
+      due to only containing background tabs without audible media playing.
+    expires: never
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+      - gsvelto@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  os_priority_raised:
+    bug_numbers:
+      - 1538987
+    description: >
+      The number of times a content process has had its OS priority raised
+      due to containing at least one foregrounded tab, or a tab with audible
+      media has started playing in it.
+    expires: never
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+      - gsvelto@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+  os_priority_change_considered:
+    bug_numbers:
+      - 1538987
+    description: >
+      The number of times we've had the opportunity to change content process
+      priority due to a tab switch or a tab being opened.
+    expires: never
+    kind: uint
+    notification_emails:
+      - mconley@mozilla.com
+      - gsvelto@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - 'main'
@@ -2616,6 +2697,49 @@ script.preloader:
     record_in_processes:
       - 'main'
       - 'content'
+
+networking:
+  data_transferred:
+    bug_numbers:
+      - 1533363
+    description: >
+      How many bytes of HTTP data transferred by type, there are some categories
+      separated by keys based on 4 parameters:
+        1. normal browsing or private browsing
+        2. first party or third party
+        3. class of service
+        4. tracking classification
+
+      Available keys are:
+        Y=0|NormalFirstParty
+        Y=1|NormalThirdPartyOther
+        Y=2|NormalThirdPartyContentLeader
+        Y=3|NormalThirdPartyContentBackground
+        Y=4|NormalThirdPartyContentOther
+        Y=5|NormalThirdPartyBasicLeader
+        Y=6|NormalThirdPartyBasicBackground
+        Y=7|NormalThirdPartyBasicOther
+        Y=8|NormalThirdPartyFingerprintingLeader
+        Y=9|NormalThirdPartyFingerprintingBackground
+        Y=10|NormalThirdPartyFingerprintingOther
+        Y=11|PrivateFirstParty
+        Y=12|PrivateThirdPartyOther
+        Y=13|PrivateThirdPartyContentLeader
+        Y=14|PrivateThirdPartyContentBackground
+        Y=15|PrivateThirdPartyContentOther
+        Y=16|PrivateThirdPartyBasicLeader
+        Y=17|PrivateThirdPartyBasicBackground
+        Y=18|PrivateThirdPartyBasicOther
+        Y=19|PrivateThirdPartyFingerprintingLeader
+        Y=20|PrivateThirdPartyFingerprintingBackground
+        Y=21|PrivateThirdPartyFingerprintingOther
+    expires: "73"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - gachen@mozilla.com
+    record_in_processes:
+      - 'main'
 
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.

@@ -215,6 +215,7 @@ nsContextMenu.prototype = {
     this.onCompletedImage    = context.onCompletedImage;
     this.onCTPPlugin         = context.onCTPPlugin;
     this.onDRMMedia          = context.onDRMMedia;
+    this.onPiPVideo          = context.onPiPVideo;
     this.onEditable          = context.onEditable;
     this.onImage             = context.onImage;
     this.onKeywordField      = context.onKeywordField;
@@ -678,7 +679,7 @@ nsContextMenu.prototype = {
     this.showItem("context-media-showcontrols", onMedia && !this.target.controls);
     this.showItem("context-media-hidecontrols", this.target.controls && (this.onVideo || (this.onAudio && !this.inSyntheticDoc)));
     this.showItem("context-video-fullscreen", this.onVideo && !this.target.ownerDocument.fullscreen);
-    if (AppConstants.NIGHTLY_BUILD) {
+    {
       let shouldDisplay = Services.prefs.getBoolPref("media.videocontrols.picture-in-picture.enabled") &&
                           this.onVideo &&
                           !this.target.ownerDocument.fullscreen;
@@ -713,6 +714,7 @@ nsContextMenu.prototype = {
         let canSaveSnapshot = !this.onDRMMedia && this.target.readyState >= this.target.HAVE_CURRENT_DATA;
         this.setItemAttr("context-video-saveimage", "disabled", !canSaveSnapshot);
         this.setItemAttr("context-video-fullscreen", "disabled", hasError);
+        this.setItemAttr("context-video-pictureinpicture", "checked", this.onPiPVideo);
       }
     }
     this.showItem("context-media-sep-commands", onMedia);
@@ -863,6 +865,7 @@ nsContextMenu.prototype = {
     openLinkIn(gContextMenuContentData.docLocation, "tab",
                { charset: gContextMenuContentData.charSet,
                  triggeringPrincipal: this.browser.contentPrincipal,
+                 csp: this.browser.csp,
                  referrerInfo: gContextMenuContentData.frameReferrerInfo });
   },
 
@@ -878,6 +881,7 @@ nsContextMenu.prototype = {
     openLinkIn(gContextMenuContentData.docLocation, "window",
                { charset: gContextMenuContentData.charSet,
                  triggeringPrincipal: this.browser.contentPrincipal,
+                 csp: this.browser.csp,
                  referrerInfo: gContextMenuContentData.frameReferrerInfo });
   },
 
@@ -949,6 +953,7 @@ nsContextMenu.prototype = {
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
     openUILink(this.imageDescURL, e, { referrerInfo: gContextMenuContentData.referrerInfo,
                                        triggeringPrincipal: this.principal,
+                                       csp: this.csp,
     });
   },
 
@@ -995,6 +1000,7 @@ nsContextMenu.prototype = {
       openUILink(this.mediaURL, e, { referrerInfo,
                                      forceAllowDataURI: true,
                                      triggeringPrincipal: this.principal,
+                                     csp: this.csp,
       });
     }
   },
@@ -1051,6 +1057,7 @@ nsContextMenu.prototype = {
 
     openUILink(this.bgImageURL, e, { referrerInfo: gContextMenuContentData.referrerInfo,
                                      triggeringPrincipal: this.principal,
+                                     csp: this.csp,
     });
   },
 
@@ -1524,6 +1531,7 @@ nsContextMenu.prototype = {
     // Store searchTerms in context menu item so we know what to search onclick
     menuItem.searchTerms = selectedText;
     menuItem.principal = this.principal;
+    menuItem.csp = this.csp;
 
     // Copied to alert.js' prefillAlertInfo().
     // If the JS character after our truncation point is a trail surrogate,

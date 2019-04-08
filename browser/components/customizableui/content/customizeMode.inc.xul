@@ -30,7 +30,7 @@
   <hbox id="customization-footer">
     <checkbox id="customization-titlebar-visibility-checkbox" class="customizationmode-checkbox"
               label="&customizeMode.titlebar;"
-#NB: because oncommand fires after click, by the time we've fired, the checkbox binding
+# NB: because oncommand fires after click, by the time we've fired, the checkbox binding
 #    will already have switched the button's state, so this is correct:
               oncommand="gCustomizeMode.toggleTitlebar(this.checked)"/>
     <checkbox id="customization-extra-drag-space-checkbox" class="customizationmode-checkbox"
@@ -41,12 +41,11 @@
     </button>
     <button id="customization-lwtheme-button" label="&customizeMode.lwthemes;" class="customizationmode-button" type="menu">
       <panel type="arrow" id="customization-lwtheme-menu"
-             onpopupshowing="gCustomizeMode.onLWThemesMenuShowing(event);"
+             onpopupshowing="gCustomizeMode.onThemesMenuShowing(event);"
              position="topcenter bottomleft"
              flip="none"
              role="menu">
         <label id="customization-lwtheme-menu-header" value="&customizeMode.lwthemes.myThemes;"/>
-        <label id="customization-lwtheme-menu-recommended" value="&customizeMode.lwthemes.recommended;"/>
         <hbox id="customization-lwtheme-menu-footer">
           <toolbarbutton class="customization-lwtheme-menu-footeritem"
                          label="&customizeMode.lwthemes.menuManage;"

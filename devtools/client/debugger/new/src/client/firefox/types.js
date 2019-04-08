@@ -201,6 +201,7 @@ export type Actions = {
  */
 export type TabTarget = {
   on: (string, Function) => void,
+  emit: (string, any) => void,
   activeConsole: {
     evaluateJS: (
       script: Script,
@@ -359,17 +360,12 @@ export type ThreadClient = {
   skipBreakpoints: boolean => Promise<{| skip: boolean |}>
 };
 
-export type FirefoxClientConnection = {
-  getTabTarget: () => TabTarget,
-  getThreadClient: () => ThreadClient,
-  setTabTarget: (target: TabTarget) => void,
-  setThreadClient: (client: ThreadClient) => void
-};
-
 export type Panel = {|
   emit: (eventName: string) => void,
   openLink: (url: string) => void,
   openWorkerToolbox: (worker: Worker) => void,
   openElementInInspector: (grip: Object) => void,
-  openConsoleAndEvaluate: (input: string) => void
+  openConsoleAndEvaluate: (input: string) => void,
+  highlightDomElement: (grip: Object) => void,
+  unHighlightDomElement: (grip: Object) => void
 |};

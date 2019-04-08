@@ -17,6 +17,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/BinarySearch.h"
@@ -39,7 +40,6 @@
 #include "SVGTextFrame.h"
 #include "nsCoord.h"
 #include "gfxContext.h"
-#include "nsIPresShell.h"
 #include "nsTArray.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSFrameConstructor.h"
@@ -648,7 +648,7 @@ static void UnhookTextRunFromFrames(gfxTextRun* aTextRun,
 static void InvalidateFrameDueToGlyphsChanged(nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame);
 
-  nsIPresShell* shell = aFrame->PresShell();
+  PresShell* presShell = aFrame->PresShell();
   for (nsIFrame* f = aFrame; f;
        f = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(f)) {
     f->InvalidateFrame();
@@ -668,7 +668,7 @@ static void InvalidateFrameDueToGlyphsChanged(nsIFrame* aFrame) {
       // we should probably do lazily here since there could be a lot
       // of text frames affected and we'd like to coalesce the work. So that's
       // not easy to do well.
-      shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+      presShell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
     }
   }
 }
@@ -1725,8 +1725,8 @@ static gfxFont::Metrics GetFirstFontMetrics(gfxFontGroup* aFontGroup,
                                             bool aVerticalMetrics) {
   if (!aFontGroup) return gfxFont::Metrics();
   gfxFont* font = aFontGroup->GetFirstValidFont();
-  return font->GetMetrics(aVerticalMetrics ? gfxFont::eVertical
-                                           : gfxFont::eHorizontal);
+  return font->GetMetrics(aVerticalMetrics ? nsFontMetrics::eVertical
+                                           : nsFontMetrics::eHorizontal);
 }
 
 static nscoord GetSpaceWidthAppUnits(const gfxTextRun* aTextRun) {
@@ -4064,17 +4064,16 @@ bool nsTextPaintStyle::InitSelectionColorsAndShadow() {
 
   mInitSelectionColorsAndShadow = true;
 
-  if (selectionStatus == nsISelectionController::SELECTION_ON) {
-    // Use ::selection pseudo class.
-    if (RefPtr<ComputedStyle> style = mFrame->ComputeSelectionStyle()) {
-      mSelectionBGColor =
-          style->GetVisitedDependentColor(&nsStyleBackground::mBackgroundColor);
-      mSelectionTextColor =
-          style->GetVisitedDependentColor(&nsStyleText::mWebkitTextFillColor);
-      mHasSelectionShadow = true;
-      mSelectionShadow = style->StyleText()->mTextShadow;
-      return true;
-    }
+  // Use ::selection pseudo class if applicable.
+  if (RefPtr<ComputedStyle> style =
+          mFrame->ComputeSelectionStyle(selectionStatus)) {
+    mSelectionBGColor =
+        style->GetVisitedDependentColor(&nsStyleBackground::mBackgroundColor);
+    mSelectionTextColor =
+        style->GetVisitedDependentColor(&nsStyleText::mWebkitTextFillColor);
+    mHasSelectionShadow = true;
+    mSelectionShadow = style->StyleText()->mTextShadow;
+    return true;
   }
 
   nscolor selectionBGColor =
@@ -4773,7 +4772,7 @@ nsresult nsTextFrame::CharacterDataChanged(
   // dirty bit without bothering to call FrameNeedsReflow again.)
   nsIFrame* lastDirtiedFrameParent = nullptr;
 
-  nsIPresShell* shell = PresContext()->GetPresShell();
+  mozilla::PresShell* presShell = PresContext()->GetPresShell();
   do {
     // textFrame contained deleted text (or the insertion point,
     // if this was a pure insertion).
@@ -4801,8 +4800,8 @@ nsresult nsTextFrame::CharacterDataChanged(
       textFrame->mReflowRequestedForCharDataChange = true;
       if (!areAncestorsAwareOfReflowRequest) {
         // Ask the parent frame to reflow me.
-        shell->FrameNeedsReflow(textFrame, nsIPresShell::eStyleChange,
-                                NS_FRAME_IS_DIRTY);
+        presShell->FrameNeedsReflow(textFrame, nsIPresShell::eStyleChange,
+                                    NS_FRAME_IS_DIRTY);
       } else {
         // We already called FrameNeedsReflow on behalf of an earlier sibling,
         // so we can just mark this frame as dirty and don't need to bother
@@ -5110,7 +5109,8 @@ void nsDisplayText::RenderToContext(gfxContext* aCtx,
     params.state = nsTextFrame::PaintTextParams::PaintText;
   }
 
-  f->PaintText(params, *this, mOpacity);
+  f->PaintText(params, mVisIStartEdge, mVisIEndEdge, ToReferenceFrame(),
+               IsSelected(), mOpacity);
 
   if (willClip) {
     aCtx->PopClip();
@@ -5141,8 +5141,7 @@ void nsTextFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  aLists.Content()->AppendToTop(
-      MakeDisplayItem<nsDisplayText>(aBuilder, this, isSelected));
+  aLists.Content()->AppendNewToTop<nsDisplayText>(aBuilder, this, isSelected);
 }
 
 static nsIFrame* GetGeneratedContentOwner(nsIFrame* aFrame, bool* aIsBefore) {
@@ -5731,7 +5730,7 @@ gfxFloat nsTextFrame::ComputeSelectionUnderlineHeight(
       nscoord defaultFontSize =
           aPresContext->Document()
               ->GetFontPrefsForLang(nullptr)
-              ->GetDefaultFont(kPresContext_DefaultVariableFont_ID)
+              ->GetDefaultFont(StyleGenericFontFamily::None)
               ->size;
       int32_t zoomedFontSize = aPresContext->AppUnitsToDevPixels(
           nsStyleFont::ZoomText(*aPresContext->Document(), defaultFontSize));
@@ -6417,8 +6416,9 @@ void nsTextFrame::PaintTextSelectionDecorations(
   const auto kDecoration = rightUnderline ? StyleTextDecorationLine_OVERLINE
                                           : StyleTextDecorationLine_UNDERLINE;
   bool useVerticalMetrics = verticalRun && mTextRun->UseCenterBaseline();
-  gfxFont::Metrics decorationMetrics(firstFont->GetMetrics(
-      useVerticalMetrics ? gfxFont::eVertical : gfxFont::eHorizontal));
+  gfxFont::Metrics decorationMetrics(
+      firstFont->GetMetrics(useVerticalMetrics ? nsFontMetrics::eVertical
+                                               : nsFontMetrics::eHorizontal));
   if (!useVerticalMetrics) {
     // The potential adjustment from using gfxFontGroup::GetUnderlineOffset
     // is only valid for horizontal font metrics.
@@ -6772,7 +6772,10 @@ void nsTextFrame::PaintShadows(nsCSSShadowArray* aShadow,
 }
 
 void nsTextFrame::PaintText(const PaintTextParams& aParams,
-                            const nsCharClipDisplayItem& aItem,
+                            const nscoord aVisIStartEdge,
+                            const nscoord aVisIEndEdge,
+                            const nsPoint& aToReferenceFrame,
+                            const bool aIsSelected,
                             float aOpacity /* = 1.0f */) {
   // Don't pass in the rendering context here, because we need a
   // *reference* context and rendering context might have some transform
@@ -6783,11 +6786,9 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
 
   PropertyProvider provider(this, iter, nsTextFrame::eInflated, mFontMetrics);
 
-  const bool isSelected = aItem.IsSelected();
-
   // Trim trailing whitespace, unless we're painting a selection highlight,
   // which should include trailing spaces if present (bug 1146754).
-  provider.InitializeForDisplay(!isSelected);
+  provider.InitializeForDisplay(!aIsSelected);
 
   const bool reversed = mTextRun->IsInlineReversed();
   const bool verticalRun = mTextRun->IsVertical();
@@ -6816,9 +6817,9 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
   uint32_t startOffset = range.start;
   uint32_t maxLength = range.Length();
   nscoord snappedStartEdge, snappedEndEdge;
-  if (!MeasureCharClippedText(provider, aItem.mVisIStartEdge,
-                              aItem.mVisIEndEdge, &startOffset, &maxLength,
-                              &snappedStartEdge, &snappedEndEdge)) {
+  if (!MeasureCharClippedText(provider, aVisIStartEdge, aVisIEndEdge,
+                              &startOffset, &maxLength, &snappedStartEdge,
+                              &snappedEndEdge)) {
     return;
   }
   if (verticalRun) {
@@ -6826,13 +6827,13 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
   } else {
     textBaselinePt.x += reversed ? -snappedEndEdge : snappedStartEdge;
   }
-  nsCharClipDisplayItem::ClipEdges clipEdges(aItem, snappedStartEdge,
-                                             snappedEndEdge);
+  nsCharClipDisplayItem::ClipEdges clipEdges(this, aToReferenceFrame,
+                                             snappedStartEdge, snappedEndEdge);
   nsTextPaintStyle textPaintStyle(this);
   textPaintStyle.SetResolveColors(!aParams.callbacks);
 
   // Fork off to the (slower) paint-with-selection path if necessary.
-  if (isSelected) {
+  if (aIsSelected) {
     MOZ_ASSERT(aOpacity == 1.0f, "We don't support opacity with selections!");
     gfxSkipCharsIterator tmp(provider.GetStart());
     Range contentRange(
@@ -7352,8 +7353,9 @@ bool nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
   WritingMode wm = GetWritingMode();
   bool verticalRun = wm.IsVertical();
   bool useVerticalMetrics = verticalRun && !wm.IsSideways();
-  const gfxFont::Metrics& metrics = firstFont->GetMetrics(
-      useVerticalMetrics ? gfxFont::eVertical : gfxFont::eHorizontal);
+  const gfxFont::Metrics& metrics =
+      firstFont->GetMetrics(useVerticalMetrics ? nsFontMetrics::eVertical
+                                               : nsFontMetrics::eHorizontal);
 
   nsCSSRendering::DecorationRectParams params;
   params.ascent = aPresContext->AppUnitsToGfxUnits(mAscent);
@@ -7479,7 +7481,7 @@ void nsTextFrame::UpdateIteratorFromOffset(const PropertyProvider& aProperties,
 
   if (aInOffset < trimmedEnd && !aIter.IsOriginalCharSkipped() &&
       !mTextRun->IsClusterStart(aIter.GetSkippedOffset())) {
-    NS_WARNING("called for non-cluster boundary");
+    // Called for non-cluster boundary
     FindClusterStart(mTextRun, trimmedOffset, &aIter);
   }
 }
@@ -9696,7 +9698,8 @@ static void TransformChars(nsTextFrame* aFrame, const nsStyleText* aStyle,
       AutoTArray<bool, 50> charsToMergeArray;
       AutoTArray<bool, 50> deletedCharsArray;
       nsCaseTransformTextRunFactory::TransformString(
-          fragString, convertedString, false, nullptr, charsToMergeArray,
+          fragString, convertedString, /* aAllUppercase = */ false,
+          /* aCaseTransformsOnly = */ true, nullptr, charsToMergeArray,
           deletedCharsArray, transformedTextRun, aSkippedOffset);
       aOut.Append(convertedString);
     } else {

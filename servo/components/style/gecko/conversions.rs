@@ -12,8 +12,7 @@
 
 use crate::gecko::values::GeckoStyleCoordConvertible;
 use crate::gecko_bindings::bindings;
-use crate::gecko_bindings::structs::RawGeckoGfxMatrix4x4;
-use crate::gecko_bindings::structs::{self, nsStyleCoord_CalcValue};
+use crate::gecko_bindings::structs::{self, nsStyleCoord_CalcValue, Matrix4x4Components};
 use crate::gecko_bindings::structs::{nsStyleImage, nsresult, SheetType};
 use crate::gecko_bindings::sugar::ns_style_coord::{CoordData, CoordDataMut, CoordDataValue};
 use crate::stylesheets::{Origin, RulesMutateError};
@@ -124,14 +123,11 @@ impl nsStyleImage {
         match image {
             GenericImage::Gradient(boxed_gradient) => self.set_gradient(*boxed_gradient),
             GenericImage::Url(ref url) => unsafe {
-                bindings::Gecko_SetLayerImageImageValue(self, (url.0).0.url_value.get());
+                bindings::Gecko_SetLayerImageImageValue(self, url.url_value_ptr())
             },
             GenericImage::Rect(ref image_rect) => {
                 unsafe {
-                    bindings::Gecko_SetLayerImageImageValue(
-                        self,
-                        (image_rect.url.0).0.url_value.get(),
-                    );
+                    bindings::Gecko_SetLayerImageImageValue(self, image_rect.url.url_value_ptr());
                     bindings::Gecko_InitializeImageCropRect(self);
 
                     // Set CropRect
@@ -422,10 +418,8 @@ impl nsStyleImage {
         use self::structs::NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE as CLOSEST_SIDE;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER as FARTHEST_CORNER;
         use self::structs::NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE as FARTHEST_SIDE;
-        use crate::values::computed::image::LineDirection;
         use crate::values::computed::position::Position;
-        use crate::values::computed::Length;
-        use crate::values::generics::image::{Circle, ColorStop, CompatMode, Ellipse};
+        use crate::values::generics::image::{Circle, ColorStop, Ellipse};
         use crate::values::generics::image::{EndingShape, GradientKind, ShapeExtent};
 
         let gecko_gradient = bindings::Gecko_GetGradientImageValue(self)
@@ -838,8 +832,7 @@ impl TrackSize<LengthPercentage> {
     /// Return TrackSize from given two nsStyleCoord
     pub fn from_gecko_style_coords<T: CoordData>(gecko_min: &T, gecko_max: &T) -> Self {
         use crate::gecko_bindings::structs::root::nsStyleUnit;
-        use crate::values::computed::length::LengthPercentage;
-        use crate::values::generics::grid::{TrackBreadth, TrackSize};
+        use crate::values::generics::grid::TrackBreadth;
 
         if gecko_min.unit() == nsStyleUnit::eStyleUnit_None {
             debug_assert!(
@@ -866,8 +859,6 @@ impl TrackSize<LengthPercentage> {
 
     /// Save TrackSize to given gecko fields.
     pub fn to_gecko_style_coords<T: CoordDataMut>(&self, gecko_min: &mut T, gecko_max: &mut T) {
-        use crate::values::generics::grid::TrackSize;
-
         match *self {
             TrackSize::FitContent(ref lop) => {
                 // Gecko sets min value to None and max value to the actual value in fit-content
@@ -897,8 +888,6 @@ impl TrackListValue<LengthPercentage, Integer> {
 
     /// Save TrackSize to given gecko fields.
     pub fn to_gecko_style_coords<T: CoordDataMut>(&self, gecko_min: &mut T, gecko_max: &mut T) {
-        use crate::values::generics::grid::TrackListValue;
-
         match *self {
             TrackListValue::TrackSize(ref size) => size.to_gecko_style_coords(gecko_min, gecko_max),
             _ => unreachable!("Should only transform from track-size computed values"),
@@ -922,8 +911,6 @@ where
     pub fn from_gecko_rect(
         sides: &crate::gecko_bindings::structs::nsStyleSides,
     ) -> Option<crate::values::generics::rect::Rect<T>> {
-        use crate::values::generics::rect::Rect;
-
         Some(Rect::new(
             T::from_gecko_style_coord(&sides.data_at(0)).expect("coord[0] cound not convert"),
             T::from_gecko_style_coord(&sides.data_at(1)).expect("coord[1] cound not convert"),
@@ -986,8 +973,8 @@ pub unsafe fn string_from_chars_pointer(p: *const u16) -> String {
     String::from_utf16_lossy(char_vec)
 }
 
-impl<'a> From<&'a RawGeckoGfxMatrix4x4> for Matrix3D {
-    fn from(m: &'a RawGeckoGfxMatrix4x4) -> Matrix3D {
+impl<'a> From<&'a Matrix4x4Components> for Matrix3D {
+    fn from(m: &'a Matrix4x4Components) -> Matrix3D {
         Matrix3D {
             m11: m[0],
             m12: m[1],
@@ -1009,8 +996,8 @@ impl<'a> From<&'a RawGeckoGfxMatrix4x4> for Matrix3D {
     }
 }
 
-impl From<Matrix3D> for RawGeckoGfxMatrix4x4 {
-    fn from(matrix: Matrix3D) -> RawGeckoGfxMatrix4x4 {
+impl From<Matrix3D> for Matrix4x4Components {
+    fn from(matrix: Matrix3D) -> Self {
         [
             matrix.m11, matrix.m12, matrix.m13, matrix.m14, matrix.m21, matrix.m22, matrix.m23,
             matrix.m24, matrix.m31, matrix.m32, matrix.m33, matrix.m34, matrix.m41, matrix.m42,

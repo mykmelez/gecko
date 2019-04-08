@@ -4,8 +4,6 @@
 
 "use strict";
 
-const Services = require("Services");
-
 // We are requiring a module from client whereas this module is from shared.
 // This shouldn't happen, but Fronts should rather be part of client anyway.
 // Otherwise gDevTools is only used for local tabs and should propably only
@@ -321,9 +319,7 @@ function TargetMixin(parentClass) {
     }
 
     isReplayEnabled() {
-      return Services.prefs.getBoolPref("devtools.recordreplay.mvp.enabled")
-        && this.canRewind
-        && this.isLocalTab;
+      return this.canRewind && this.isLocalTab;
     }
 
     getExtensionPathName(url) {
@@ -356,6 +352,17 @@ function TargetMixin(parentClass) {
         return null;
       }
       return this.tab.linkedBrowser.contentPrincipal;
+    }
+
+    /**
+     * Similar to the above get contentPrincipal(), the get csp()
+     * returns the CSP which should be used for opening links.
+     */
+    get csp() {
+      if (!this.isLocalTab) {
+        return null;
+      }
+      return this.tab.linkedBrowser.csp;
     }
 
     // Attach the console actor

@@ -9,6 +9,7 @@
 #include "mozilla/dom/AnimationBinding.h"
 #include "mozilla/dom/AnimationPlaybackEvent.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/AnimationTarget.h"
@@ -17,7 +18,6 @@
 #include "mozilla/TypeTraits.h"     // For std::forward<>
 #include "nsAnimationManager.h"     // For CSSAnimation
 #include "nsDOMMutationObserver.h"  // For nsAutoAnimationMutationBatch
-#include "nsIPresShell.h"           // For nsIPresShell
 #include "nsThreadUtils.h"  // For nsRunnableMethod and nsRevocableEventPtr
 #include "nsTransitionManager.h"      // For CSSTransition
 #include "PendingAnimationTracker.h"  // For PendingAnimationTracker

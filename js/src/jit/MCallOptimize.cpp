@@ -24,6 +24,7 @@
 #include "jit/Lowering.h"
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
+#include "js/RegExpFlags.h"  // JS::RegExpFlag, JS::RegExpFlags
 #include "vm/ArgumentsObject.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
@@ -37,13 +38,14 @@
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/StringObject-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using mozilla::ArrayLength;
 using mozilla::AssertedCast;
 using mozilla::Maybe;
 
 using JS::DoubleNaNValue;
+using JS::RegExpFlag;
+using JS::RegExpFlags;
 using JS::TrackedOutcome;
 
 namespace js {
@@ -224,7 +226,7 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
     return InliningStatus_NotInlined;
   }
 
-  bool isWasmCall = target->isWasmOptimized();
+  bool isWasmCall = target->isWasmWithJitEntry();
   if (!isWasmCall &&
       (!target->hasJitInfo() ||
        target->jitInfo()->type() != JSJitInfo::InlinableNative)) {
@@ -625,7 +627,7 @@ IonBuilder::InliningResult IonBuilder::inlineNativeGetter(CallInfo& callInfo,
   }
 
   // Try to optimize RegExp getters.
-  RegExpFlag mask = NoFlags;
+  RegExpFlags mask = RegExpFlag::NoFlags;
   if (RegExpObject::isOriginalFlagGetter(native, &mask)) {
     const Class* clasp = thisTypes->getKnownClass(constraints());
     if (clasp != &RegExpObject::class_) {
@@ -636,7 +638,7 @@ IonBuilder::InliningResult IonBuilder::inlineNativeGetter(CallInfo& callInfo,
         MLoadFixedSlot::New(alloc(), thisArg, RegExpObject::flagsSlot());
     current->add(flags);
     flags->setResultType(MIRType::Int32);
-    MConstant* maskConst = MConstant::New(alloc(), Int32Value(mask));
+    MConstant* maskConst = MConstant::New(alloc(), Int32Value(mask.value()));
     current->add(maskConst);
     MBitAnd* maskedFlag = MBitAnd::New(alloc(), flags, maskConst);
     maskedFlag->setInt32Specialization();
@@ -911,7 +913,7 @@ IonBuilder::InliningResult IonBuilder::inlineArrayPopShift(
       OBJECT_FLAG_SPARSE_INDEXES | OBJECT_FLAG_LENGTH_OVERFLOW |
       OBJECT_FLAG_ITERATED | OBJECT_FLAG_NON_EXTENSIBLE_ELEMENTS;
 
-  MDefinition* obj = convertUnboxedObjects(callInfo.thisArg());
+  MDefinition* obj = callInfo.thisArg();
   TemporaryTypeSet* thisTypes = obj->resultTypeSet();
   if (!thisTypes) {
     return InliningStatus_NotInlined;
@@ -1018,7 +1020,7 @@ IonBuilder::InliningResult IonBuilder::inlineArrayPush(CallInfo& callInfo) {
     return InliningStatus_NotInlined;
   }
 
-  MDefinition* obj = convertUnboxedObjects(callInfo.thisArg());
+  MDefinition* obj = callInfo.thisArg();
   for (uint32_t i = 0; i < callInfo.argc(); i++) {
     MDefinition* value = callInfo.getArg(i);
     if (PropertyWriteNeedsTypeBarrier(alloc(), constraints(), current, &obj,
@@ -1149,7 +1151,7 @@ IonBuilder::InliningResult IonBuilder::inlineArraySlice(CallInfo& callInfo) {
     return InliningStatus_NotInlined;
   }
 
-  MDefinition* obj = convertUnboxedObjects(callInfo.thisArg());
+  MDefinition* obj = callInfo.thisArg();
 
   // Ensure |this| and result are objects.
   if (getInlineReturnType() != MIRType::Object) {
@@ -2942,8 +2944,7 @@ IonBuilder::InliningResult IonBuilder::inlineObjectToString(
 
   // Try to constant fold some common cases.
   if (const Class* knownClass = types->getKnownClass(constraints())) {
-    if (knownClass == &PlainObject::class_ ||
-        knownClass == &UnboxedPlainObject::class_) {
+    if (knownClass == &PlainObject::class_) {
       pushConstant(StringValue(names().objectObject));
       return InliningStatus_Inlined;
     }
@@ -4324,7 +4325,7 @@ IonBuilder::InliningResult IonBuilder::inlineConstructTypedObject(
 
 IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
                                                       JSFunction* target) {
-  MOZ_ASSERT(target->isWasmOptimized());
+  MOZ_ASSERT(target->isWasmWithJitEntry());
 
   // Don't inline wasm constructors.
   if (callInfo.constructing()) {
@@ -4348,11 +4349,8 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
   // Check that the function doesn't take or return non-compatible JS
   // argument types before adding nodes to the MIR graph, otherwise they'd be
   // dead code.
-  if (sig.hasI64ArgOrRet() || sig.temporarilyUnsupportedAnyRef()
-#ifdef WASM_CODEGEN_DEBUG
-      || !JitOptions.enableWasmIonFastCalls
-#endif
-  ) {
+  if (sig.hasI64ArgOrRet() || sig.temporarilyUnsupportedAnyRef() ||
+      !JitOptions.enableWasmIonFastCalls) {
     return InliningStatus_NotInlined;
   }
 

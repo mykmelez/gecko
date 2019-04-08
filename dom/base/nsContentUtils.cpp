@@ -22,6 +22,7 @@
 #include "jsfriendapi.h"
 #include "js/ArrayBuffer.h"  // JS::{GetArrayBufferData,IsArrayBufferObject,NewArrayBuffer}
 #include "js/JSON.h"
+#include "js/RegExp.h"  // JS::ExecuteRegExpNoStatics, JS::NewUCRegExpObject, JS::RegExpFlags
 #include "js/Value.h"
 #include "Layers.h"
 #include "nsAppRunner.h"
@@ -49,6 +50,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/MessageBroadcaster.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/DOMException.h"
@@ -89,6 +91,7 @@
 #include "mozilla/ManualNAC.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/Services.h"
@@ -2738,7 +2741,7 @@ static inline void KeyAppendString(const nsACString& aString,
 static inline void KeyAppendInt(int32_t aInt, nsACString& aKey) {
   KeyAppendSep(aKey);
 
-  aKey.Append(nsPrintfCString("%d", aInt));
+  aKey.AppendInt(aInt);
 }
 
 static inline bool IsAutocompleteOff(const nsIContent* aContent) {
@@ -3195,25 +3198,21 @@ void nsContentUtils::SplitExpatName(const char16_t* aExpatName,
 }
 
 // static
-nsIPresShell* nsContentUtils::GetPresShellForContent(
-    const nsIContent* aContent) {
+PresShell* nsContentUtils::GetPresShellForContent(const nsIContent* aContent) {
   Document* doc = aContent->GetComposedDoc();
   if (!doc) {
     return nullptr;
   }
-
-  return doc->GetShell();
+  return doc->GetPresShell();
 }
 
 // static
 nsPresContext* nsContentUtils::GetContextForContent(
     const nsIContent* aContent) {
-  nsIPresShell* presShell = GetPresShellForContent(aContent);
-
+  PresShell* presShell = GetPresShellForContent(aContent);
   if (!presShell) {
     return nullptr;
   }
-
   return presShell->GetPresContext();
 }
 
@@ -3735,16 +3734,17 @@ nsresult nsContentUtils::FormatLocalizedString(
 /* static */
 void nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
                                            const char* classification,
-                                           bool aFromPrivateWindow) {
+                                           bool aFromPrivateWindow,
+                                           bool aFromChromeContext) {
   nsCOMPtr<nsIScriptError> scriptError =
       do_CreateInstance(NS_SCRIPTERROR_CONTRACTID);
   if (scriptError) {
     nsCOMPtr<nsIConsoleService> console =
         do_GetService(NS_CONSOLESERVICE_CONTRACTID);
-    if (console &&
-        NS_SUCCEEDED(scriptError->Init(aErrorText, EmptyString(), EmptyString(),
-                                       0, 0, nsIScriptError::errorFlag,
-                                       classification, aFromPrivateWindow))) {
+    if (console && NS_SUCCEEDED(scriptError->Init(
+                       aErrorText, EmptyString(), EmptyString(), 0, 0,
+                       nsIScriptError::errorFlag, classification,
+                       aFromPrivateWindow, aFromChromeContext))) {
       console->LogMessage(scriptError);
     }
   }
@@ -4150,7 +4150,9 @@ nsresult nsContentUtils::DispatchInputEvent(Element* aEventTargetElement,
   HTMLInputElement* inputElement =
       HTMLInputElement::FromNode(aEventTargetElement);
   if (inputElement) {
-    inputElement->MaybeUpdateAllValidityStates();
+    MOZ_KnownLive(inputElement)->MaybeUpdateAllValidityStates(true);
+    // XXX Should we stop dispatching "input" event if the target is removed
+    //     from the DOM tree?
   }
 
   if (!useInputEvent) {
@@ -4180,7 +4182,7 @@ nsresult nsContentUtils::DispatchInputEvent(Element* aEventTargetElement,
     }
     // If we're running xpcshell tests, we fail to get presShell here.
     // Even in such case, we need to dispatch "input" event without widget.
-    nsIPresShell* presShell = document->GetShell();
+    PresShell* presShell = document->GetPresShell();
     if (presShell) {
       nsPresContext* presContext = presShell->GetPresContext();
       if (NS_WARN_IF(!presContext)) {
@@ -5298,6 +5300,7 @@ nsContentUtils::GetMostRecentNonPBWindow() {
 void nsContentUtils::WarnScriptWasIgnored(Document* aDocument) {
   nsAutoString msg;
   bool privateBrowsing = false;
+  bool chromeContext = false;
 
   if (aDocument) {
     nsCOMPtr<nsIURI> uri = aDocument->GetDocumentURI();
@@ -5307,11 +5310,12 @@ void nsContentUtils::WarnScriptWasIgnored(Document* aDocument) {
     }
     privateBrowsing =
         !!aDocument->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId;
+    chromeContext = IsSystemPrincipal(aDocument->NodePrincipal());
   }
 
   msg.AppendLiteral(
       "Unable to run script because scripts are blocked internally.");
-  LogSimpleConsoleError(msg, "DOM", privateBrowsing);
+  LogSimpleConsoleError(msg, "DOM", privateBrowsing, chromeContext);
 }
 
 /* static */
@@ -6294,9 +6298,9 @@ nsIPresShell* nsContentUtils::FindPresShellForDocument(const Document* aDoc) {
     doc = displayDoc;
   }
 
-  nsIPresShell* shell = doc->GetShell();
-  if (shell) {
-    return shell;
+  PresShell* presShell = doc->GetPresShell();
+  if (presShell) {
+    return presShell;
   }
 
   nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = doc->GetDocShell();
@@ -6511,8 +6515,8 @@ bool nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
 
   JS::Rooted<JSObject*> re(
       cx,
-      JS_NewUCRegExpObject(cx, static_cast<char16_t*>(aPattern.BeginWriting()),
-                           aPattern.Length(), JSREG_UNICODE));
+      JS::NewUCRegExpObject(cx, static_cast<char16_t*>(aPattern.BeginWriting()),
+                            aPattern.Length(), JS::RegExpFlag::Unicode));
   if (!re) {
     // Remove extra patterns added above to report with the original pattern.
     aPattern.Cut(0, 4);
@@ -6523,9 +6527,9 @@ bool nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
 
   JS::Rooted<JS::Value> rval(cx, JS::NullValue());
   size_t idx = 0;
-  if (!JS_ExecuteRegExpNoStatics(cx, re,
-                                 static_cast<char16_t*>(aValue.BeginWriting()),
-                                 aValue.Length(), &idx, true, &rval)) {
+  if (!JS::ExecuteRegExpNoStatics(cx, re,
+                                  static_cast<char16_t*>(aValue.BeginWriting()),
+                                  aValue.Length(), &idx, true, &rval)) {
     return true;
   }
 
@@ -6939,6 +6943,23 @@ bool nsContentUtils::IsAllowedNonCorsLanguage(const nsACString& aHeaderValue) {
     return false;
   }
   return true;
+}
+
+// static
+bool nsContentUtils::IsCORSSafelistedRequestHeader(const nsACString& aName,
+                                                   const nsACString& aValue) {
+  // see https://fetch.spec.whatwg.org/#cors-safelisted-request-header
+  if (aValue.Length() > 128) {
+    return false;
+  }
+  return (aName.LowerCaseEqualsLiteral("accept") &&
+          nsContentUtils::IsAllowedNonCorsAccept(aValue)) ||
+         (aName.LowerCaseEqualsLiteral("accept-language") &&
+          nsContentUtils::IsAllowedNonCorsLanguage(aValue)) ||
+         (aName.LowerCaseEqualsLiteral("content-language") &&
+          nsContentUtils::IsAllowedNonCorsLanguage(aValue)) ||
+         (aName.LowerCaseEqualsLiteral("content-type") &&
+          nsContentUtils::IsAllowedNonCorsContentType(aValue));
 }
 
 bool nsContentUtils::DoNotTrackEnabled() {
@@ -9829,7 +9850,7 @@ void nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
   size_t oldLength = aElements.Length();
 #endif
 
-  if (nsIPresShell* presShell = aDocument->GetShell()) {
+  if (PresShell* presShell = aDocument->GetPresShell()) {
     if (nsIFrame* scrollFrame = presShell->GetRootScrollFrame()) {
       nsIAnonymousContentCreator* creator = do_QueryFrame(scrollFrame);
       MOZ_ASSERT(
@@ -10506,9 +10527,9 @@ bool nsContentUtils::
   }
 
   Document* topLevel = aDocument->GetTopLevelContentDocument();
-  return topLevel && topLevel->GetShell() &&
-         topLevel->GetShell()->GetPresContext() &&
-         !topLevel->GetShell()->GetPresContext()->HadContentfulPaint() &&
+  return topLevel && topLevel->GetPresShell() &&
+         topLevel->GetPresShell()->GetPresContext() &&
+         !topLevel->GetPresShell()->GetPresContext()->HadContentfulPaint() &&
          nsThreadManager::MainThreadHasPendingHighPriorityEvents();
 }
 

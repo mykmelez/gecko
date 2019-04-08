@@ -52,7 +52,6 @@
 #include "mozilla/dom/indexedDB/PBackgroundIDBTransactionParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBVersionChangeTransactionParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIndexedDBUtilsParent.h"
-#include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestParent.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamParent.h"
 #include "mozilla/dom/quota/Client.h"
@@ -75,6 +74,7 @@
 #include "nsCOMPtr.h"
 #include "nsDataHashtable.h"
 #include "nsEscape.h"
+#include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
 #include "nsNetUtil.h"
 #include "nsIAsyncInputStream.h"
@@ -273,6 +273,20 @@ const char kPrefFileHandleEnabled[] = "dom.fileHandle.enabled";
 #define IDB_DELETION_MARKER_FILE_PREFIX "idb-deleting-"
 
 const uint32_t kDeleteTimeoutMs = 1000;
+
+/**
+ * Automatically crash the browser if IndexedDB shutdown takes this long.  We've
+ * chosen a value that is longer than the value for QuotaManager shutdown timer
+ * which is currently set to 30 seconds.  We've also chosen a value that is long
+ * long enough that it is unlikely for the problem to be falsely triggered by
+ * slow system I/O.  We've also chosen a value long enough so that automated
+ * tests should time out and fail if IndexedDB shutdown hangs.  Also, this value
+ * is long enough so that testers can notice the IndexedDB shutdown hang; we
+ * want to know about the hangs, not hide them.  On the other hand this value is
+ * less than 60 seconds which is used by nsTerminator to crash a hung main
+ * process.
+ */
+#define SHUTDOWN_TIMEOUT_MS 50000
 
 #ifdef DEBUG
 
@@ -7667,24 +7681,6 @@ class GetFileReferencesHelper final : public Runnable {
   NS_DECL_NSIRUNNABLE
 };
 
-class PermissionRequestHelper final : public PermissionRequestBase,
-                                      public PIndexedDBPermissionRequestParent {
-  bool mActorDestroyed;
-
- public:
-  PermissionRequestHelper(Element* aOwnerElement, nsIPrincipal* aPrincipal)
-      : PermissionRequestBase(aOwnerElement, aPrincipal),
-        mActorDestroyed(false) {}
-
- protected:
-  ~PermissionRequestHelper() override = default;
-
- private:
-  void OnPromptComplete(PermissionValue aPermissionValue) override;
-
-  void ActorDestroy(ActorDestroyReason aWhy) override;
-};
-
 /*******************************************************************************
  * Other class declarations
  ******************************************************************************/
@@ -7838,6 +7834,8 @@ class QuotaClient final : public mozilla::dom::quota::Client {
 
   nsresult UpgradeStorageFrom1_0To2_0(nsIFile* aDirectory) override;
 
+  nsresult UpgradeStorageFrom2_1To2_2(nsIFile* aDirectory) override;
+
   nsresult InitOrigin(PersistenceType aPersistenceType,
                       const nsACString& aGroup, const nsACString& aOrigin,
                       const AtomicBool& aCanceled,
@@ -7866,6 +7864,8 @@ class QuotaClient final : public mozilla::dom::quota::Client {
 
  private:
   ~QuotaClient() override;
+
+  void ShutdownTimedOut();
 
   static void DeleteTimerCallback(nsITimer* aTimer, void* aClosure);
 
@@ -9208,46 +9208,6 @@ bool RecvFlushPendingFileDeletions() {
     }
   }
 
-  return true;
-}
-
-PIndexedDBPermissionRequestParent* AllocPIndexedDBPermissionRequestParent(
-    Element* aOwnerElement, nsIPrincipal* aPrincipal) {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  RefPtr<PermissionRequestHelper> actor =
-      new PermissionRequestHelper(aOwnerElement, aPrincipal);
-  return actor.forget().take();
-}
-
-bool RecvPIndexedDBPermissionRequestConstructor(
-    PIndexedDBPermissionRequestParent* aActor) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  auto* actor = static_cast<PermissionRequestHelper*>(aActor);
-
-  PermissionRequestBase::PermissionValue permission;
-  nsresult rv = actor->PromptIfNeeded(&permission);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-
-  if (permission != PermissionRequestBase::kPermissionPrompt) {
-    Unused << PIndexedDBPermissionRequestParent::Send__delete__(actor,
-                                                                permission);
-  }
-
-  return true;
-}
-
-bool DeallocPIndexedDBPermissionRequestParent(
-    PIndexedDBPermissionRequestParent* aActor) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aActor);
-
-  RefPtr<PermissionRequestHelper> actor =
-      dont_AddRef(static_cast<PermissionRequestHelper*>(aActor));
   return true;
 }
 
@@ -15751,8 +15711,18 @@ QuotaClient::~QuotaClient() {
 nsresult QuotaClient::AsyncDeleteFile(FileManager* aFileManager,
                                       int64_t aFileId) {
   AssertIsOnBackgroundThread();
-  MOZ_ASSERT(mDeleteTimer);
 
+  if (mShutdownRequested) {
+    // Whoops! We want to delete an IndexedDB disk-backed File but it's too late
+    // to actually delete the file! This means we're going to "leak" the file
+    // and leave it around when we shouldn't! (The file will stay around until
+    // next storage initialization is triggered when the app is started again).
+    // Fixing this is tracked by bug 1539377.
+
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(mDeleteTimer);
   MOZ_ALWAYS_SUCCEEDS(mDeleteTimer->Cancel());
 
   nsresult rv = mDeleteTimer->InitWithNamedFuncCallback(
@@ -15911,6 +15881,53 @@ nsresult QuotaClient::UpgradeStorageFrom1_0To2_0(nsIFile* aDirectory) {
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
+  }
+
+  return NS_OK;
+}
+
+nsresult QuotaClient::UpgradeStorageFrom2_1To2_2(nsIFile* aDirectory) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+
+  nsCOMPtr<nsIDirectoryEnumerator> entries;
+  nsresult rv = aDirectory->GetDirectoryEntries(getter_AddRefs(entries));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIFile> file;
+  while (NS_SUCCEEDED((rv = entries->GetNextFile(getter_AddRefs(file)))) &&
+         file) {
+    nsString leafName;
+    rv = file->GetLeafName(leafName);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    bool isDirectory;
+    rv = file->IsDirectory(&isDirectory);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    if (isDirectory) {
+      continue;
+    }
+
+    // It's reported that files ending with ".tmp" somehow live in the indexedDB
+    // directories in Bug 1503883. Such files shouldn't exist in the indexedDB
+    // directory so remove them in this upgrade.
+    if (StringEndsWith(leafName, NS_LITERAL_STRING(".tmp"))) {
+      rv = file->Remove(false);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+    }
+  }
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   return NS_OK;
@@ -16209,12 +16226,25 @@ void QuotaClient::ShutdownWorkThreads() {
 
   AbortOperations(VoidCString());
 
+  nsCOMPtr<nsITimer> timer = NS_NewTimer();
+
+  MOZ_ALWAYS_SUCCEEDS(timer->InitWithNamedFuncCallback(
+      [](nsITimer* aTimer, void* aClosure) {
+        auto quotaClient = static_cast<QuotaClient*>(aClosure);
+
+        quotaClient->ShutdownTimedOut();
+      },
+      this, SHUTDOWN_TIMEOUT_MS, nsITimer::TYPE_ONE_SHOT,
+      "indexeddb::QuotaClient::ShutdownWorkThreads::SpinEventLoopTimer"));
+
   // This should release any IDB related quota objects or directory locks.
   MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() {
     return (!gFactoryOps || gFactoryOps->IsEmpty()) &&
            (!gLiveDatabaseHashtable || !gLiveDatabaseHashtable->Count()) &&
            !mCurrentMaintenance;
   }));
+
+  MOZ_ALWAYS_SUCCEEDS(timer->Cancel());
 
   // And finally, shutdown all threads.
   RefPtr<ConnectionPool> connectionPool = gConnectionPool.get();
@@ -16241,6 +16271,37 @@ void QuotaClient::ShutdownWorkThreads() {
     MOZ_ALWAYS_SUCCEEDS(mDeleteTimer->Cancel());
     mDeleteTimer = nullptr;
   }
+}
+
+void QuotaClient::ShutdownTimedOut() {
+  AssertIsOnBackgroundThread();
+  MOZ_DIAGNOSTIC_ASSERT(
+      (gFactoryOps && !gFactoryOps->IsEmpty()) ||
+      (gLiveDatabaseHashtable && gLiveDatabaseHashtable->Count()) ||
+      mCurrentMaintenance);
+
+  nsCString data;
+
+  if (gFactoryOps && !gFactoryOps->IsEmpty()) {
+    data.Append("gFactoryOps: ");
+    data.AppendInt(static_cast<uint32_t>(gFactoryOps->Length()));
+    data.Append("\n");
+  }
+
+  if (gLiveDatabaseHashtable && gLiveDatabaseHashtable->Count()) {
+    data.Append("gLiveDatabaseHashtable: ");
+    data.AppendInt(gLiveDatabaseHashtable->Count());
+    data.Append("\n");
+  }
+
+  if (mCurrentMaintenance) {
+    data.Append("mCurrentMaintenance\n");
+  }
+
+  CrashReporter::AnnotateCrashReport(
+      CrashReporter::Annotation::IndexedDBShutdownTimeout, data);
+
+  MOZ_CRASH("IndexedDB shutdown timed out");
 }
 
 void QuotaClient::DeleteTimerCallback(nsITimer* aTimer, void* aClosure) {
@@ -21623,32 +21684,38 @@ void TransactionDatabaseOperationBase::SendPreprocessInfoOrResults(
   MOZ_ASSERT(mTransaction);
 
   if (NS_WARN_IF(IsActorDestroyed())) {
-    // Don't send any notifications if the actor was destroyed already.
+    // Normally we wouldn't need to send any notifications if the actor was
+    // already destroyed, but this can be a VersionChangeOp which needs to
+    // notify its parent operation (OpenDatabaseOp) about the failure.
+    // So SendFailureResult needs to be called even when the actor was
+    // destroyed.  Normal operations redundantly check if the actor was
+    // destroyed in SendSuccessResult and SendFailureResult, therefore it's
+    // ok to call it in all cases here.
     if (NS_SUCCEEDED(mResultCode)) {
       IDB_REPORT_INTERNAL_ERR();
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-  } else {
-    if (mTransaction->IsInvalidated() || mTransaction->IsAborted()) {
-      // Aborted transactions always see their requests fail with ABORT_ERR,
-      // even if the request succeeded or failed with another error.
-      mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
-    } else if (NS_SUCCEEDED(mResultCode)) {
-      if (aSendPreprocessInfo) {
-        // This should not release the IPDL reference.
-        mResultCode = SendPreprocessInfo();
-      } else {
-        // This may release the IPDL reference.
-        mResultCode = SendSuccessResult();
-      }
-    }
+  } else if (mTransaction->IsInvalidated() || mTransaction->IsAborted()) {
+    // Aborted transactions always see their requests fail with ABORT_ERR,
+    // even if the request succeeded or failed with another error.
+    mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
+  }
 
-    if (NS_FAILED(mResultCode)) {
-      // This should definitely release the IPDL reference.
-      if (!SendFailureResult(mResultCode)) {
-        // Abort the transaction.
-        mTransaction->Abort(mResultCode, /* aForce */ false);
-      }
+  if (NS_SUCCEEDED(mResultCode)) {
+    if (aSendPreprocessInfo) {
+      // This should not release the IPDL reference.
+      mResultCode = SendPreprocessInfo();
+    } else {
+      // This may release the IPDL reference.
+      mResultCode = SendSuccessResult();
+    }
+  }
+
+  if (NS_FAILED(mResultCode)) {
+    // This should definitely release the IPDL reference.
+    if (!SendFailureResult(mResultCode)) {
+      // Abort the transaction.
+      mTransaction->Abort(mResultCode, /* aForce */ false);
     }
   }
 
@@ -24010,7 +24077,10 @@ nsresult ObjectStoreAddOrPutRequestOp::DoDatabaseWork(
     nsCString flatCloneData;
     flatCloneData.SetLength(cloneDataSize);
     auto iter = cloneData.Start();
-    cloneData.ReadBytes(iter, flatCloneData.BeginWriting(), cloneDataSize);
+    if (NS_WARN_IF(!cloneData.ReadBytes(iter, flatCloneData.BeginWriting(),
+                                        cloneDataSize))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     // Compress the bytes before adding into the database.
     const char* uncompressed = flatCloneData.BeginReading();
@@ -24249,7 +24319,10 @@ ObjectStoreAddOrPutRequestOp::SCInputStream::ReadSegments(
     *_retval += count;
     aCount -= count;
 
-    mData.Advance(mIter, count);
+    if (NS_WARN_IF(!mData.Advance(mIter, count))) {
+      // InputStreams do not propagate errors to caller.
+      return NS_OK;
+    }
   }
 
   return NS_OK;
@@ -26562,17 +26635,7 @@ void PermissionRequestHelper::OnPromptComplete(
     PermissionValue aPermissionValue) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!mActorDestroyed) {
-    Unused << PIndexedDBPermissionRequestParent::Send__delete__(
-        this, aPermissionValue);
-  }
-}
-
-void PermissionRequestHelper::ActorDestroy(ActorDestroyReason aWhy) {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!mActorDestroyed);
-
-  mActorDestroyed = true;
+  mResolver(aPermissionValue);
 }
 
 #ifdef DEBUG

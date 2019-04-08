@@ -24,6 +24,7 @@
 #include "nsNetUtil.h"
 #include "nsIConsoleService.h"
 #include "nsIObserverService.h"
+#include "nsIPresShellInlines.h"
 #include "nsLayoutStatics.h"
 #include "nsLayoutUtils.h"
 
@@ -36,14 +37,18 @@ nsStyleSheetService::nsStyleSheetService() {
                 "Convention for Style Sheet");
   NS_ASSERTION(!gInstance,
                "Someone is using CreateInstance instead of GetService");
-  gInstance = this;
+  if (!gInstance) {
+    gInstance = this;
+  }
   nsLayoutStatics::AddRef();
 }
 
 nsStyleSheetService::~nsStyleSheetService() {
   UnregisterWeakMemoryReporter(this);
 
-  gInstance = nullptr;
+  if (gInstance == this) {
+    gInstance = nullptr;
+  }
   nsLayoutStatics::Release();
 }
 

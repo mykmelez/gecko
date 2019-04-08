@@ -206,14 +206,16 @@ nsresult PopulateContentSecurityPolicies(
 }
 
 nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
-                                  PrincipalInfo* aPrincipalInfo) {
+                                  PrincipalInfo* aPrincipalInfo,
+                                  bool aSkipBaseDomain) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aPrincipalInfo);
 
+  nsresult rv;
   if (aPrincipal->GetIsNullPrincipal()) {
     nsCOMPtr<nsIURI> uri;
-    nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
+    rv = aPrincipal->GetURI(getter_AddRefs(uri));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -233,19 +235,7 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIScriptSecurityManager> secMan =
-      nsContentUtils::GetSecurityManager();
-  if (!secMan) {
-    return NS_ERROR_FAILURE;
-  }
-
-  bool isSystemPrincipal;
-  nsresult rv = secMan->IsSystemPrincipal(aPrincipal, &isSystemPrincipal);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (isSystemPrincipal) {
+  if (aPrincipal->IsSystemPrincipal()) {
     *aPrincipalInfo = SystemPrincipalInfo();
     return NS_OK;
   }
@@ -259,7 +249,7 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
     PrincipalInfo info;
 
     for (auto& prin : expanded->AllowList()) {
-      rv = PrincipalToPrincipalInfo(prin, &info);
+      rv = PrincipalToPrincipalInfo(prin, &info, aSkipBaseDomain);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -324,9 +314,13 @@ nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
 
   // This attribute is not crucial.
   nsCString baseDomain;
-  if (NS_FAILED(aPrincipal->GetBaseDomain(baseDomain))) {
-    NS_WARNING("Failed to get base domain!");
+  if (aSkipBaseDomain) {
     baseDomain.SetIsVoid(true);
+  } else {
+    if (NS_FAILED(aPrincipal->GetBaseDomain(baseDomain))) {
+      NS_WARNING("Failed to get base domain!");
+      baseDomain.SetIsVoid(true);
+    }
   }
 
   *aPrincipalInfo =

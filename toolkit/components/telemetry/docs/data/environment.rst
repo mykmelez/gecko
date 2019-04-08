@@ -99,6 +99,7 @@ Structure:
         memoryMB: <number>,
         virtualMaxMB: <number>, // windows-only
         isWow64: <bool>, // windows-only
+	isWowARM64: <bool>, // windows-only
         cpu: {
             count: <number>,  // desktop only, e.g. 8, or null on failure - logical cpus
             cores: <number>, // desktop only, e.g., 4, or null on failure - physical cores
@@ -152,7 +153,6 @@ Structure:
         gfx: {
             D2DEnabled: <bool>, // null on failure
             DWriteEnabled: <bool>, // null on failure
-            LowEndMachine: <bool>, // whether we're adjusting to being on low-spec hardware
             //DWriteVersion: <string>, // temporarily removed, pending bug 1154500
             adapters: [
               {
@@ -276,7 +276,6 @@ Structure:
             },
             ...
         },
-        persona: <string>, // id of the current persona
       },
       experiments: {
         "<experiment id>": { branch: "<branch>" },
@@ -465,6 +464,10 @@ For each experiment we collect the ``id`` and the ``branch`` the client is enrol
 
 Version History
 ---------------
+
+- Firefox 67:
+
+  - Removed ``persona``. The ``addons.activeAddons`` list should be used instead. (`bug 1525511 https://bugzilla.mozilla.org/show_bug.cgi?id=1525511>`_)
 
 - Firefox 61:
 

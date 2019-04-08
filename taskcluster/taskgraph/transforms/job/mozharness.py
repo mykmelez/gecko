@@ -27,6 +27,10 @@ from taskgraph.transforms.job.common import (
     generic_worker_hg_commands,
     support_vcs_checkout,
 )
+from taskgraph.transforms.task import (
+    get_branch_repo,
+    get_branch_rev,
+)
 
 mozharness_run_schema = Schema({
     Required('using'): 'mozharness',
@@ -167,7 +171,8 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
         'MOZHARNESS_CONFIG': ' '.join(run['config']),
         'MOZHARNESS_SCRIPT': run['script'],
         'MH_BRANCH': config.params['project'],
-        'MOZ_SOURCE_CHANGESET': env['GECKO_HEAD_REV'],
+        'MOZ_SOURCE_CHANGESET': get_branch_rev(config),
+        'MOZ_SOURCE_REPO': get_branch_repo(config),
         'MH_BUILD_POOL': 'taskcluster',
         'MOZ_BUILD_DATE': config.params['moz_build_date'],
         'MOZ_SCM_LEVEL': config.params['level'],
@@ -195,9 +200,6 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     if config.params.is_try():
         env['TRY_COMMIT_MSG'] = config.params['message']
-
-    if run['comm-checkout']:
-        env['MOZ_SOURCE_CHANGESET'] = env['COMM_HEAD_REV']
 
     # if we're not keeping artifacts, set some env variables to empty values
     # that will cause the build process to skip copying the results to the
@@ -277,7 +279,8 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         'MOZ_SCM_LEVEL': config.params['level'],
         'MOZ_AUTOMATION': '1',
         'MH_BRANCH': config.params['project'],
-        'MOZ_SOURCE_CHANGESET': env['GECKO_HEAD_REV'],
+        'MOZ_SOURCE_CHANGESET': get_branch_rev(config),
+        'MOZ_SOURCE_REPO': get_branch_repo(config),
     })
     if run['use-simple-package']:
         env.update({'MOZ_SIMPLE_PACKAGE_NAME': 'target'})
@@ -292,24 +295,24 @@ def mozharness_on_generic_worker(config, job, taskdesc):
     if config.params.is_try():
         env['TRY_COMMIT_MSG'] = config.params['message'] or 'no commit message'
 
-    if run['comm-checkout']:
-        env['MOZ_SOURCE_CHANGESET'] = env['COMM_HEAD_REV']
-
     if not job['attributes']['build_platform'].startswith('win'):
         raise Exception(
             "Task generation for mozharness build jobs currently only supported on Windows"
         )
 
-    mh_command = [r'c:\mozilla-build\python\python.exe']
-    mh_command.append('\\'.join([r'.\build\src\testing', run['script'].replace('/', '\\')]))
+    gecko = env['GECKO_PATH'].replace('.', '%cd%')
+    mh_command = [
+            'c:/mozilla-build/python/python.exe',
+            '{}/mach'.format(gecko), 'python',
+    ]
+    mh_command.append('/'.join([gecko, 'testing', run['script']]))
 
     if 'config-paths' in run:
         for path in run['config-paths']:
-            mh_command.append(r'--extra-config-path '
-                              r'.\build\src\{}'.format(path.replace('/', '\\')))
+            mh_command.append('--extra-config-path {}/{}'.format(gecko, path))
 
     for cfg in run['config']:
-        mh_command.append('--config ' + cfg.replace('/', '\\'))
+        mh_command.append('--config ' + cfg)
     if run['use-magic-mh-args']:
         mh_command.append('--branch ' + config.params['project'])
     mh_command.append(r'--work-dir %cd:Z:=z:%\build')

@@ -28,7 +28,10 @@ from taskgraph.util.schema import (
     optionally_keyed_by,
     Schema,
 )
-from taskgraph.util.taskcluster import get_artifact_path
+from taskgraph.util.taskcluster import (
+    get_artifact_path,
+    get_index_url,
+)
 from mozbuild.schedules import INCLUSIVE_COMPONENTS
 
 from taskgraph.util.perfile import perfile_number_of_chunks
@@ -63,6 +66,11 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows7-32-nightly': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
+    'windows7-32-shippable': {
       'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -102,6 +110,11 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
+    'windows10-64-shippable': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
     'windows10-64-asan': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
@@ -113,6 +126,11 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-pgo-qr': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
+    'windows10-64-shippable-qr': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -314,6 +332,7 @@ test_description_schema = Schema({
         # the artifact name (including path) to test on the build task; this is
         # generally set in a per-kind transformation
         Optional('build-artifact-name'): basestring,
+        Optional('installer-url'): basestring,
 
         # If not false, tooltool downloads will be enabled via relengAPIProxy
         # for either just public files, or all files.  Not supported on Windows
@@ -426,7 +445,7 @@ test_description_schema = Schema({
     # or target.zip (Windows).
     Optional('target'): optionally_keyed_by(
         'test-platform',
-        Any(basestring, None),
+        Any(basestring, None, {'index': basestring, 'name': basestring}),
     ),
 
     # A list of artifacts to install from 'fetch' tasks.
@@ -455,15 +474,13 @@ def set_defaults(config, tests):
             # all Android test tasks download internal objects from tooltool
             test['mozharness']['tooltool-downloads'] = 'internal'
             test['mozharness']['actions'] = ['get-secrets']
-            # Fennec is non-e10s; geckoview handled in set_target
-            test['e10s'] = False
+
             # loopback-video is always true for Android, but false for other
             # platform phyla
             test['loopback-video'] = True
         else:
             # all non-android tests want to run the bits that require node
             test['mozharness']['set-moz-node-path'] = True
-            test.setdefault('e10s', True)
 
         # software-gl-layers is only meaningful on linux unittests, where it defaults to True
         if test['test-platform'].startswith('linux') and test['suite'] not in ['talos', 'raptor']:
@@ -480,8 +497,8 @@ def set_defaults(config, tests):
         else:
             test.setdefault('webrender', False)
 
+        test.setdefault('e10s', True)
         test.setdefault('try-name', test['test-name'])
-
         test.setdefault('os-groups', [])
         test.setdefault('run-as-administrator', False)
         test.setdefault('chunks', 1)
@@ -578,8 +595,6 @@ def set_target(config, tests):
         if 'target' in test:
             resolve_keyed_by(test, 'target', item_name=test['test-name'])
             target = test['target']
-            if target and 'geckoview' in target:
-                test['e10s'] = True
         if not target:
             if build_platform.startswith('macosx'):
                 target = 'target.dmg'
@@ -589,7 +604,14 @@ def set_target(config, tests):
                 target = 'target.zip'
             else:
                 target = 'target.tar.bz2'
-        test['mozharness']['build-artifact-name'] = get_artifact_path(test, target)
+
+        if isinstance(target, dict):
+            # TODO Remove hardcoded mobile artifact prefix
+            index_url = get_index_url(target['index'])
+            installer_url = '{}/artifacts/public/{}'.format(index_url, target['name'])
+            test['mozharness']['installer-url'] = installer_url
+        else:
+            test['mozharness']['build-artifact-name'] = get_artifact_path(test, target)
 
         yield test
 
@@ -604,6 +626,7 @@ def set_treeherder_machine_platform(config, tests):
         'linux64-pgo/opt': 'linux64/pgo',
         'macosx64/debug': 'osx-10-10/debug',
         'macosx64/opt': 'osx-10-10/opt',
+        'macosx64-shippable/opt': 'osx-10-10-shippable/opt',
         'win64-asan/opt': 'windows10-64/asan',
         'win64-aarch64/opt': 'windows10-aarch64/opt',
         'win32-pgo/opt': 'windows7-32/pgo',
@@ -613,7 +636,7 @@ def set_treeherder_machine_platform(config, tests):
         'android-api-16/debug': 'android-em-4-3-armv7-api16/debug',
         'android-api-16-ccov/debug': 'android-em-4-3-armv7-api16-ccov/debug',
         'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
-        'android-api-16-pgo/opt': 'android-em-4-3-armv7-api16-pgo/opt',
+        'android-api-16-pgo/opt': 'android-em-4-3-armv7-api16/pgo',
         'android-x86/opt': 'android-em-4-2-x86/opt',
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
     }
@@ -625,7 +648,10 @@ def set_treeherder_machine_platform(config, tests):
         # platform based on regular macOS builds, such as for QR.
         # Since it's unclear if the regular macOS builds can be removed from
         # the table, workaround the issue for QR.
-        if '-qr' in test['test-platform']:
+        if 'android' in test['test-platform'] and 'pgo/opt' in test['test-platform']:
+            platform_new = test['test-platform'].replace('-pgo/opt', '/pgo')
+            test['treeherder-machine-platform'] = platform_new
+        elif '-qr' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
         elif 'android-hw' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
@@ -655,39 +681,47 @@ def set_tier(config, tests):
                                          'linux32/debug',
                                          'linux32-nightly/opt',
                                          'linux32-devedition/opt',
+                                         'linux32-shippable/opt',
                                          'linux64/opt',
                                          'linux64-nightly/opt',
                                          'linux64/debug',
                                          'linux64-pgo/opt',
+                                         'linux64-shippable/opt',
                                          'linux64-devedition/opt',
                                          'linux64-asan/opt',
                                          'linux64-qr/opt',
                                          'linux64-qr/debug',
                                          'linux64-pgo-qr/opt',
+                                         'linux64-shippable-qr/opt',
                                          'windows7-32/debug',
                                          'windows7-32/opt',
                                          'windows7-32-pgo/opt',
                                          'windows7-32-devedition/opt',
                                          'windows7-32-nightly/opt',
+                                         'windows7-32-shippable/opt',
                                          'windows10-aarch64/opt',
                                          'windows10-64/debug',
                                          'windows10-64/opt',
                                          'windows10-64-pgo/opt',
+                                         'windows10-64-shippable/opt',
                                          'windows10-64-devedition/opt',
                                          'windows10-64-nightly/opt',
                                          'windows10-64-asan/opt',
                                          'windows10-64-qr/opt',
                                          'windows10-64-qr/debug',
                                          'windows10-64-pgo-qr/opt',
+                                         'windows10-64-shippable-qr/opt',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',
+                                         'macosx64-shippable/opt',
                                          'macosx64-devedition/opt',
                                          'macosx64-qr/opt',
+                                         'macosx64-shippable-qr/opt',
                                          'macosx64-qr/debug',
                                          'android-em-4.3-arm7-api-16/opt',
                                          'android-em-4.3-arm7-api-16/debug',
-                                         'android-em-4.3-arm7-api-16-pgo/opt',
+                                         'android-em-4.3-arm7-api-16/pgo',
                                          'android-em-4.2-x86/opt',
                                          'android-em-7.0-x86_64/opt',
                                          'android-em-7.0-x86_64/debug',
@@ -790,6 +824,43 @@ def handle_suite_category(config, tests):
             if not any(arg.startswith(category_arg) for arg in extra):
                 extra.append('{}={}'.format(category_arg, flavor))
 
+        yield test
+
+
+def get_mobile_project(test):
+    """Returns the mobile project of the specified task or None."""
+
+    if not test['build-platform'].startswith('android'):
+        return
+
+    mobile_projects = (
+        'fennec',
+        'geckoview',
+        'refbrow',
+    )
+
+    for name in mobile_projects:
+        if name in test['test-name']:
+            return name
+
+    target = test.get('target')
+    if target:
+        if isinstance(target, dict):
+            target = target['name']
+
+        for name in mobile_projects:
+            if name in target:
+                return name
+
+    return 'fennec'
+
+
+@transforms.add
+def disable_fennec_e10s(config, tests):
+    for test in tests:
+        if get_mobile_project(test) == 'fennec':
+            # Fennec is non-e10s
+            test['e10s'] = False
         yield test
 
 

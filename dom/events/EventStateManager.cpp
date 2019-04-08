@@ -13,6 +13,8 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
@@ -46,7 +48,6 @@
 #include "nsITextControlElement.h"
 #include "nsIWidget.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "nsGkAtoms.h"
 #include "nsIFormControl.h"
 #include "nsComboboxControlFrame.h"
@@ -750,10 +751,12 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       DeltaAccumulator::GetInstance()->InitLineOrPageDelta(aTargetFrame, this,
                                                            wheelEvent);
     } break;
-    case eSetSelection:
-      IMEStateManager::HandleSelectionEvent(aPresContext, GetFocusedContent(),
+    case eSetSelection: {
+      nsCOMPtr<nsIContent> focusedContent = GetFocusedContent();
+      IMEStateManager::HandleSelectionEvent(aPresContext, focusedContent,
                                             aEvent->AsSelectionEvent());
       break;
+    }
     case eContentCommandCut:
     case eContentCommandCopy:
     case eContentCommandPaste:
@@ -852,9 +855,9 @@ void EventStateManager::NotifyTargetUserActivation(WidgetEvent* aEvent,
 already_AddRefed<EventStateManager> EventStateManager::ESMFromContentOrThis(
     nsIContent* aContent) {
   if (aContent) {
-    nsIPresShell* shell = aContent->OwnerDoc()->GetShell();
-    if (shell) {
-      nsPresContext* prescontext = shell->GetPresContext();
+    PresShell* presShell = aContent->OwnerDoc()->GetPresShell();
+    if (presShell) {
+      nsPresContext* prescontext = presShell->GetPresContext();
       if (prescontext) {
         RefPtr<EventStateManager> esm = prescontext->EventStateManager();
         if (esm) {
@@ -1234,7 +1237,7 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
     }
     // else there is a race between APZ and the LayersId to TabParent mapping,
     // so fall back to delivering the event to the topmost child process.
-  } else {
+  } else if (aEvent->mClass == eKeyboardEventClass) {
     // APZ attaches a LayersId to hit-testable events, for keyboard events,
     // we use focus.
     TabParent* preciseRemote = TabParent::GetFocused();
@@ -1293,7 +1296,9 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       remote->SendPluginEvent(*aEvent->AsPluginEvent());
       return;
     }
-    default: { MOZ_CRASH("Attempt to send non-whitelisted event?"); }
+    default: {
+      MOZ_CRASH("Attempt to send non-whitelisted event?");
+    }
   }
 }
 
@@ -1651,10 +1656,11 @@ void EventStateManager::FillInEventFromGestureDown(WidgetMouseEvent* aEvent) {
 }
 
 void EventStateManager::MaybeFirePointerCancel(WidgetInputEvent* aEvent) {
-  nsCOMPtr<nsIPresShell> shell = mPresContext->GetPresShell();
+  RefPtr<PresShell> presShell = mPresContext->GetPresShell();
   AutoWeakFrame targetFrame = mCurrentTarget;
 
-  if (!PointerEventHandler::IsPointerEventEnabled() || !shell || !targetFrame) {
+  if (!PointerEventHandler::IsPointerEventEnabled() || !presShell ||
+      !targetFrame) {
     return;
   }
 
@@ -1672,7 +1678,7 @@ void EventStateManager::MaybeFirePointerCancel(WidgetInputEvent* aEvent) {
                                                    ePointerCancel);
 
     event.convertToPointer = false;
-    shell->HandleEventWithTarget(&event, targetFrame, content, &status);
+    presShell->HandleEventWithTarget(&event, targetFrame, content, &status);
   } else if (WidgetTouchEvent* aTouchEvent = aEvent->AsTouchEvent()) {
     WidgetPointerEvent event(aTouchEvent->IsTrusted(), ePointerCancel,
                              aTouchEvent->mWidget);
@@ -1681,7 +1687,7 @@ void EventStateManager::MaybeFirePointerCancel(WidgetInputEvent* aEvent) {
         &event, aTouchEvent, aTouchEvent->mTouches[0], true);
 
     event.convertToPointer = false;
-    shell->HandleEventWithTarget(&event, targetFrame, content, &status);
+    presShell->HandleEventWithTarget(&event, targetFrame, content, &status);
   } else {
     MOZ_ASSERT(false);
   }
@@ -2655,25 +2661,25 @@ void EventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
   bool isDeltaModePixel =
       (aEvent->mDeltaMode == WheelEvent_Binding::DOM_DELTA_PIXEL);
 
-  nsIScrollableFrame::ScrollMode mode;
+  ScrollMode mode;
   switch (aEvent->mScrollType) {
     case WidgetWheelEvent::SCROLL_DEFAULT:
       if (isDeltaModePixel) {
-        mode = nsIScrollableFrame::NORMAL;
+        mode = ScrollMode::eNormal;
       } else if (aEvent->mFlags.mHandledByAPZ) {
-        mode = nsIScrollableFrame::SMOOTH_MSD;
+        mode = ScrollMode::eSmoothMsd;
       } else {
-        mode = nsIScrollableFrame::SMOOTH;
+        mode = ScrollMode::eSmooth;
       }
       break;
     case WidgetWheelEvent::SCROLL_SYNCHRONOUSLY:
-      mode = nsIScrollableFrame::INSTANT;
+      mode = ScrollMode::eInstant;
       break;
     case WidgetWheelEvent::SCROLL_ASYNCHRONOUSELY:
-      mode = nsIScrollableFrame::NORMAL;
+      mode = ScrollMode::eNormal;
       break;
     case WidgetWheelEvent::SCROLL_SMOOTHLY:
-      mode = nsIScrollableFrame::SMOOTH;
+      mode = ScrollMode::eSmooth;
       break;
     default:
       MOZ_CRASH("Invalid mScrollType value comes");
@@ -3236,9 +3242,8 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             esm->PostHandleMouseUp(mouseUpEvent, aStatus, aOverrideClickTarget);
       }
 
-      nsIPresShell* shell = presContext->GetPresShell();
-      if (shell) {
-        RefPtr<nsFrameSelection> frameSelection = shell->FrameSelection();
+      if (PresShell* presShell = presContext->GetPresShell()) {
+        RefPtr<nsFrameSelection> frameSelection = presShell->FrameSelection();
         frameSelection->SetDragState(false);
       }
     } break;
@@ -4299,9 +4304,9 @@ void EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
   if (Document* parentDoc = mDocument->GetParentDocument()) {
     if (nsCOMPtr<nsIContent> docContent =
             parentDoc->FindContentForSubDocument(mDocument)) {
-      if (nsIPresShell* parentShell = parentDoc->GetShell()) {
+      if (PresShell* parentPresShell = parentDoc->GetPresShell()) {
         RefPtr<EventStateManager> parentESM =
-            parentShell->GetPresContext()->EventStateManager();
+            parentPresShell->GetPresContext()->EventStateManager();
         parentESM->NotifyMouseOver(aMouseEvent, docContent);
       }
     }
@@ -4898,7 +4903,7 @@ nsresult EventStateManager::PostHandleMouseUp(
   MOZ_ASSERT(EventCausesClickEvents(*aMouseUpEvent));
   MOZ_ASSERT(aStatus);
 
-  nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
+  RefPtr<PresShell> presShell = mPresContext->GetPresShell();
   if (!presShell) {
     return NS_OK;
   }
@@ -5112,9 +5117,9 @@ nsresult EventStateManager::HandleMiddleClickPaste(
 }
 
 nsIFrame* EventStateManager::GetEventTarget() {
-  nsIPresShell* shell;
+  PresShell* presShell;
   if (mCurrentTarget || !mPresContext ||
-      !(shell = mPresContext->GetPresShell())) {
+      !(presShell = mPresContext->GetPresShell())) {
     return mCurrentTarget;
   }
 
@@ -5125,7 +5130,7 @@ nsIFrame* EventStateManager::GetEventTarget() {
     }
   }
 
-  nsIFrame* frame = shell->GetCurrentEventFrame();
+  nsIFrame* frame = presShell->GetCurrentEventFrame();
   return (mCurrentTarget = frame);
 }
 
@@ -5142,9 +5147,7 @@ already_AddRefed<nsIContent> EventStateManager::GetEventTargetContent(
   }
 
   nsCOMPtr<nsIContent> content;
-
-  nsIPresShell* presShell = mPresContext->GetPresShell();
-  if (presShell) {
+  if (PresShell* presShell = mPresContext->GetPresShell()) {
     content = presShell->GetEventTargetContent(aEvent);
   }
 
@@ -5240,13 +5243,7 @@ void EventStateManager::UpdateAncestorState(nsIContent* aStartNode,
 
 bool EventStateManager::SetContentState(nsIContent* aContent,
                                         EventStates aState) {
-  // We manage 4 states here: ACTIVE, HOVER, DRAGOVER, URLTARGET
-  // The input must be exactly one of them.
-  MOZ_ASSERT(aState == NS_EVENT_STATE_ACTIVE ||
-                 aState == NS_EVENT_STATE_HOVER ||
-                 aState == NS_EVENT_STATE_DRAGOVER ||
-                 aState == NS_EVENT_STATE_URLTARGET,
-             "Unexpected state");
+  MOZ_ASSERT(ManagesState(aState), "Unexpected state");
 
   nsCOMPtr<nsIContent> notifyContent1;
   nsCOMPtr<nsIContent> notifyContent2;
@@ -5493,10 +5490,9 @@ void EventStateManager::EnsureDocument(nsPresContext* aPresContext) {
 }
 
 void EventStateManager::FlushPendingEvents(nsPresContext* aPresContext) {
-  MOZ_ASSERT(nullptr != aPresContext, "nullptr ptr");
-  nsIPresShell* shell = aPresContext->GetPresShell();
-  if (shell) {
-    shell->FlushPendingNotifications(FlushType::InterruptibleLayout);
+  MOZ_ASSERT(aPresContext, "nullptr ptr");
+  if (RefPtr<PresShell> presShell = aPresContext->GetPresShell()) {
+    presShell->FlushPendingNotifications(FlushType::InterruptibleLayout);
   }
 }
 
@@ -5652,8 +5648,8 @@ nsresult EventStateManager::DoContentCommandEvent(
 nsresult EventStateManager::DoContentCommandScrollEvent(
     WidgetContentCommandEvent* aEvent) {
   NS_ENSURE_TRUE(mPresContext, NS_ERROR_NOT_AVAILABLE);
-  nsIPresShell* ps = mPresContext->GetPresShell();
-  NS_ENSURE_TRUE(ps, NS_ERROR_NOT_AVAILABLE);
+  PresShell* presShell = mPresContext->GetPresShell();
+  NS_ENSURE_TRUE(presShell, NS_ERROR_NOT_AVAILABLE);
   NS_ENSURE_TRUE(aEvent->mScroll.mAmount != 0, NS_ERROR_INVALID_ARG);
 
   nsIScrollableFrame::ScrollUnit scrollUnit;
@@ -5674,7 +5670,7 @@ nsresult EventStateManager::DoContentCommandScrollEvent(
   aEvent->mSucceeded = true;
 
   nsIScrollableFrame* sf =
-      ps->GetScrollableFrameToScroll(nsIPresShell::eEither);
+      presShell->GetScrollableFrameToScroll(nsIPresShell::eEither);
   aEvent->mIsEnabled =
       sf ? (aEvent->mScroll.mIsHorizontal ? WheelHandlingUtils::CanScrollOn(
                                                 sf, aEvent->mScroll.mAmount, 0)
@@ -5694,7 +5690,7 @@ nsresult EventStateManager::DoContentCommandScrollEvent(
   }
 
   // The caller may want synchronous scrolling.
-  sf->ScrollBy(pt, scrollUnit, nsIScrollableFrame::INSTANT);
+  sf->ScrollBy(pt, scrollUnit, ScrollMode::eInstant);
   return NS_OK;
 }
 

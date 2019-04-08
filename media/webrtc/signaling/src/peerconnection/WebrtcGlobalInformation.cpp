@@ -319,30 +319,32 @@ static void RunStatsQuery(
       if (pc.HasMedia()) {
         promises.AppendElement(
             pc.GetStats(nullptr, true)
-                ->Then(GetMainThreadSerialEventTarget(), __func__,
-                       [=](UniquePtr<RTCStatsQuery>&& aQuery) {
-                         return RTCStatsQueryPromise::CreateAndResolve(
-                             std::move(aQuery), __func__);
-                       },
-                       [=](nsresult aError) {
-                         // Ignore errors! Just resolve with a nullptr.
-                         return RTCStatsQueryPromise::CreateAndResolve(
-                             UniquePtr<RTCStatsQuery>(), __func__);
-                       }));
+                ->Then(
+                    GetMainThreadSerialEventTarget(), __func__,
+                    [=](UniquePtr<RTCStatsQuery>&& aQuery) {
+                      return RTCStatsQueryPromise::CreateAndResolve(
+                          std::move(aQuery), __func__);
+                    },
+                    [=](nsresult aError) {
+                      // Ignore errors! Just resolve with a nullptr.
+                      return RTCStatsQueryPromise::CreateAndResolve(
+                          UniquePtr<RTCStatsQuery>(), __func__);
+                    }));
       }
     }
   }
 
   RTCStatsQueryPromise::All(GetMainThreadSerialEventTarget(), promises)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aThisChild,
-              aRequestId](nsTArray<UniquePtr<RTCStatsQuery>>&& aQueries)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnStatsReport_m(aThisChild, aRequestId, std::move(aQueries));
-                 },
-             [=](nsresult) { MOZ_CRASH(); });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aThisChild,
+           aRequestId](nsTArray<UniquePtr<RTCStatsQuery>>&& aQueries)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnStatsReport_m(aThisChild, aRequestId, std::move(aQueries));
+              },
+          [=](nsresult) { MOZ_CRASH(); });
 }
 
 void ClearClosedStats() {
@@ -458,19 +460,20 @@ static nsresult RunLogQuery(const nsCString& aPattern,
               [transportHandler, aPattern]() {
                 return transportHandler->GetIceLog(aPattern);
               })
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aRequestId, aThisChild](Sequence<nsString>&& aLogLines)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnGetLogging_m(aThisChild, aRequestId, std::move(aLogLines));
-                 },
-             // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
-             // function async anyway.
-             [aRequestId, aThisChild](nsresult aError)
-                 MOZ_CAN_RUN_SCRIPT_BOUNDARY {
-                   OnGetLogging_m(aThisChild, aRequestId, Sequence<nsString>());
-                 });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aRequestId, aThisChild](Sequence<nsString>&& aLogLines)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnGetLogging_m(aThisChild, aRequestId, std::move(aLogLines));
+              },
+          // MOZ_CAN_RUN_SCRIPT_BOUNDARY because we're going to run that
+          // function async anyway.
+          [aRequestId, aThisChild](nsresult aError)
+              MOZ_CAN_RUN_SCRIPT_BOUNDARY {
+                OnGetLogging_m(aThisChild, aRequestId, Sequence<nsString>());
+              });
 
   return NS_OK;
 }
@@ -960,13 +963,12 @@ static void StoreLongTermICEStatisticsImpl_m(nsresult result,
 
   // Beyond ICE, accumulate telemetry for various PER_CALL settings here.
 
-  if (query->report->mOutboundRTPStreamStats.WasPassed()) {
-    auto& array = query->report->mOutboundRTPStreamStats.Value();
+  if (query->report->mOutboundRtpStreamStats.WasPassed()) {
+    auto& array = query->report->mOutboundRtpStreamStats.Value();
     for (decltype(array.Length()) i = 0; i < array.Length(); i++) {
       auto& s = array[i];
       bool isVideo = (s.mId.Value().Find("video") != -1);
-      bool isRemote = s.mType.Value() == dom::RTCStatsType::Remote_outbound_rtp;
-      if (!isVideo || isRemote) {
+      if (!isVideo) {
         continue;
       }
       if (s.mBitrateMean.WasPassed()) {
@@ -995,13 +997,12 @@ static void StoreLongTermICEStatisticsImpl_m(nsresult result,
     }
   }
 
-  if (query->report->mInboundRTPStreamStats.WasPassed()) {
-    auto& array = query->report->mInboundRTPStreamStats.Value();
+  if (query->report->mInboundRtpStreamStats.WasPassed()) {
+    auto& array = query->report->mInboundRtpStreamStats.Value();
     for (decltype(array.Length()) i = 0; i < array.Length(); i++) {
       auto& s = array[i];
       bool isVideo = (s.mId.Value().Find("video") != -1);
-      bool isRemote = s.mType.Value() == dom::RTCStatsType::Remote_inbound_rtp;
-      if (!isVideo || isRemote) {
+      if (!isVideo) {
         continue;
       }
       if (s.mBitrateMean.WasPassed()) {
@@ -1050,13 +1051,14 @@ void WebrtcGlobalInformation::StoreLongTermICEStatistics(
   }
 
   aPc.GetStats(nullptr, true)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [=](UniquePtr<RTCStatsQuery>&& aQuery) {
-               StoreLongTermICEStatisticsImpl_m(NS_OK, aQuery.get());
-             },
-             [=](nsresult aError) {
-               StoreLongTermICEStatisticsImpl_m(aError, nullptr);
-             });
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [=](UniquePtr<RTCStatsQuery>&& aQuery) {
+            StoreLongTermICEStatisticsImpl_m(NS_OK, aQuery.get());
+          },
+          [=](nsresult aError) {
+            StoreLongTermICEStatisticsImpl_m(aError, nullptr);
+          });
 }
 
 }  // namespace dom

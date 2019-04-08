@@ -21,6 +21,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"  // for PodZero
 #include "mozilla/Poison.h"
+#include "mozilla/PresShell.h"
 #include "nsAbsoluteContainingBlock.h"
 #include "nsAlgorithm.h"  // for clamped()
 #include "nsCSSAnonBoxes.h"
@@ -5718,8 +5719,6 @@ void nsGridContainerFrame::Reflow(nsPresContext* aPresContext,
     ::MergeSortedFrameLists(mFrames, items, GetContent());
   }
 
-  RenumberList();
-
 #ifdef DEBUG
   mDidPushItemsBitMayLie = false;
   SanityCheckGridItemsBeforeReflow();
@@ -6151,8 +6150,6 @@ void nsGridContainerFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
 nscoord nsGridContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
                                              IntrinsicISizeType aType) {
-  RenumberList();
-
   // Calculate the sum of column sizes under intrinsic sizing.
   // http://dev.w3.org/csswg/css-grid/#intrinsic-sizes
   GridReflowInput state(this, *aRenderingContext);
@@ -6514,12 +6511,13 @@ void nsGridContainerFrame::NoteNewChildren(ChildListID aListID,
   MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
 #endif
 
-  nsIPresShell* shell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   for (auto pif = GetPrevInFlow(); pif; pif = pif->GetPrevInFlow()) {
     if (aListID == kPrincipalList) {
       pif->AddStateBits(NS_STATE_GRID_DID_PUSH_ITEMS);
     }
-    shell->FrameNeedsReflow(pif, nsIPresShell::eTreeChange, NS_FRAME_IS_DIRTY);
+    presShell->FrameNeedsReflow(pif, nsIPresShell::eTreeChange,
+                                NS_FRAME_IS_DIRTY);
   }
 }
 
@@ -6742,11 +6740,11 @@ nsGridContainerFrame* nsGridContainerFrame::GetGridFrameWithComputedInfo(
       // Hold onto aFrame while we do this, in case reflow destroys it.
       AutoWeakFrame weakFrameRef(aFrame);
 
-      nsIPresShell* shell = gridFrame->PresShell();
+      mozilla::PresShell* presShell = gridFrame->PresShell();
       gridFrame->AddStateBits(NS_STATE_GRID_GENERATE_COMPUTED_VALUES);
-      shell->FrameNeedsReflow(gridFrame, nsIPresShell::eResize,
-                              NS_FRAME_IS_DIRTY);
-      shell->FlushPendingNotifications(FlushType::Layout);
+      presShell->FrameNeedsReflow(gridFrame, nsIPresShell::eResize,
+                                  NS_FRAME_IS_DIRTY);
+      presShell->FlushPendingNotifications(FlushType::Layout);
 
       // Since the reflow may have side effects, get the grid frame
       // again. But if the weakFrameRef is no longer valid, then we

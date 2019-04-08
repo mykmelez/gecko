@@ -395,7 +395,6 @@ class JS::Realm : public JS::shadow::Realm {
   friend class js::AutoRestoreRealmDebugMode;
 
   bool isSelfHostingRealm_ = false;
-  bool marked_ = true;
   bool isSystem_ = false;
 
  public:
@@ -438,7 +437,7 @@ class JS::Realm : public JS::shadow::Realm {
    */
   uint32_t globalWriteBarriered = 0;
 
-  uint32_t warnedAboutStringGenericsMethods = 0;
+  uint32_t warnedAboutArrayGenericsMethods = 0;
 #ifdef DEBUG
   bool firedOnNewGlobalObject = false;
 #endif
@@ -518,7 +517,7 @@ class JS::Realm : public JS::shadow::Realm {
   inline bool globalIsAboutToBeFinalized();
 
   /* True if a global exists and it's not being collected. */
-  inline bool hasLiveGlobal();
+  inline bool hasLiveGlobal() const;
 
   inline void initGlobal(js::GlobalObject& global);
 
@@ -635,9 +634,7 @@ class JS::Realm : public JS::shadow::Realm {
     realmStats_ = newStats;
   }
 
-  bool marked() const { return marked_; }
-  void mark() { marked_ = true; }
-  void unmark() { marked_ = false; }
+  inline bool marked() const;
 
   /*
    * The principals associated with this realm. Note that the same several

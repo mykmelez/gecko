@@ -11,7 +11,6 @@
 #include "nsIContent.h"
 #include "nsAtom.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "mozilla/ComputedStyle.h"
 #include "nsCSSRendering.h"
 #include "nsNameSpaceManager.h"
@@ -40,6 +39,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Services.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
@@ -269,6 +269,11 @@ void nsMenuFrame::SetInitialChildList(ChildListID aListID,
                                       nsFrameList& aChildList) {
   if (aListID == kPrincipalList || aListID == kPopupList) {
     NS_ASSERTION(!HasPopup(), "SetInitialChildList called twice?");
+#ifdef DEBUG
+    for (nsIFrame* f : aChildList) {
+      MOZ_ASSERT(f->GetParent() == this, "Unexpected parent");
+    }
+#endif
     SetPopupFrame(aChildList);
   }
   nsBoxFrame::SetInitialChildList(aListID, aChildList);

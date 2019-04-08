@@ -92,10 +92,8 @@ class CSSStyleSheet;
 
 // Forward declaration copied here since ServoBindings.h #includes nsCSSValue.h.
 extern "C" {
-RawGeckoURLExtraDataBorrowedMut Servo_CssUrlData_GetExtraData(
-    RawServoCssUrlDataBorrowed url);
-
-bool Servo_CssUrlData_IsLocalRef(RawServoCssUrlDataBorrowed url);
+mozilla::URLExtraData* Servo_CssUrlData_GetExtraData(const RawServoCssUrlData*);
+bool Servo_CssUrlData_IsLocalRef(const RawServoCssUrlData* url);
 }
 
 namespace mozilla {
@@ -242,7 +240,7 @@ struct GridTemplateAreasValue final {
 }  // namespace css
 }  // namespace mozilla
 
-enum nsCSSUnit {
+enum nsCSSUnit : uint32_t {
   eCSSUnit_Null = 0,     // (n/a) null unit, value is not specified
   eCSSUnit_Auto = 1,     // (n/a) value is algorithmic
   eCSSUnit_Inherit = 2,  // (n/a) value is inherited

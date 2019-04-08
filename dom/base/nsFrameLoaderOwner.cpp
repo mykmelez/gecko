@@ -33,14 +33,12 @@ void nsFrameLoaderOwner::ChangeRemoteness(
   mFrameLoader->LoadFrame(false);
 
   // Now that we've got a new FrameLoader, we need to reset our
-  // nsSubDocumentFrame use the new FrameLoader. We just unset the frameloader
-  // here, and expect that the subdocument frame will pick up the new
-  // frameloader lazily.
+  // nsSubDocumentFrame to use the new FrameLoader.
   nsIFrame* ourFrame = owner->GetPrimaryFrame();
   if (ourFrame) {
     nsSubDocumentFrame* ourFrameFrame = do_QueryFrame(ourFrame);
     if (ourFrameFrame) {
-      ourFrameFrame->UnsetFrameLoader();
+      ourFrameFrame->ResetFrameLoader();
     }
   }
 
@@ -50,6 +48,5 @@ void nsFrameLoaderOwner::ChangeRemoteness(
   // ChromeOnlyDispatch is turns on to make sure this isn't fired into content.
   (new AsyncEventDispatcher(owner, NS_LITERAL_STRING("XULFrameLoaderCreated"),
                             CanBubble::eYes, ChromeOnlyDispatch::eYes))
-    ->RunDOMEventWhenSafe();
-
+      ->RunDOMEventWhenSafe();
 }

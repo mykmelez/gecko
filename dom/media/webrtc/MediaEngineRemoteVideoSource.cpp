@@ -5,7 +5,6 @@
 
 #include "MediaEngineRemoteVideoSource.h"
 
-#include "AllocationHandle.h"
 #include "CamerasChild.h"
 #include "MediaManager.h"
 #include "MediaTrackConstraints.h"
@@ -100,13 +99,11 @@ void MediaEngineRemoteVideoSource::Shutdown() {
     return;
   }
 
-  // Allocate always returns a null AllocationHandle.
-  // We can safely pass nullptr here.
   if (mState == kStarted) {
-    Stop(nullptr);
+    Stop();
   }
   if (mState == kAllocated || mState == kStopped) {
-    Deallocate(nullptr);
+    Deallocate();
   }
   MOZ_ASSERT(mState == kReleased);
 
@@ -197,7 +194,7 @@ nsresult MediaEngineRemoteVideoSource::Allocate(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
     const nsString& aDeviceId,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-    AllocationHandle** aOutHandle, const char** aOutBadConstraint) {
+    const char** aOutBadConstraint) {
   LOG(__PRETTY_FUNCTION__);
   AssertIsOnOwningThread();
 
@@ -225,8 +222,6 @@ nsresult MediaEngineRemoteVideoSource::Allocate(
     return NS_ERROR_FAILURE;
   }
 
-  *aOutHandle = nullptr;
-
   {
     MutexAutoLock lock(mMutex);
     mState = kAllocated;
@@ -237,8 +232,7 @@ nsresult MediaEngineRemoteVideoSource::Allocate(
   return NS_OK;
 }
 
-nsresult MediaEngineRemoteVideoSource::Deallocate(
-    const RefPtr<const AllocationHandle>& aHandle) {
+nsresult MediaEngineRemoteVideoSource::Deallocate() {
   LOG(__PRETTY_FUNCTION__);
   AssertIsOnOwningThread();
 
@@ -273,7 +267,6 @@ nsresult MediaEngineRemoteVideoSource::Deallocate(
 }
 
 void MediaEngineRemoteVideoSource::SetTrack(
-    const RefPtr<const AllocationHandle>& aHandle,
     const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
     const PrincipalHandle& aPrincipal) {
   LOG(__PRETTY_FUNCTION__);
@@ -300,8 +293,7 @@ void MediaEngineRemoteVideoSource::SetTrack(
                     SourceMediaStream::ADDTRACK_QUEUED);
 }
 
-nsresult MediaEngineRemoteVideoSource::Start(
-    const RefPtr<const AllocationHandle>& aHandle) {
+nsresult MediaEngineRemoteVideoSource::Start() {
   LOG(__PRETTY_FUNCTION__);
   AssertIsOnOwningThread();
 
@@ -355,8 +347,7 @@ nsresult MediaEngineRemoteVideoSource::Start(
   return NS_OK;
 }
 
-nsresult MediaEngineRemoteVideoSource::FocusOnSelectedSource(
-    const RefPtr<const AllocationHandle>& aHandle) {
+nsresult MediaEngineRemoteVideoSource::FocusOnSelectedSource() {
   LOG(__PRETTY_FUNCTION__);
   AssertIsOnOwningThread();
 
@@ -366,8 +357,7 @@ nsresult MediaEngineRemoteVideoSource::FocusOnSelectedSource(
   return result == 0 ? NS_OK : NS_ERROR_FAILURE;
 }
 
-nsresult MediaEngineRemoteVideoSource::Stop(
-    const RefPtr<const AllocationHandle>& aHandle) {
+nsresult MediaEngineRemoteVideoSource::Stop() {
   LOG(__PRETTY_FUNCTION__);
   AssertIsOnOwningThread();
 
@@ -386,18 +376,12 @@ nsresult MediaEngineRemoteVideoSource::Stop(
   {
     MutexAutoLock lock(mMutex);
     mState = kStopped;
-
-    // Drop any cached image so we don't start with a stale image on next
-    // usage.  Also, gfx gets very upset if these are held until this object
-    // is gc'd in final-cc during shutdown (bug 1374164)
-    mImage = nullptr;
   }
 
   return NS_OK;
 }
 
 nsresult MediaEngineRemoteVideoSource::Reconfigure(
-    const RefPtr<AllocationHandle>& aHandle,
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
     const nsString& aDeviceId, const char** aOutBadConstraint) {
   LOG(__PRETTY_FUNCTION__);
@@ -422,9 +406,7 @@ nsresult MediaEngineRemoteVideoSource::Reconfigure(
 
   bool started = mState == kStarted;
   if (started) {
-    // Allocate always returns a null AllocationHandle.
-    // We can safely pass nullptr below.
-    nsresult rv = Stop(nullptr);
+    nsresult rv = Stop();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       nsAutoCString name;
       GetErrorName(rv, name);
@@ -442,7 +424,7 @@ nsresult MediaEngineRemoteVideoSource::Reconfigure(
   }
 
   if (started) {
-    nsresult rv = Start(nullptr);
+    nsresult rv = Start();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       nsAutoCString name;
       GetErrorName(rv, name);
@@ -486,42 +468,6 @@ webrtc::CaptureCapability MediaEngineRemoteVideoSource::GetCapability(
   camera::GetChildAndCall(&camera::CamerasChild::GetCaptureCapability,
                           mCapEngine, mUniqueId.get(), aIndex, result);
   return result;
-}
-
-void MediaEngineRemoteVideoSource::Pull(
-    const RefPtr<const AllocationHandle>& aHandle,
-    const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-    StreamTime aEndOfAppendedData, StreamTime aDesiredTime,
-    const PrincipalHandle& aPrincipalHandle) {
-  TRACE_AUDIO_CALLBACK_COMMENT("SourceMediaStream %p track %i", aStream.get(),
-                               aTrackID);
-  MutexAutoLock lock(mMutex);
-  if (mState == kReleased) {
-    // We end the track before deallocating, so this is safe.
-    return;
-  }
-
-  MOZ_ASSERT(mState == kStarted || mState == kStopped);
-
-  StreamTime delta = aDesiredTime - aEndOfAppendedData;
-  MOZ_ASSERT(delta > 0);
-
-  VideoSegment segment;
-  RefPtr<layers::Image> image = mImage;
-  if (mState == kStarted) {
-    MOZ_ASSERT(!image || mImageSize == image->GetSize());
-    segment.AppendFrame(image.forget(), delta, mImageSize, aPrincipalHandle);
-  } else {
-    // nullptr images are allowed, but we force it to black and retain the size.
-    segment.AppendFrame(image.forget(), delta, mImageSize, aPrincipalHandle,
-                        true);
-  }
-
-  // This is safe from any thread, and is safe if the track is Finished
-  // or Destroyed.
-  // This can fail if either a) we haven't added the track yet, or b)
-  // we've removed or finished the track.
-  aStream->AppendToTrack(aTrackID, &segment);
 }
 
 int MediaEngineRemoteVideoSource::DeliverFrame(
@@ -592,7 +538,9 @@ int MediaEngineRemoteVideoSource::DeliverFrame(
       }
       break;
     }
-    default: { break; }
+    default: {
+      break;
+    }
   }
 
   rtc::Callback0<void> callback_unused;
@@ -670,14 +618,12 @@ int MediaEngineRemoteVideoSource::DeliverFrame(
 
   {
     MutexAutoLock lock(mMutex);
-    // implicitly releases last image
-    mImage = image.forget();
-    mImageSize = mImage->GetSize();
+    MOZ_ASSERT(mState == kStarted);
+    VideoSegment segment;
+    mImageSize = image->GetSize();
+    segment.AppendFrame(image.forget(), mImageSize, mPrincipal);
+    mStream->AppendToTrack(mTrackID, &segment);
   }
-
-  // We'll push the frame into the MSG on the next Pull. This will avoid
-  // swamping the MSG with frames should it be taking longer than normal to run
-  // an iteration.
 
   return 0;
 }
@@ -909,7 +855,7 @@ bool MediaEngineRemoteVideoSource::ChooseCapability(
         continue;
       }
       LogCapability("Hardcoded capability", cap, 0);
-      candidateSet.AppendElement(CapabilityCandidate(std::move(cap)));
+      candidateSet.AppendElement(cap);
     }
   }
 

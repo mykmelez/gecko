@@ -445,8 +445,6 @@ VIRTUAL_CALL_CLASSES = set([
     ("PTexture", "parent"),
 
     # Defined in a .cpp
-    ("PAsmJSCacheEntry", "child"),
-    ("PAsmJSCacheEntry", "parent"),
     ("PBackgroundFileHandle", "parent"),
     ("PBackgroundFileRequest", "parent"),
     ("PBackgroundIDBCursor", "parent"),
@@ -594,9 +592,6 @@ VIRTUAL_CALL_CLASSES = set([
     ("PHttpChannel", "parent"),
     ("PSessionStorageObserver", "child"),
     ("PSessionStorageObserver", "parent"),
-
-    # bug 1513911
-    ("PIndexedDBPermissionRequest", "child"),
 
     # Recv* methods are MOZ_CAN_RUN_SCRIPT and OnMessageReceived is not, so
     # it's not allowed to call them.

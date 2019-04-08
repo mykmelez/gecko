@@ -131,6 +131,7 @@ EXPORTS.js += [
     '../public/Debug.h',
     '../public/Equality.h',
     '../public/ErrorReport.h',
+    '../public/ForOfIterator.h',
     '../public/GCAnnotations.h',
     '../public/GCAPI.h',
     '../public/GCHashTable.h',
@@ -159,6 +160,8 @@ EXPORTS.js += [
     '../public/Realm.h',
     '../public/RealmOptions.h',
     '../public/RefCounted.h',
+    '../public/RegExp.h',
+    '../public/RegExpFlags.h',
     '../public/RequiredDefines.h',
     '../public/Result.h',
     '../public/RootingAPI.h',
@@ -188,6 +191,7 @@ EXPORTS.js += [
     '../public/Utility.h',
     '../public/Value.h',
     '../public/Vector.h',
+    '../public/Warnings.h',
     '../public/WeakMapPtr.h',
     '../public/Wrapper.h',
 ]
@@ -324,8 +328,8 @@ UNIFIED_SOURCES += [
     'vm/UbiNode.cpp',
     'vm/UbiNodeCensus.cpp',
     'vm/UbiNodeShortestPaths.cpp',
-    'vm/UnboxedObject.cpp',
     'vm/Value.cpp',
+    'vm/Warnings.cpp',
     'vm/Xdr.cpp',
 ]
 

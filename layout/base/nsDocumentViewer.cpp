@@ -7,6 +7,7 @@
 /* container for a document and its presentation */
 
 #include "gfxContext.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ServoStyleSet.h"
 #include "nscore.h"
@@ -21,7 +22,6 @@
 #include "mozilla/dom/PopupBlocker.h"
 #include "mozilla/dom/Document.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "nsIFrame.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsSubDocumentFrame.h"
@@ -402,7 +402,7 @@ class nsDocumentViewer final : public nsIContentViewer,
   nsCOMPtr<nsIWidget> mWindow;  // may be null
   RefPtr<nsViewManager> mViewManager;
   RefPtr<nsPresContext> mPresContext;
-  nsCOMPtr<nsIPresShell> mPresShell;
+  RefPtr<PresShell> mPresShell;
 
   RefPtr<nsDocViewerSelectionListener> mSelectionListener;
   RefPtr<nsDocViewerFocusListener> mFocusListener;
@@ -726,12 +726,8 @@ nsresult nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow) {
 
   NS_ASSERTION(!mPresShell, "Someone should have destroyed the presshell!");
 
-  // Create the style set...
-  UniquePtr<ServoStyleSet> styleSet = CreateStyleSet(mDocument);
-
   // Now make the shell for the document
-  mPresShell =
-      mDocument->CreateShell(mPresContext, mViewManager, std::move(styleSet));
+  mPresShell = mDocument->CreatePresShell(mPresContext, mViewManager);
   if (!mPresShell) {
     return NS_ERROR_FAILURE;
   }
@@ -770,9 +766,9 @@ nsresult nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow) {
 
   p2a = mPresContext->AppUnitsPerDevPixel();  // zoom may have changed it
   if (aDoInitialReflow) {
-    nsCOMPtr<nsIPresShell> shell = mPresShell;
+    RefPtr<PresShell> presShell = mPresShell;
     // Initial reflow
-    shell->Initialize();
+    presShell->Initialize();
   }
 
   // now register ourselves as a selection listener, so that we get
@@ -880,7 +876,7 @@ nsresult nsDocumentViewer::InitInternal(nsIWidget* aParentWidget,
     if (!mPresContext &&
         (aParentWidget || containerView || mDocument->IsBeingUsedAsImage() ||
          (mDocument->GetDisplayDocument() &&
-          mDocument->GetDisplayDocument()->GetShell()))) {
+          mDocument->GetDisplayDocument()->GetPresShell()))) {
       // Create presentation context
       if (mIsPageMode) {
         // Presentation context already created in SetPageMode which is calling
@@ -1009,8 +1005,8 @@ nsDocumentViewer::LoadComplete(nsresult aStatus) {
   // checking for our mDocument and its window.
   if (mPresShell && !mStopped) {
     // Hold strong ref because this could conceivably run script
-    nsCOMPtr<nsIPresShell> shell = mPresShell;
-    shell->FlushPendingNotifications(FlushType::Layout);
+    RefPtr<PresShell> presShell = mPresShell;
+    presShell->FlushPendingNotifications(FlushType::Layout);
   }
 
   nsresult rv = NS_OK;
@@ -1116,8 +1112,14 @@ nsDocumentViewer::LoadComplete(nsresult aStatus) {
 
   // Notify the document that it has been shown (regardless of whether
   // it was just loaded). Note: mDocument may be null now if the above
-  // firing of onload caused the document to unload.
-  if (mDocument) {
+  // firing of onload caused the document to unload. Or, mDocument may not be
+  // the "current active" document, if the above firing of onload caused our
+  // docshell to navigate away. NOTE: In this latter scenario, it's likely that
+  // we fired pagehide (when navigating away) without ever having fired
+  // pageshow, and that's pretty broken... Fortunately, this should be rare.
+  // (It requires us to spin the event loop in onload handler, e.g. via sync
+  // XHR, in order for the navigation-away to happen before onload completes.)
+  if (mDocument && mDocument->IsCurrentActiveDocument()) {
     // Re-get window, since it might have changed during above firing of onload
     window = mDocument->GetWindow();
     if (window) {
@@ -1138,8 +1140,8 @@ nsDocumentViewer::LoadComplete(nsresult aStatus) {
     // Now that the document has loaded, we can tell the presshell
     // to unsuppress painting.
     if (mPresShell) {
-      nsCOMPtr<nsIPresShell> shell(mPresShell);
-      shell->UnsuppressPainting();
+      RefPtr<PresShell> presShell = mPresShell;
+      presShell->UnsuppressPainting();
       // mPresShell could have been removed now, see bug 378682/421432
       if (mPresShell) {
         mPresShell->LoadComplete();
@@ -1861,8 +1863,8 @@ nsDocumentViewer::Stop(void) {
 
   if (!mLoaded && mPresShell) {
     // Well, we might as well paint what we have so far.
-    nsCOMPtr<nsIPresShell> shell(mPresShell);  // bug 378682
-    shell->UnsuppressPainting();
+    RefPtr<PresShell> presShell = mPresShell;  // bug 378682
+    presShell->UnsuppressPainting();
   }
 
   return NS_OK;
@@ -2186,8 +2188,8 @@ nsDocumentViewer::Show(void) {
     // shown...
 
     if (mPresShell) {
-      nsCOMPtr<nsIPresShell> shell(mPresShell);  // bug 378682
-      shell->UnsuppressPainting();
+      RefPtr<PresShell> presShell = mPresShell;  // bug 378682
+      presShell->UnsuppressPainting();
     }
   }
 
@@ -2283,77 +2285,6 @@ nsDocumentViewer::RequestWindowClose(bool* aCanClose) {
     *aCanClose = true;
 
   return NS_OK;
-}
-
-UniquePtr<ServoStyleSet> nsDocumentViewer::CreateStyleSet(Document* aDocument) {
-  // Make sure this does the same thing as PresShell::Add{User,Agent}Sheet wrt
-  // ordering.
-
-  // The document will fill in the document sheets when we create the presshell
-  auto cache = nsLayoutStylesheetCache::Singleton();
-  nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance();
-
-  auto styleSet = MakeUnique<ServoStyleSet>();
-
-  // User sheets
-
-  for (StyleSheet* sheet : *sheetService->UserStyleSheets()) {
-    styleSet->AppendStyleSheet(SheetType::User, sheet);
-  }
-
-  StyleSheet* sheet = nsContentUtils::IsInChromeDocshell(aDocument)
-                          ? cache->GetUserChromeSheet()
-                          : cache->GetUserContentSheet();
-
-  if (sheet) {
-    styleSet->AppendStyleSheet(SheetType::User, sheet);
-  }
-
-  // Agent sheets
-
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->UASheet());
-
-  if (MOZ_LIKELY(mDocument->NodeInfoManager()->MathMLEnabled())) {
-    styleSet->AppendStyleSheet(SheetType::Agent, cache->MathMLSheet());
-  }
-
-  if (MOZ_LIKELY(mDocument->NodeInfoManager()->SVGEnabled())) {
-    styleSet->AppendStyleSheet(SheetType::Agent, cache->SVGSheet());
-  }
-
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->HTMLSheet());
-
-  // We don't add quirk.css here; nsPresContext::CompatibilityModeChanged will
-  // append it if needed.
-
-  if (nsLayoutUtils::ShouldUseNoFramesSheet(aDocument)) {
-    styleSet->AppendStyleSheet(SheetType::Agent, cache->NoFramesSheet());
-  }
-
-  if (nsLayoutUtils::ShouldUseNoScriptSheet(aDocument)) {
-    styleSet->AppendStyleSheet(SheetType::Agent, cache->NoScriptSheet());
-  }
-
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->CounterStylesSheet());
-
-  // Load the minimal XUL rules for scrollbars and a few other XUL things
-  // that non-XUL (typically HTML) documents commonly use.
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->MinimalXULSheet());
-
-  // Only load the full XUL sheet if we'll need it.
-  if (aDocument->LoadsFullXULStyleSheetUpFront()) {
-    styleSet->AppendStyleSheet(SheetType::Agent, cache->XULSheet());
-  }
-
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->FormsSheet());
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->ScrollbarsSheet());
-  styleSet->AppendStyleSheet(SheetType::Agent, cache->PluginProblemSheet());
-
-  for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
-    styleSet->AppendStyleSheet(SheetType::Agent, sheet);
-  }
-
-  return styleSet;
 }
 
 NS_IMETHODIMP
@@ -2818,8 +2749,8 @@ nsDocumentViewer::SetFullZoom(float aFullZoom) {
   if (GetIsPrintPreview()) {
     nsPresContext* pc = GetPresContext();
     NS_ENSURE_TRUE(pc, NS_OK);
-    nsCOMPtr<nsIPresShell> shell = pc->GetPresShell();
-    NS_ENSURE_TRUE(shell, NS_OK);
+    PresShell* presShell = pc->GetPresShell();
+    NS_ENSURE_TRUE(presShell, NS_OK);
 
     if (!mPrintPreviewZoomed) {
       mOriginalPrintPreviewScale = pc->GetPrintPreviewScale();
@@ -2828,13 +2759,13 @@ nsDocumentViewer::SetFullZoom(float aFullZoom) {
 
     mPrintPreviewZoom = aFullZoom;
     pc->SetPrintPreviewScale(aFullZoom * mOriginalPrintPreviewScale);
-    nsIPageSequenceFrame* pf = shell->GetPageSequenceFrame();
+    nsIPageSequenceFrame* pf = presShell->GetPageSequenceFrame();
     if (pf) {
       nsIFrame* f = do_QueryFrame(pf);
-      shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+      presShell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
     }
 
-    nsIFrame* rootFrame = shell->GetRootFrame();
+    nsIFrame* rootFrame = presShell->GetRootFrame();
     if (rootFrame) {
       rootFrame->InvalidateFrame();
     }
@@ -3687,7 +3618,7 @@ nsDocumentViewer::PrintPreviewNavigate(int16_t aType, int32_t aPageNum) {
   if (aType == nsIWebBrowserPrint::PRINTPREVIEW_HOME ||
       (aType == nsIWebBrowserPrint::PRINTPREVIEW_GOTO_PAGENUM &&
        aPageNum == 1)) {
-    sf->ScrollTo(nsPoint(0, 0), nsIScrollableFrame::INSTANT);
+    sf->ScrollTo(nsPoint(0, 0), ScrollMode::eInstant);
     return NS_OK;
   }
 
@@ -3753,7 +3684,7 @@ nsDocumentViewer::PrintPreviewNavigate(int16_t aType, int32_t aPageNum) {
   if (fndPageFrame) {
     nscoord newYPosn = nscoord(mPrintJob->GetPrintPreviewScale() *
                                fndPageFrame->GetPosition().y);
-    sf->ScrollTo(nsPoint(pt.x, newYPosn), nsIScrollableFrame::INSTANT);
+    sf->ScrollTo(nsPoint(pt.x, newYPosn), ScrollMode::eInstant);
   }
   return NS_OK;
 }
@@ -4260,7 +4191,7 @@ void nsDocumentViewer::SetPrintPreviewPresentation(nsViewManager* aViewManager,
   mWindow = nullptr;
   mViewManager = aViewManager;
   mPresContext = aPresContext;
-  mPresShell = aPresShell;
+  mPresShell = static_cast<PresShell*>(aPresShell);
 
   if (ShouldAttachToTopLevel()) {
     DetachFromTopLevelWidget();

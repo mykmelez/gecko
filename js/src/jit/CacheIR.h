@@ -232,8 +232,6 @@ extern const uint32_t ArgLengths[];
   _(GuardMagicValue, Id, Byte)                                                 \
   _(GuardFrameHasNoArgumentsObject, None)                                      \
   _(GuardNoDenseElements, Id)                                                  \
-  _(GuardNoUnboxedExpando, Id)                                                 \
-  _(GuardAndLoadUnboxedExpando, Id, Id)                                        \
   _(GuardAndGetIndexFromString, Id, Id)                                        \
   _(GuardAndGetNumberFromString, Id, Id)                                       \
   _(GuardAndGetIterator, Id, Id, Field, Field)                                 \
@@ -279,7 +277,6 @@ extern const uint32_t ArgLengths[];
   _(AllocateAndStoreDynamicSlot, Id, Field, Id, Byte, Field, Field, Field)     \
   _(StoreTypedObjectReferenceProperty, Id, Field, Byte, Byte, Id)              \
   _(StoreTypedObjectScalarProperty, Id, Field, Byte, Byte, Id)                 \
-  _(StoreUnboxedProperty, Id, Byte, Field, Id)                                 \
   _(StoreDenseElement, Id, Id, Id)                                             \
   _(StoreDenseElementHole, Id, Id, Id, Byte)                                   \
   _(ArrayPush, Id, Id)                                                         \
@@ -303,7 +300,6 @@ extern const uint32_t ArgLengths[];
   /* The *Result ops load a value into the cache's result register. */         \
   _(LoadFixedSlotResult, Id, Field)                                            \
   _(LoadDynamicSlotResult, Id, Field)                                          \
-  _(LoadUnboxedPropertyResult, Id, Byte, Field)                                \
   _(LoadTypedObjectResult, Id, Byte, Byte, Field)                              \
   _(LoadDenseElementResult, Id, Id)                                            \
   _(LoadDenseElementHoleResult, Id, Id)                                        \
@@ -769,9 +765,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   }
   void guardGroupForLayout(ObjOperandId obj, ObjectGroup* group) {
     // NOTE: Comment in guardGroupForTypeBarrier also applies.
-    MOZ_ASSERT(!group->hasUncacheableClass());
-    MOZ_ASSERT(IsUnboxedObjectClass(group->clasp()) ||
-               IsTypedObjectClass(group->clasp()));
+    MOZ_ASSERT(IsTypedObjectClass(group->clasp()));
     guardGroup(obj, group);
   }
   void guardProto(ObjOperandId obj, JSObject* proto) {
@@ -918,15 +912,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void guardNoDenseElements(ObjOperandId obj) {
     writeOpWithOperandId(CacheOp::GuardNoDenseElements, obj);
   }
-  void guardNoUnboxedExpando(ObjOperandId obj) {
-    writeOpWithOperandId(CacheOp::GuardNoUnboxedExpando, obj);
-  }
-  ObjOperandId guardAndLoadUnboxedExpando(ObjOperandId obj) {
-    ObjOperandId res(nextOperandId_++);
-    writeOpWithOperandId(CacheOp::GuardAndLoadUnboxedExpando, obj);
-    writeOperandId(res);
-    return res;
-  }
 
   ValOperandId loadStackValue(uint32_t idx) {
     ValOperandId res(nextOperandId_++);
@@ -1064,13 +1049,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     buffer_.writeByte(uint32_t(type));
     writeOperandId(rhs);
   }
-  void storeUnboxedProperty(ObjOperandId obj, JSValueType type, size_t offset,
-                            ValOperandId rhs) {
-    writeOpWithOperandId(CacheOp::StoreUnboxedProperty, obj);
-    buffer_.writeByte(uint32_t(type));
-    addStubField(offset, StubField::Type::RawWord);
-    writeOperandId(rhs);
-  }
   void storeDenseElement(ObjOperandId obj, Int32OperandId index,
                          ValOperandId rhs) {
     writeOpWithOperandId(CacheOp::StoreDenseElement, obj);
@@ -1200,7 +1178,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
                      bool isSpread, bool isConstructing) {
     writeOpWithOperandId(CacheOp::CallClassHook, calleeId);
     writeOperandId(argc);
-    buffer_.writeByte(true);                // may be cross-realm
+    buffer_.writeByte(true);  // may be cross-realm
     buffer_.writeByte(uint32_t(isSpread));
     buffer_.writeByte(uint32_t(isConstructing));
     void* target = JS_FUNC_TO_DATA_PTR(void*, hook);
@@ -1375,12 +1353,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   }
   void loadDynamicSlotResult(ObjOperandId obj, size_t offset) {
     writeOpWithOperandId(CacheOp::LoadDynamicSlotResult, obj);
-    addStubField(offset, StubField::Type::RawWord);
-  }
-  void loadUnboxedPropertyResult(ObjOperandId obj, JSValueType type,
-                                 size_t offset) {
-    writeOpWithOperandId(CacheOp::LoadUnboxedPropertyResult, obj);
-    buffer_.writeByte(uint32_t(type));
     addStubField(offset, StubField::Type::RawWord);
   }
   void loadTypedObjectResult(ObjOperandId obj, uint32_t offset,
@@ -1806,8 +1778,6 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator {
                               uint32_t index, Int32OperandId indexId);
   bool tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
                              uint32_t index, Int32OperandId indexId);
-  bool tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId objId,
-                                   uint32_t index, Int32OperandId indexId);
 
   bool tryAttachGenericElement(HandleObject obj, ObjOperandId objId,
                                uint32_t index, Int32OperandId indexId);

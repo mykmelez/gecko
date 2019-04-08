@@ -181,6 +181,7 @@ pub struct PictureContext {
     pub apply_local_clip_rect: bool,
     pub allow_subpixel_aa: bool,
     pub is_passthrough: bool,
+    pub is_composite: bool,
     pub raster_space: RasterSpace,
     pub surface_spatial_node_index: SpatialNodeIndex,
     pub raster_spatial_node_index: SpatialNodeIndex,
@@ -612,7 +613,7 @@ impl FrameBuilder {
             }
 
             // Used to generated a unique z-buffer value per primitive.
-            let mut z_generator = ZBufferIdGenerator::new();
+            let mut z_generator = ZBufferIdGenerator::new(layer);
             let use_dual_source_blending = self.config.dual_source_blending_is_enabled &&
                                            self.config.dual_source_blending_is_supported;
 

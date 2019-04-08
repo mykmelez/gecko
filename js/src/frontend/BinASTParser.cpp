@@ -24,10 +24,13 @@
 #include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
-
+#include "js/RegExpFlags.h"  // JS::RegExpFlag, JS::RegExpFlags
 #include "vm/RegExpObject.h"
 
 #include "frontend/ParseContext-inl.h"
+
+using JS::RegExpFlag;
+using JS::RegExpFlags;
 
 namespace js {
 namespace frontend {
@@ -2092,8 +2095,7 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceCallExpression(
     }
   }
 
-  BINJS_TRY_DECL(result, handler_.newCall(callee, arguments));
-  result->setOp(op);
+  BINJS_TRY_DECL(result, handler_.newCall(callee, arguments, op));
   return result;
 }
 
@@ -3523,18 +3525,18 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceLiteralRegExpExpression(
   Chars flags(cx_);
   MOZ_TRY(tokenizer_->readChars(flags));
 
-  RegExpFlag reflags = NoFlags;
+  RegExpFlags reflags = RegExpFlag::NoFlags;
   for (auto c : flags) {
-    if (c == 'g' && !(reflags & GlobalFlag)) {
-      reflags = RegExpFlag(reflags | GlobalFlag);
-    } else if (c == 'i' && !(reflags & IgnoreCaseFlag)) {
-      reflags = RegExpFlag(reflags | IgnoreCaseFlag);
-    } else if (c == 'm' && !(reflags & MultilineFlag)) {
-      reflags = RegExpFlag(reflags | MultilineFlag);
-    } else if (c == 'y' && !(reflags & StickyFlag)) {
-      reflags = RegExpFlag(reflags | StickyFlag);
-    } else if (c == 'u' && !(reflags & UnicodeFlag)) {
-      reflags = RegExpFlag(reflags | UnicodeFlag);
+    if (c == 'g' && !reflags.global()) {
+      reflags |= RegExpFlag::Global;
+    } else if (c == 'i' && !reflags.ignoreCase()) {
+      reflags |= RegExpFlag::IgnoreCase;
+    } else if (c == 'm' && !reflags.multiline()) {
+      reflags |= RegExpFlag::Multiline;
+    } else if (c == 'u' && !reflags.unicode()) {
+      reflags |= RegExpFlag::Unicode;
+    } else if (c == 'y' && !reflags.sticky()) {
+      reflags |= RegExpFlag::Sticky;
     } else {
       return raiseError("Invalid regexp flags");
     }
@@ -3591,8 +3593,9 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceNewExpression(
 
   BINJS_MOZ_TRY_DECL(arguments, parseArguments());
 
-  BINJS_TRY_DECL(result, handler_.newNewExpression(tokenizer_->pos(start).begin,
-                                                   callee, arguments));
+  BINJS_TRY_DECL(result,
+                 handler_.newNewExpression(tokenizer_->pos(start).begin, callee,
+                                           arguments, /* isSpread = */ false));
   return result;
 }
 
@@ -4134,7 +4137,6 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseInterfaceUnaryExpression(
     case UnaryOperator::Delete: {
       switch (operand->getKind()) {
         case ParseNodeKind::Name:
-          operand->setOp(JSOP_DELNAME);
           pnk = ParseNodeKind::DeleteNameExpr;
           BINJS_TRY(this->strictModeError(JSMSG_DEPRECATED_DELETE_OPERAND));
           pc_->sc()->setBindingsAccessedDynamically();

@@ -16,7 +16,8 @@ import {
   getRelativeUrl,
   isGenerated,
   isOriginal as isOriginalSource,
-  isUrlExtension
+  isUrlExtension,
+  getPlainUrl
 } from "../utils/source";
 
 import { originalToGeneratedId } from "devtools-source-map";
@@ -26,7 +27,7 @@ import type { Source, SourceId, SourceLocation, ThreadId } from "../types";
 import type { PendingSelectedLocation, Selector } from "./types";
 import type { Action, DonePromiseAction, FocusItem } from "../actions/types";
 import type { LoadSourceAction } from "../actions/types/SourceAction";
-import { mapValues, uniqBy, uniq } from "lodash";
+import { mapValues, uniqBy } from "lodash";
 
 export type SourcesMap = { [SourceId]: Source };
 export type SourcesMapByThread = { [ThreadId]: SourcesMap };
@@ -34,6 +35,7 @@ export type SourcesMapByThread = { [ThreadId]: SourcesMap };
 type UrlsMap = { [string]: SourceId[] };
 type DisplayedSources = { [ThreadId]: { [SourceId]: boolean } };
 type GetDisplayedSourcesSelector = OuterState => { [ThreadId]: SourcesMap };
+type PlainUrlsMap = { [string]: string[] };
 
 export type SourcesState = {
   epoch: number,
@@ -44,6 +46,11 @@ export type SourcesState = {
   // All sources associated with a given URL. When using source maps, multiple
   // sources can have the same URL.
   urls: UrlsMap,
+
+  // All full URLs belonging to a given plain (query string stripped) URL.
+  // Query strings are only shown in the Sources tab if they are required for
+  // disambiguation.
+  plainUrls: PlainUrlsMap,
 
   // For each thread, all sources in that thread that are under the project root
   // and should be shown in the editor's sources pane.
@@ -59,6 +66,7 @@ export type SourcesState = {
 const emptySources = {
   sources: {},
   urls: {},
+  plainUrls: {},
   displayed: {}
 };
 
@@ -227,6 +235,7 @@ function addSources(state: SourcesState, sources: Source[]) {
     ...state,
     sources: { ...state.sources },
     urls: { ...state.urls },
+    plainUrls: { ...state.plainUrls },
     displayed: { ...state.displayed }
   };
 
@@ -253,7 +262,16 @@ function addSources(state: SourcesState, sources: Source[]) {
       state.urls[source.url] = [...existing, source.id];
     }
 
-    // 3. Update the displayed actor map
+    // 3. Update the plain url map
+    if (source.url) {
+      const plainUrl = getPlainUrl(source.url);
+      const existingPlainUrls = state.plainUrls[plainUrl] || [];
+      if (!existingPlainUrls.includes(source.url)) {
+        state.plainUrls[plainUrl] = [...existingPlainUrls, source.url];
+      }
+    }
+
+    // 4. Update the displayed actor map
     if (
       underRoot(source, state.projectDirectoryRoot) &&
       (!source.isExtension ||
@@ -371,15 +389,6 @@ function getSourceActors(state, source) {
   return generatedSource ? generatedSource.actors : [];
 }
 
-export function getSourceThreads(
-  state: OuterState,
-  source: Source
-): ThreadId[] {
-  return uniq(
-    getSourceActors(state.sources, source).map(actor => actor.thread)
-  );
-}
-
 export function getSourceInSources(sources: SourcesMap, id: string): ?Source {
   return sources[id];
 }
@@ -485,6 +494,14 @@ export function getGeneratedSource(
   return getSourceFromId(state, originalToGeneratedId(source.id));
 }
 
+export function getGeneratedSourceById(
+  state: OuterState,
+  sourceId: string
+): Source {
+  const generatedSourceId = originalToGeneratedId(sourceId);
+  return getSourceFromId(state, generatedSourceId);
+}
+
 export function getPendingSelectedLocation(state: OuterState) {
   return state.sources.pendingSelectedLocation;
 }
@@ -508,17 +525,14 @@ export function hasPrettySource(state: OuterState, id: string) {
 
 export function getSourcesUrlsInSources(
   state: OuterState,
-  url: string
+  url: ?string
 ): string[] {
-  const urls = getUrls(state);
-  if (!url || !urls[url]) {
+  if (!url) {
     return [];
   }
-  const plainUrl = url.split("?")[0];
 
-  return Object.keys(urls)
-    .filter(Boolean)
-    .filter(sourceUrl => sourceUrl.split("?")[0] === plainUrl);
+  const plainUrl = getPlainUrl(url);
+  return getPlainUrls(state)[plainUrl] || [];
 }
 
 export function getHasSiblingOfSameName(state: OuterState, source: ?Source) {
@@ -539,6 +553,10 @@ export function getSourcesEpoch(state: OuterState) {
 
 export function getUrls(state: OuterState) {
   return state.sources.urls;
+}
+
+export function getPlainUrls(state: OuterState) {
+  return state.sources.plainUrls;
 }
 
 export function getSourceList(state: OuterState): Source[] {

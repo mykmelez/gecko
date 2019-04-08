@@ -30,7 +30,6 @@
 #include "vm/Shape.h"
 #include "vm/SymbolType.h"
 #include "vm/TypedArrayObject.h"
-#include "vm/UnboxedObject.h"
 #include "wasm/WasmJS.h"
 
 #include "gc/GC-inl.h"
@@ -41,7 +40,6 @@
 #include "vm/NativeObject-inl.h"
 #include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -994,17 +992,16 @@ void LazyScript::traceChildren(JSTracer* trc) {
   }
 
   // We rely on the fact that atoms are always tenured.
-  JSAtom** closedOverBindings = this->closedOverBindings();
-  for (auto i : IntegerRange(numClosedOverBindings())) {
-    if (closedOverBindings[i]) {
-      TraceManuallyBarrieredEdge(trc, &closedOverBindings[i],
-                                 "closedOverBinding");
+  for (GCPtrAtom& closedOverBinding : closedOverBindings()) {
+    if (closedOverBinding) {
+      TraceEdge(trc, &closedOverBinding, "closedOverBinding");
     }
   }
 
-  GCPtrFunction* innerFunctions = this->innerFunctions();
-  for (auto i : IntegerRange(numInnerFunctions())) {
-    TraceEdge(trc, &innerFunctions[i], "lazyScriptInnerFunction");
+  for (GCPtrFunction& innerFunction : innerFunctions()) {
+    if (innerFunction) {
+      TraceEdge(trc, &innerFunction, "lazyScriptInnerFunction");
+    }
   }
 
   if (trc->isMarkingTracer()) {
@@ -1033,16 +1030,16 @@ inline void js::GCMarker::eagerlyMarkChildren(LazyScript* thing) {
   }
 
   // We rely on the fact that atoms are always tenured.
-  JSAtom** closedOverBindings = thing->closedOverBindings();
-  for (auto i : IntegerRange(thing->numClosedOverBindings())) {
-    if (closedOverBindings[i]) {
-      traverseEdge(thing, static_cast<JSString*>(closedOverBindings[i]));
+  for (GCPtrAtom& closedOverBinding : thing->closedOverBindings()) {
+    if (closedOverBinding) {
+      traverseEdge(thing, static_cast<JSString*>(closedOverBinding));
     }
   }
 
-  GCPtrFunction* innerFunctions = thing->innerFunctions();
-  for (auto i : IntegerRange(thing->numInnerFunctions())) {
-    traverseEdge(thing, static_cast<JSObject*>(innerFunctions[i]));
+  for (GCPtrFunction& innerFunction : thing->innerFunctions()) {
+    if (innerFunction) {
+      traverseEdge(thing, static_cast<JSObject*>(innerFunction));
+    }
   }
 
   markImplicitEdges(thing);
@@ -1411,10 +1408,7 @@ void js::ObjectGroup::traceChildren(JSTracer* trc) {
     TraceEdge(trc, &proto(), "group_proto");
   }
 
-  if (trc->isMarkingTracer()) {
-    realm()->mark();
-  }
-
+  // Note: the realm's global can be nullptr if we GC while creating the global.
   if (JSObject* global = realm()->unsafeUnbarrieredMaybeGlobal()) {
     TraceManuallyBarrieredEdge(trc, &global, "group_global");
   }
@@ -1425,16 +1419,6 @@ void js::ObjectGroup::traceChildren(JSTracer* trc) {
 
   if (maybePreliminaryObjects(sweep)) {
     maybePreliminaryObjects(sweep)->trace(trc);
-  }
-
-  if (maybeUnboxedLayout(sweep)) {
-    unboxedLayout(sweep).trace(trc);
-  }
-
-  if (ObjectGroup* unboxedGroup = maybeOriginalUnboxedGroup()) {
-    TraceManuallyBarrieredEdge(trc, &unboxedGroup,
-                               "group_original_unboxed_group");
-    setOriginalUnboxedGroup(unboxedGroup);
   }
 
   if (JSObject* descr = maybeTypeDescr()) {
@@ -1460,8 +1444,7 @@ void js::GCMarker::lazilyMarkChildren(ObjectGroup* group) {
     traverseEdge(group, group->proto().toObject());
   }
 
-  group->realm()->mark();
-
+  // Note: the realm's global can be nullptr if we GC while creating the global.
   if (GlobalObject* global = group->realm()->unsafeUnbarrieredMaybeGlobal()) {
     traverseEdge(group, static_cast<JSObject*>(global));
   }
@@ -1472,14 +1455,6 @@ void js::GCMarker::lazilyMarkChildren(ObjectGroup* group) {
 
   if (group->maybePreliminaryObjects(sweep)) {
     group->maybePreliminaryObjects(sweep)->trace(this);
-  }
-
-  if (group->maybeUnboxedLayout(sweep)) {
-    group->unboxedLayout(sweep).trace(this);
-  }
-
-  if (ObjectGroup* unboxedGroup = group->maybeOriginalUnboxedGroup()) {
-    traverseEdge(group, unboxedGroup);
   }
 
   if (TypeDescr* descr = group->maybeTypeDescr()) {
@@ -1520,23 +1495,6 @@ static inline NativeObject* CallTraceHook(Functor&& f, JSTracer* trc,
     if (tobj.typeDescr().hasTraceList()) {
       VisitTraceList(f, tobj.typeDescr().traceList(),
                      tobj.inlineTypedMemForGC());
-    }
-
-    return nullptr;
-  }
-
-  if (clasp == &UnboxedPlainObject::class_) {
-    JSObject** pexpando = obj->as<UnboxedPlainObject>().addressOfExpando();
-    if (*pexpando) {
-      f(pexpando);
-    }
-
-    UnboxedPlainObject& unboxed = obj->as<UnboxedPlainObject>();
-    const UnboxedLayout& layout = check == CheckGeneration::DoChecks
-                                      ? unboxed.layout()
-                                      : unboxed.layoutDontCheckGeneration();
-    if (layout.traceList()) {
-      VisitTraceList(f, layout.traceList(), unboxed.data());
     }
 
     return nullptr;
@@ -2117,6 +2075,7 @@ bool MarkStack::setCapacityForMode(JSGCMode mode) {
       capacity = NON_INCREMENTAL_MARK_STACK_BASE_CAPACITY;
       break;
     case JSGC_MODE_INCREMENTAL:
+    case JSGC_MODE_ZONE_INCREMENTAL:
       capacity = INCREMENTAL_MARK_STACK_BASE_CAPACITY;
       break;
     default:
@@ -2796,20 +2755,6 @@ void js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const {
 
 static inline void TraceWholeCell(TenuringTracer& mover, JSObject* object) {
   mover.traceObject(object);
-
-  // Additionally trace the expando object attached to any unboxed plain
-  // objects. Baseline and Ion can write properties to the expando while
-  // only adding a post barrier to the owning unboxed object. Note that
-  // it isn't possible for a nursery unboxed object to have a tenured
-  // expando, so that adding a post barrier on the original object will
-  // capture any tenured->nursery edges in the expando as well.
-
-  if (object->is<UnboxedPlainObject>()) {
-    if (UnboxedExpandoObject* expando =
-            object->as<UnboxedPlainObject>().maybeExpando()) {
-      expando->traceChildren(&mover);
-    }
-  }
 }
 
 static inline void TraceWholeCell(TenuringTracer& mover, JSString* str) {

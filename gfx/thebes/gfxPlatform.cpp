@@ -948,10 +948,6 @@ void gfxPlatform::Init() {
     }
   };
   gfxPrefs::SetLayoutFrameRateChangeCallback(updateFrameRateCallback);
-  gfxPrefs::SetIsLowEndMachineDoNotUseDirectlyChangeCallback(
-      updateFrameRateCallback);
-  gfxPrefs::SetAdjustToMachineChangeCallback(updateFrameRateCallback);
-  gfxPrefs::SetResistFingerprintingChangeCallback(updateFrameRateCallback);
   // Set up the vsync source for the parent process.
   ReInitFrameRate();
 
@@ -2151,23 +2147,6 @@ static void ShutdownCMS() {
   gCMSInitialized = false;
 }
 
-// default SetupClusterBoundaries, based on Unicode properties;
-// platform subclasses may override if they wish
-void gfxPlatform::SetupClusterBoundaries(gfxTextRun* aTextRun,
-                                         const char16_t* aString) {
-  if (aTextRun->GetFlags() & gfx::ShapedTextFlags::TEXT_IS_8BIT) {
-    // 8-bit text doesn't have clusters.
-    // XXX is this true in all languages???
-    // behdad: don't think so.  Czech for example IIRC has a
-    // 'ch' grapheme.
-    // jfkthame: but that's not expected to behave as a grapheme cluster
-    // for selection/editing/etc.
-    return;
-  }
-
-  aTextRun->SetupClusterBoundaries(0, aString, aTextRun->GetLength());
-}
-
 int32_t gfxPlatform::GetBidiNumeralOption() {
   if (mBidiNumeralOption == UNINITIALIZED_VALUE) {
     mBidiNumeralOption = Preferences::GetInt(BIDI_NUMERAL_PREF, 0);
@@ -2914,12 +2893,6 @@ bool gfxPlatform::ContentUsesTiling() const {
           contentUsesPOMTP);
 }
 
-/* static */
-bool gfxPlatform::ShouldAdjustForLowEndMachine() {
-  return gfxPrefs::AdjustToMachine() && !gfxPrefs::ResistFingerprinting() &&
-         gfxPrefs::IsLowEndMachineDoNotUseDirectly();
-}
-
 /***
  * The preference "layout.frame_rate" has 3 meanings depending on the value:
  *
@@ -2946,7 +2919,7 @@ bool gfxPlatform::IsInLayoutAsapMode() {
 
 /* static */
 bool gfxPlatform::ForceSoftwareVsync() {
-  return ShouldAdjustForLowEndMachine() || gfxPrefs::LayoutFrameRate() > 0 ||
+  return gfxPrefs::LayoutFrameRate() > 0 ||
          recordreplay::IsRecordingOrReplaying();
 }
 
@@ -2960,9 +2933,7 @@ int gfxPlatform::GetSoftwareVsyncRate() {
 }
 
 /* static */
-int gfxPlatform::GetDefaultFrameRate() {
-  return ShouldAdjustForLowEndMachine() ? 30 : 60;
-}
+int gfxPlatform::GetDefaultFrameRate() { return 60; }
 
 /* static */
 void gfxPlatform::ReInitFrameRate() {

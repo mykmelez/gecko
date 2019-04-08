@@ -56,14 +56,18 @@ job-defaults:
             default: beta
       last-watershed:
          by-release-type:
-            beta: "56.0b3"
+            beta:
+               by-platform:
+                  win64-aarch64.*: "67.0b2"
+                  default: "56.0b3"
             release(-rc)?:
                by-platform:
                   linux-.*: "57.0"
                   linux64-.*: "57.0"
                   macosx64-.*: "57.0"
                   win32-.*: "56.0"
-                  win64-.*: "56.0"
+                  win64(?!-aarch64)-.*: "56.0"
+                  win64-aarch64.*: "67.0"
                   default: null
             esr60: "52.0esr"
             default: "default"
@@ -77,7 +81,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-nightly
+         build_platform: linux-shippable
       extra:
          product: firefox
          platform: linux-i686
@@ -101,7 +105,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-nightly
+         build_platform: linux64-shippable
       extra:
          product: firefox
          platform: linux-x86_64
@@ -125,7 +129,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-nightly
+         build_platform: macosx64-shippable
       extra:
          product: firefox
          platform: mac
@@ -149,7 +153,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-nightly
+         build_platform: win32-shippable
       extra:
          product: firefox
          platform: win32
@@ -173,10 +177,34 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-nightly
+         build_platform: win64-shippable
       extra:
          product: firefox
          platform: win64
+         updater-platform: linux-x86_64
+         channel:
+            by-release-type:
+               beta: "beta-localtest"
+               release(-rc)?: "release-localtest"
+               esr60: "esr-localtest"
+               default: "default"
+         mar-channel-id-override:
+            by-release-type:
+               beta: beta
+               default: null
+
+   firefox-win64-aarch64:
+      shipping-product: firefox
+      treeherder:
+         symbol: UVC
+         platform: windows2012-aarch64/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win64-aarch64-shippable
+      extra:
+         product: firefox
+         platform: win64-aarch64
          updater-platform: linux-x86_64
          channel:
             by-release-type:
@@ -265,6 +293,22 @@ jobs:
       extra:
          product: firefox
          platform: win64
+         updater-platform: linux-x86_64
+         channel: "aurora-localtest"
+         include-version: devedition_hack
+
+   devedition-win64-aarch64:
+      shipping-product: devedition
+      treeherder:
+         symbol: UVC
+         platform: windows2012-aarch64-devedition/opt
+         kind: test
+         tier: 1
+      attributes:
+         build_platform: win64-aarch64-devedition-nightly
+      extra:
+         product: firefox
+         platform: win64-aarch64
          updater-platform: linux-x86_64
          channel: "aurora-localtest"
          include-version: devedition_hack

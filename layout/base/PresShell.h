@@ -9,12 +9,12 @@
 #ifndef mozilla_PresShell_h
 #define mozilla_PresShell_h
 
-#include "MobileViewportManager.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/HTMLDocumentBinding.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/UniquePtr.h"
@@ -39,6 +39,7 @@ struct RangePaintInfo;
 
 class nsPresShellEventCB;
 class AutoPointerEventTargetUpdater;
+class MobileViewportManager;
 
 namespace mozilla {
 
@@ -48,6 +49,7 @@ class Selection;
 }  // namespace dom
 
 class EventDispatchingCallback;
+class GeckoMVMContext;
 class OverflowChangedTracker;
 
 // A set type for tracking visible frames, for use by the visibility code in
@@ -56,17 +58,14 @@ typedef nsTHashtable<nsPtrHashKey<nsIFrame>> VisibleFrames;
 
 // This is actually pref-controlled, but we use this value if we fail
 // to get the pref for any reason.
-#ifdef MOZ_WIDGET_ANDROID
-#  define PAINTLOCK_EVENT_DELAY 250
-#else
-#  define PAINTLOCK_EVENT_DELAY 5
-#endif
+#define PAINTLOCK_EVENT_DELAY 5
 
 class PresShell final : public nsIPresShell,
                         public nsISelectionController,
                         public nsIObserver,
                         public nsSupportsWeakReference {
   typedef layers::FocusTarget FocusTarget;
+  typedef dom::Element Element;
 
  public:
   PresShell();
@@ -76,8 +75,7 @@ class PresShell final : public nsIPresShell,
 
   static bool AccessibleCaretEnabled(nsIDocShell* aDocShell);
 
-  void Init(Document* aDocument, nsPresContext* aPresContext,
-            nsViewManager* aViewManager, UniquePtr<ServoStyleSet> aStyleSet);
+  void Init(Document*, nsPresContext*, nsViewManager*);
   void Destroy() override;
 
   NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
@@ -174,6 +172,18 @@ class PresShell final : public nsIPresShell,
   void SetRestoreResolution(float aResolution,
                             LayoutDeviceIntSize aDisplaySize) override;
 
+  // Widget notificiations
+  void WindowSizeMoveDone() override;
+  void SysColorChanged() override { mPresContext->SysColorChanged(); }
+  void ThemeChanged() override { mPresContext->ThemeChanged(); }
+  void BackingScaleFactorChanged() override {
+    mPresContext->UIResolutionChangedSync();
+  }
+
+  void SynthesizeMouseMove(bool aFromScroll) override;
+
+  Document* GetPrimaryContentDocument() override;
+
   // nsIViewObserver interface
 
   void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
@@ -208,6 +218,8 @@ class PresShell final : public nsIPresShell,
 
   NS_IMETHOD SetSelectionFlags(int16_t aInEnable) override;
   NS_IMETHOD GetSelectionFlags(int16_t* aOutEnable) override;
+
+  using nsIPresShell::GetSelectionFlags;
 
   // nsISelectionController
 
@@ -269,11 +281,10 @@ class PresShell final : public nsIPresShell,
 
   void UpdateCanvasBackground() override;
 
-  void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
-                                    nsDisplayList& aList, nsIFrame* aFrame,
-                                    const nsRect& aBounds,
-                                    nscolor aBackstopColor,
-                                    uint32_t aFlags) override;
+  void AddCanvasBackgroundColorItem(
+      nsDisplayListBuilder& aBuilder, nsDisplayList& aList, nsIFrame* aFrame,
+      const nsRect& aBounds, nscolor aBackstopColor = NS_RGBA(0, 0, 0, 0),
+      uint32_t aFlags = 0) override;
 
   void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                      nsDisplayList& aList, nsIFrame* aFrame,
@@ -287,9 +298,7 @@ class PresShell final : public nsIPresShell,
     return (mMobileViewportManager != nullptr);
   }
 
-  RefPtr<MobileViewportManager> GetMobileViewportManager() const override {
-    return mMobileViewportManager;
-  }
+  RefPtr<MobileViewportManager> GetMobileViewportManager() const override;
 
   void UpdateViewportOverridden(bool aAfterInitialization) override;
 
@@ -519,7 +528,8 @@ class PresShell final : public nsIPresShell,
      *                                  PresShell should be set instead.  I.e.,
      *                                  in the latter case, the frame is in
      *                                  a parent document.
-     * @param aGUIEvent                 Event to be handled.
+     * @param aGUIEvent                 Event to be handled.  Must be a trusted
+     *                                  event.
      * @param aDontRetargetEvents       true if this shouldn't redirect the
      *                                  event to different PresShell.
      *                                  false if this can redirect the event to
@@ -538,7 +548,8 @@ class PresShell final : public nsIPresShell,
      * WidgetEvent, not WidgetGUIEvent.  So, you can dispatch a simple event
      * with this.
      *
-     * @param aEvent                    Event to be dispatched.
+     * @param aEvent                    Event to be dispatched.  Must be a
+     *                                  trusted event.
      * @param aNewEventFrame            Temporal new event frame.
      * @param aNewEventContent          Temporal new event content.
      * @param aEventStatus              [in/out] EventStuatus of aEvent.
@@ -564,12 +575,7 @@ class PresShell final : public nsIPresShell,
      * OnPresShellDestroy() is called when every PresShell instance is being
      * destroyed.
      */
-    static inline void OnPresShellDestroy(Document* aDocument) {
-      if (sLastKeyDownEventTargetElement &&
-          sLastKeyDownEventTargetElement->OwnerDoc() == aDocument) {
-        sLastKeyDownEventTargetElement = nullptr;
-      }
-    }
+    static inline void OnPresShellDestroy(Document* aDocument);
 
    private:
     static bool InZombieDocument(nsIContent* aContent);
@@ -987,7 +993,7 @@ class PresShell final : public nsIPresShell,
      * @return                          The element which should be the event
      *                                  target of aGUIEvent.
      */
-    Element* ComputeFocusedEventTargetElement(WidgetGUIEvent* aGUIEvent);
+    dom::Element* ComputeFocusedEventTargetElement(WidgetGUIEvent* aGUIEvent);
 
     /**
      * MaybeHandleEventWithAnotherPresShell() may handle aGUIEvent with another
@@ -1005,7 +1011,7 @@ class PresShell final : public nsIPresShell,
      *                                  can handle the event, this returns true.
      */
     MOZ_CAN_RUN_SCRIPT
-    bool MaybeHandleEventWithAnotherPresShell(Element* aEventTargetElement,
+    bool MaybeHandleEventWithAnotherPresShell(dom::Element* aEventTargetElement,
                                               WidgetGUIEvent* aGUIEvent,
                                               nsEventStatus* aEventStatus,
                                               nsresult* aRv);
@@ -1102,13 +1108,22 @@ class PresShell final : public nsIPresShell,
     /**
      * PrepareToDispatchEvent() prepares to dispatch aEvent.
      *
-     * @param aEvent            The handling event.
-     * @return                  true if the event is user interaction.  I.e.,
-     *                          enough obvious input to allow to open popup,
-     *                          etc.  false, otherwise.
+     * @param aEvent                    The handling event.
+     * @param aEventStatus              [in/out] The status of aEvent.
+     * @param aIsUserInteraction        [out] Set to true if the event is user
+     *                                  interaction.  I.e., enough obvious input
+     *                                  to allow to open popup, etc.  Otherwise,
+     *                                  set to false.
+     * @param aTouchIsNew               [out] Set to true if the event is an
+     *                                  eTouchMove event and it represents new
+     *                                  touch.  Otherwise, set to false.
+     * @return                          true if the caller can dispatch the
+     *                                  event into the DOM.
      */
     MOZ_CAN_RUN_SCRIPT
-    bool PrepareToDispatchEvent(WidgetEvent* aEvent);
+    bool PrepareToDispatchEvent(WidgetEvent* aEvent,
+                                nsEventStatus* aEventStatus,
+                                bool* aIsUserInteraction, bool* aTouchIsNew);
 
     /**
      * MaybeHandleKeyboardEventBeforeDispatch() may handle aKeyboardEvent
@@ -1119,16 +1134,6 @@ class PresShell final : public nsIPresShell,
     MOZ_CAN_RUN_SCRIPT
     void MaybeHandleKeyboardEventBeforeDispatch(
         WidgetKeyboardEvent* aKeyboardEvent);
-
-    /**
-     * PrepareToDispatchContextMenuEvent() prepares to dispatch aEvent into
-     * the DOM.
-     *
-     * @param aEvent            Must be eContextMenu event.
-     * @return                  true if it can be dispatched into the DOM.
-     *                          Otherwise, false.
-     */
-    bool PrepareToDispatchContextMenuEvent(WidgetEvent* aEvent);
 
     /**
      * This and the next two helper methods are used to target and position the
@@ -1279,10 +1284,8 @@ class PresShell final : public nsIPresShell,
     AutoCurrentEventInfoSetter* mCurrentEventInfoSetter;
     static TimeStamp sLastInputCreated;
     static TimeStamp sLastInputProcessed;
-    static StaticRefPtr<Element> sLastKeyDownEventTargetElement;
+    static StaticRefPtr<dom::Element> sLastKeyDownEventTargetElement;
   };
-
-  void SynthesizeMouseMove(bool aFromScroll) override;
 
   PresShell* GetRootPresShell();
 
@@ -1290,15 +1293,6 @@ class PresShell final : public nsIPresShell,
 
   // The callback for the mPaintSuppressionTimer timer.
   static void sPaintSuppressionCallback(nsITimer* aTimer, void* aPresShell);
-
-  // Widget notificiations
-  void WindowSizeMoveDone() override;
-  void SysColorChanged() override { mPresContext->SysColorChanged(); }
-  void ThemeChanged() override { mPresContext->ThemeChanged(); }
-  void BackingScaleFactorChanged() override {
-    mPresContext->UIResolutionChangedSync();
-  }
-  Document* GetPrimaryContentDocument() override;
 
   void PausePainting() override;
   void ResumePainting() override;
@@ -1355,6 +1349,7 @@ class PresShell final : public nsIPresShell,
   TouchManager mTouchManager;
 
   RefPtr<ZoomConstraintsClient> mZoomConstraintsClient;
+  RefPtr<GeckoMVMContext> mMVMContext;
   RefPtr<MobileViewportManager> mMobileViewportManager;
 
   // This timer controls painting suppression.  Until it fires

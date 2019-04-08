@@ -5,9 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ResponsiveImageSelector.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/TextUtils.h"
 #include "nsIURI.h"
+#include "nsIPresShellInlines.h"
 #include "mozilla/dom/Document.h"
 #include "nsContentUtils.h"
 #include "nsPresContext.h"
@@ -223,7 +225,7 @@ bool ResponsiveImageSelector::SetSizesFromDescriptor(const nsAString& aSizes) {
   ClearSelectedCandidate();
 
   NS_ConvertUTF16toUTF8 sizes(aSizes);
-  mServoSourceSizeList.reset(Servo_SourceSizeList_Parse(&sizes));
+  mServoSourceSizeList = Servo_SourceSizeList_Parse(&sizes).Consume();
   return !!mServoSourceSizeList;
 }
 
@@ -401,7 +403,7 @@ int ResponsiveImageSelector::GetSelectedCandidateIndex() {
 bool ResponsiveImageSelector::ComputeFinalWidthForCurrentViewport(
     double* aWidth) {
   dom::Document* doc = Document();
-  nsIPresShell* presShell = doc->GetShell();
+  PresShell* presShell = doc->GetPresShell();
   nsPresContext* pctx = presShell ? presShell->GetPresContext() : nullptr;
 
   if (!pctx) {

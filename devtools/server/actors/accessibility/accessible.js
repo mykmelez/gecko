@@ -12,13 +12,12 @@ loader.lazyRequireGetter(this, "getContrastRatioFor", "devtools/server/actors/ac
 loader.lazyRequireGetter(this, "isDefunct", "devtools/server/actors/utils/accessibility", true);
 loader.lazyRequireGetter(this, "findCssSelector", "devtools/shared/inspector/css-logic", true);
 
-const nsIAccessibleRelation = Ci.nsIAccessibleRelation;
 const RELATIONS_TO_IGNORE = new Set([
-  nsIAccessibleRelation.RELATION_CONTAINING_APPLICATION,
-  nsIAccessibleRelation.RELATION_CONTAINING_TAB_PANE,
-  nsIAccessibleRelation.RELATION_CONTAINING_WINDOW,
-  nsIAccessibleRelation.RELATION_PARENT_WINDOW_OF,
-  nsIAccessibleRelation.RELATION_SUBWINDOW_OF,
+  Ci.nsIAccessibleRelation.RELATION_CONTAINING_APPLICATION,
+  Ci.nsIAccessibleRelation.RELATION_CONTAINING_TAB_PANE,
+  Ci.nsIAccessibleRelation.RELATION_CONTAINING_WINDOW,
+  Ci.nsIAccessibleRelation.RELATION_PARENT_WINDOW_OF,
+  Ci.nsIAccessibleRelation.RELATION_SUBWINDOW_OF,
 ]);
 
 const nsIAccessibleRole = Ci.nsIAccessibleRole;
@@ -312,7 +311,7 @@ const AccessibleActor = ActorClassWithSpec(accessibleSpec, {
     }
 
     const relations =
-      [...this.rawAccessible.getRelations().enumerate(nsIAccessibleRelation)];
+      [...this.rawAccessible.getRelations().enumerate(Ci.nsIAccessibleRelation)];
     if (relations.length === 0) {
       return relationObjects;
     }
@@ -389,13 +388,13 @@ const AccessibleActor = ActorClassWithSpec(accessibleSpec, {
 
     const { DOMNode: rawNode } = this.rawAccessible;
     const win = rawNode.ownerGlobal;
-    this.walker.loadTransitionDisablingStyleSheet(win);
+    this.walker.clearStyles(win);
     const contrastRatio = await getContrastRatioFor(rawNode.parentNode, {
       bounds: this.bounds,
       win,
     });
 
-    this.walker.removeTransitionDisablingStyleSheet(win);
+    this.walker.restoreStyles(win);
 
     return contrastRatio;
   },
@@ -407,16 +406,27 @@ const AccessibleActor = ActorClassWithSpec(accessibleSpec, {
    *         Audit results for the accessible object.
   */
   async audit() {
-    // More audit steps will be added here in the near future. In addition to colour
-    // contrast ratio we will add autits for to the missing names, invalid states, etc.
-    // (For example see bug 1518808).
-    const [ contrastRatio ] = await Promise.all([
-      this._getContrastRatio(),
-    ]);
+    if (this._auditing) {
+      return this._auditing;
+    }
 
-    return this.isDefunct ? null : {
+    // More audit steps will be added here in the near future. In addition to
+    // colour contrast ratio we will add autits for to the missing names,
+    // invalid states, etc. (For example see bug 1518808).
+    this._auditing = Promise.all([
+      this._getContrastRatio(),
+    ]).then(([
       contrastRatio,
-    };
+    ]) => {
+      const audit = this.isDefunct ? null : {
+        contrastRatio,
+      };
+
+      this._auditing = null;
+      return audit;
+    });
+
+    return this._auditing;
   },
 
   snapshot() {

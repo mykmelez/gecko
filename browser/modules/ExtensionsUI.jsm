@@ -86,7 +86,7 @@ var ExtensionsUI = {
             }
 
             this.sideloaded.delete(addon);
-              this._updateNotifications();
+            this._updateNotifications();
 
             if (this.sideloaded.size == 0) {
               AddonManager.removeAddonListener(this.sideloadListener);
@@ -140,6 +140,15 @@ var ExtensionsUI = {
         .then(async answer => {
           if (answer) {
             await addon.enable();
+
+            this._updateNotifications();
+
+            // The user has just enabled a sideloaded extension, if the permission
+            // can be changed for the extension, show the post-install panel to
+            // give the user that opportunity.
+            if (addon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS) {
+              this.showInstallNotification(browser, addon);
+            }
           }
           this.emit("sideload-response");
         });
@@ -445,7 +454,7 @@ var ExtensionsUI = {
       function setCheckbox(win) {
         let checkbox = win.document.getElementById("addon-incognito-checkbox");
         checkbox.checked = false;
-        checkbox.hidden = allowPrivateBrowsingByDefault || addon.type !== "extension";
+        checkbox.hidden = !(addon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS);
       }
       setCheckbox(window);
 

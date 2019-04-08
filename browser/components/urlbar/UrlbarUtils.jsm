@@ -66,6 +66,8 @@ var UrlbarUtils = {
   },
 
   // Defines UrlbarResult types.
+  // If you add new result types, consider checking if consumers of
+  // "urlbar-user-start-navigation" need update as well.
   RESULT_TYPE: {
     // An open tab.
     // Payload: { icon, url, userContextId }
@@ -91,6 +93,8 @@ var UrlbarUtils = {
   // can return results from more than one source. This is used by the
   // ProvidersManager to decide which providers must be queried and which
   // results can be returned.
+  // If you add new source types, consider checking if consumers of
+  // "urlbar-user-start-navigation" need update as well.
   RESULT_SOURCE: {
     BOOKMARKS: 1,
     HISTORY: 2,
@@ -111,6 +115,7 @@ var UrlbarUtils = {
     NONE: 1,
     COMPOSING: 2,
     COMMIT: 3,
+    CANCELED: 4,
   },
 
   // This defines possible reasons for canceling a query.
@@ -391,6 +396,8 @@ class UrlbarQueryContext {
    *   The maximum number of results that will be displayed for this query.
    * @param {boolean} options.allowAutofill
    *   Whether or not to allow providers to include autofill results.
+   * @param {number} options.userContextId
+   *   The container id where this context was generated, if any.
    */
   constructor(options = {}) {
     this._checkRequiredOptions(options, [
@@ -414,6 +421,8 @@ class UrlbarQueryContext {
         (!Array.isArray(options.sources) || !options.sources.length)) {
       throw new Error(`Invalid sources list`);
     }
+
+    this.userContextId = options.userContextId;
   }
 
   /**

@@ -13,15 +13,19 @@ import org.mozilla.gecko.util.GeckoBundle;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.geckoview.BuildConfig;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
+import android.os.Debug;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.MessageQueue;
+import android.os.Process;
 import android.os.SystemClock;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
@@ -130,7 +134,6 @@ public class GeckoThread extends Thread {
     public static final int FLAG_DEBUGGING = 1 << 0; // Debugging mode.
     public static final int FLAG_PRELOAD_CHILD = 1 << 1; // Preload child during main thread start.
     public static final int FLAG_ENABLE_NATIVE_CRASHREPORTER = 1 << 2; // Enable native crash reporting.
-    public static final int FLAG_ENABLE_MARIONETTE = 1 << 3; // Enable Marionette at startup.
 
     public static final long DEFAULT_TIMEOUT = 5000;
 
@@ -176,7 +179,7 @@ public class GeckoThread extends Thread {
 
     private synchronized boolean initInternal(final InitInfo info) {
         ThreadUtils.assertOnUiThread();
-        uiThreadId = android.os.Process.myTid();
+        uiThreadId = Process.myTid();
 
         if (mInitialized) {
             return false;
@@ -432,11 +435,10 @@ public class GeckoThread extends Thread {
             env.add(0, "MOZ_CRASHREPORTER=1");
         }
 
-        if (!isChildProcess() && ((mInitInfo.flags & FLAG_ENABLE_MARIONETTE) != 0)) {
-            // The presence of this environment variable determines the initial
-            // value of `marionette.enabled`.
-            env.add(0, "MOZ_MARIONETTE=1");
-        }
+        // Very early -- before we load mozglue -- wait for Java debuggers.  This allows to connect
+        // a dual/hybrid debugger as well, allowing to debug child processes -- including the
+        // mozglue loading process.
+        maybeWaitForJavaDebugger(context, env);
 
         GeckoLoader.loadMozGlue(context);
         setState(State.MOZGLUE_READY);
@@ -488,6 +490,67 @@ public class GeckoThread extends Thread {
 
         // Remove pumpMessageLoop() idle handler
         Looper.myQueue().removeIdleHandler(idleHandler);
+    }
+
+    private static void maybeWaitForJavaDebugger(final @NonNull Context context, final @NonNull List<String> env) {
+        for (final String e : env) {
+            if (e == null) {
+                continue;
+            }
+
+            if (e.equals("MOZ_DEBUG_WAIT_FOR_JAVA_DEBUGGER=1")) {
+                if (!isChildProcess()) {
+                    final String processName = getProcessName(context);
+                    waitForJavaDebugger(processName);
+                }
+            }
+
+            if (e.startsWith("MOZ_DEBUG_CHILD_WAIT_FOR_JAVA_DEBUGGER=")) {
+                String filter = e.substring("MOZ_DEBUG_CHILD_WAIT_FOR_JAVA_DEBUGGER=".length());
+                if (isChildProcess()) {
+                    final String processName = getProcessName(context);
+                    if (processName == null || processName.endsWith(filter)) {
+                        waitForJavaDebugger(processName);
+                    }
+                }
+            }
+        }
+    }
+
+    private static @Nullable String getProcessName(final @NonNull Context context) {
+        final int pid = Process.myPid();
+        final ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+
+        // This can be quite slow, and it can return null.
+        List<ActivityManager.RunningAppProcessInfo> processInfos = manager.getRunningAppProcesses();
+
+        if (processInfos == null) {
+            return null;
+        }
+
+        for (ActivityManager.RunningAppProcessInfo processInfo : processInfos) {
+            if (processInfo.pid == pid) {
+                return processInfo.processName;
+            }
+        }
+
+        return null;
+    }
+
+    private static void waitForJavaDebugger(final @Nullable String processName) {
+        final int pid = Process.myPid();
+        final String processIdentification = (isChildProcess() ? "Child process " : "Main process ") +
+                (processName != null ? processName : "<unknown>") +
+                " (" + pid + ")";
+
+        if (Debug.isDebuggerConnected()) {
+            Log.i(LOGTAG, processIdentification + ": Waiting for Java debugger ... " + " already connected");
+            return;
+        }
+
+        Log.w(LOGTAG, processIdentification + ": Waiting for Java debugger ...");
+        Debug.waitForDebugger();
+        Log.w(LOGTAG, processIdentification + ": Waiting for Java debugger ... connected");
     }
 
     @WrapForJNI(calledFrom = "gecko")

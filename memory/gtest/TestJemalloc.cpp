@@ -6,6 +6,7 @@
 
 #include "mozilla/mozalloc.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/Unused.h"
 #include "mozilla/Vector.h"
 #include "mozmemory.h"
 #include "nsCOMPtr.h"
@@ -65,7 +66,8 @@ static inline void TestThree(size_t size) {
   ASSERT_NO_FATAL_FAILURE(TestOne(size + 1));
 }
 
-TEST(Jemalloc, UsableSizeInAdvance) {
+TEST(Jemalloc, UsableSizeInAdvance)
+{
   /*
    * Test every size up to a certain point, then (N-1, N, N+1) triplets for a
    * various sizes beyond that.
@@ -96,7 +98,8 @@ bool InfoEqFreedPage(jemalloc_ptr_info_t& aInfo, void* aAddr,
          aInfo.size == aPageSize;
 }
 
-TEST(Jemalloc, PtrInfo) {
+TEST(Jemalloc, PtrInfo)
+{
   // Some things might be running in other threads, so ensure our assumptions
   // (e.g. about isFreedSmall and isFreedPage ratios below) are not altered by
   // other threads.
@@ -252,7 +255,8 @@ TEST(Jemalloc, PtrInfo) {
 size_t sSizes[] = {1,      42,      79,      918,     1.5_KiB,
                    73_KiB, 129_KiB, 1.1_MiB, 2.6_MiB, 5.1_MiB};
 
-TEST(Jemalloc, Arenas) {
+TEST(Jemalloc, Arenas)
+{
   arena_id_t arena = moz_create_arena();
   ASSERT_TRUE(arena != 0);
   void* ptr = moz_arena_malloc(arena, 42);
@@ -361,8 +365,8 @@ class SizeClassesBetween {
 static bool IsSameRoundedHugeClass(size_t aSize1, size_t aSize2,
                                    jemalloc_stats_t& aStats) {
   return (aSize1 > aStats.large_max && aSize2 > aStats.large_max &&
-          ALIGNMENT_CEILING(aSize1, aStats.chunksize) ==
-              ALIGNMENT_CEILING(aSize2, aStats.chunksize));
+          ALIGNMENT_CEILING(aSize1 + aStats.page_size, aStats.chunksize) ==
+              ALIGNMENT_CEILING(aSize2 + aStats.page_size, aStats.chunksize));
 }
 
 static bool CanReallocInPlace(size_t aFromSize, size_t aToSize,
@@ -384,7 +388,8 @@ static bool CanReallocInPlace(size_t aFromSize, size_t aToSize,
   return false;
 }
 
-TEST(Jemalloc, InPlace) {
+TEST(Jemalloc, InPlace)
+{
   jemalloc_stats_t stats;
   jemalloc_stats(&stats);
 
@@ -416,9 +421,16 @@ TEST(Jemalloc, InPlace) {
 // Bug 1474254: disable this test for windows ccov builds because it leads to
 // timeout.
 #if !defined(XP_WIN) || !defined(MOZ_CODE_COVERAGE)
-TEST(Jemalloc, JunkPoison) {
+TEST(Jemalloc, JunkPoison)
+{
   jemalloc_stats_t stats;
   jemalloc_stats(&stats);
+
+#  ifdef HAS_GDB_SLEEP_DURATION
+  // Avoid death tests adding some unnecessary (long) delays.
+  unsigned int old_gdb_sleep_duration = _gdb_sleep_duration;
+  _gdb_sleep_duration = 0;
+#  endif
 
   // Create buffers in a separate arena, for faster comparisons with
   // bulk_compare.
@@ -494,29 +506,33 @@ TEST(Jemalloc, JunkPoison) {
         memset(ptr, fill, moz_malloc_usable_size(ptr));
         char* ptr2 = (char*)moz_arena_realloc(arena, ptr, to_size);
         ASSERT_EQ(ptr, ptr2);
+        // Shrinking allocation
         if (from_size >= to_size) {
           ASSERT_NO_FATAL_FAILURE(
               bulk_compare(ptr, 0, to_size, fill_buf, stats.page_size));
-          // On Windows (MALLOC_DECOMMIT), in-place realloc of huge allocations
-          // decommits extra pages, writing to them becomes an error.
-#  ifdef XP_WIN
+          // Huge allocations have guards and will crash when accessing
+          // beyond the valid range.
           if (to_size > stats.large_max) {
             size_t page_limit = ALIGNMENT_CEILING(to_size, stats.page_size);
             ASSERT_NO_FATAL_FAILURE(bulk_compare(ptr, to_size, page_limit,
                                                  poison_buf, stats.page_size));
             ASSERT_DEATH_WRAP(ptr[page_limit] = 0, "");
-          } else
-#  endif
-          {
+          } else {
             ASSERT_NO_FATAL_FAILURE(bulk_compare(ptr, to_size, from_size,
                                                  poison_buf, stats.page_size));
           }
         } else {
+          // Enlarging allocation
           ASSERT_NO_FATAL_FAILURE(
               bulk_compare(ptr, 0, from_size, fill_buf, stats.page_size));
           if (stats.opt_junk || stats.opt_zero) {
             ASSERT_NO_FATAL_FAILURE(bulk_compare(ptr, from_size, to_size,
                                                  junk_buf, stats.page_size));
+          }
+          // Huge allocation, so should have a guard page following
+          if (to_size > stats.large_max) {
+            ASSERT_DEATH_WRAP(
+                ptr[ALIGNMENT_CEILING(to_size, stats.page_size)] = 0, "");
           }
         }
         moz_arena_free(arena, ptr2);
@@ -600,5 +616,9 @@ TEST(Jemalloc, JunkPoison) {
   moz_arena_free(buf_arena, junk_buf);
   // Until Bug 1364359 is fixed it is unsafe to call moz_dispose_arena.
   // moz_dispose_arena(buf_arena);
+
+#  ifdef HAS_GDB_SLEEP_DURATION
+  _gdb_sleep_duration = old_gdb_sleep_duration;
+#  endif
 }
 #endif

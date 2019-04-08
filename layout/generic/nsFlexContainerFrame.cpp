@@ -21,6 +21,7 @@
 #include "gfxContext.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/UniquePtr.h"
 #include "WritingModes.h"
 
@@ -3909,6 +3910,27 @@ static nscoord GetLargestLineMainSize(const FlexLine* aFirstLine) {
   return largestLineOuterSize;
 }
 
+/**
+ * Returns true if aFrame or any of its children have the
+ * NS_FRAME_CONTAINS_RELATIVE_BSIZE flag set -- i.e. if any of these frames (or
+ * their descendants) might have a relative-BSize dependency on aFrame (or its
+ * ancestors).
+ */
+static bool FrameHasRelativeBSizeDependency(nsIFrame* aFrame) {
+  if (aFrame->HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
+    return true;
+  }
+  for (nsIFrame::ChildListIterator childLists(aFrame); !childLists.IsDone();
+       childLists.Next()) {
+    for (nsIFrame* childFrame : childLists.CurrentList()) {
+      if (childFrame->HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /* Resolves the content-box main-size of a flex container frame,
  * primarily based on:
  * - the "tentative" main size, taken from the reflow state ("tentative"
@@ -4208,8 +4230,6 @@ void nsFlexContainerFrame::Reflow(nsPresContext* aPresContext,
     AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
   }
 
-  RenumberList();
-
   const FlexboxAxisTracker axisTracker(this, aReflowInput.GetWritingMode());
 
   // Check to see if we need to create a computed info structure, to
@@ -4401,11 +4421,11 @@ nsFlexContainerFrame* nsFlexContainerFrame::GetFlexFrameWithComputedInfo(
       // Hold onto aFrame while we do this, in case reflow destroys it.
       AutoWeakFrame weakFrameRef(aFrame);
 
-      nsIPresShell* shell = flexFrame->PresContext()->PresShell();
+      RefPtr<mozilla::PresShell> presShell = flexFrame->PresShell();
       flexFrame->AddStateBits(NS_STATE_FLEX_GENERATE_COMPUTED_VALUES);
-      shell->FrameNeedsReflow(flexFrame, nsIPresShell::eResize,
-                              NS_FRAME_IS_DIRTY);
-      shell->FlushPendingNotifications(FlushType::Layout);
+      presShell->FrameNeedsReflow(flexFrame, nsIPresShell::eResize,
+                                  NS_FRAME_IS_DIRTY);
+      presShell->FlushPendingNotifications(FlushType::Layout);
 
       // Since the reflow may have side effects, get the flex frame
       // again. But if the weakFrameRef is no longer valid, then we
@@ -4834,12 +4854,11 @@ void nsFlexContainerFrame::DoFlexLayout(
         if (finalFlexItemCBSize ==
             LogicalSize(flexWM,
                         item->Frame()->GetContentRectRelativeToSelf().Size())) {
-          // Even if our size hasn't changed, some of our descendants might
-          // care that our bsize is now considered "definite" (whereas it
+          // Even if the child's size hasn't changed, some of its descendants
+          // might care that its bsize is now considered "definite" (whereas it
           // wasn't in our previous "measuring" reflow), if they have a
           // relative bsize.
-          if (!(item->Frame()->GetStateBits() &
-                NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
+          if (!FrameHasRelativeBSizeDependency(item->Frame())) {
             // Item has the correct size (and its children don't care that
             // it's now "definite"). Let's just make sure it's at the right
             // position.
@@ -5147,8 +5166,6 @@ void nsFlexContainerFrame::ReflowPlaceholders(
 nscoord nsFlexContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
                                              IntrinsicISizeType aType) {
   nscoord containerISize = 0;
-  RenumberList();
-
   const nsStylePosition* stylePos = StylePosition();
   const FlexboxAxisTracker axisTracker(this, GetWritingMode());
 

@@ -111,6 +111,10 @@ detail-last-updated =
 
 detail-contributions-description = The developer of this add-on asks that you help support its continued development by making a small contribution.
 
+detail-contributions-button = Contribute
+    .title = Contribute to the development of this add-on
+    .accesskey = C
+
 detail-update-type =
     .value = Automatic Updates
 
@@ -130,6 +134,15 @@ detail-update-manual =
 detail-private-browsing-label = Run in Private Windows
 
 detail-private-browsing-description2 = When allowed, the extension will have access to your online activities while private browsing. <label data-l10n-name="detail-private-browsing-learn-more">Learn more</label>
+
+# Some add-ons may elect to not run in private windows by setting incognito: not_allowed in the manifest.  This
+# cannot be overriden by the user.
+detail-private-disallowed-label = Not Allowed in Private Windows
+detail-private-disallowed-description = This extension does not run while private browsing. <label data-l10n-name="detail-private-browsing-learn-more">Learn more</label>
+
+# Some special add-ons are privileged, run in private windows automatically, and this permission can't be revoked
+detail-private-required-label = Requires Access to Private Windows
+detail-private-required-description = This extension has access to your online activities while private browsing. <label data-l10n-name="detail-private-browsing-learn-more">Learn more</label>
 
 detail-private-browsing-on =
     .label = Allow
@@ -315,6 +328,10 @@ shortcuts-modifier-other = Include Ctrl or Alt
 shortcuts-invalid = Invalid combination
 shortcuts-letter = Type a letter
 shortcuts-system = Can’t override a { -brand-short-name } shortcut
+# String displayed when a keyboard shortcut is already used by another add-on
+# Variables:
+#   $addon (string) - Name of the add-on
+shortcuts-exists = Already in use by { $addon }
 
 shortcuts-card-expand-button =
     { $numberToShow ->
@@ -334,3 +351,23 @@ expand-addon-button = More Options
 
 addons-enabled-heading = Enabled
 addons-disabled-heading = Disabled
+
+addon-detail-author-label = Author
+addon-detail-version-label = Version
+addon-detail-last-updated-label = Last Updated
+addon-detail-homepage-label = Homepage
+addon-detail-rating-label = Rating
+
+# This string is used to show that an add-on is disabled.
+# Variables:
+#   $name (string) - The name of the add-on
+addon-name-disabled = { $name } (disabled)
+
+# The number of reviews that an add-on has received on AMO.
+# Variables:
+#   $numberOfReviews (number) - The number of reviews received
+addon-detail-reviews-link =
+    { $numberOfReviews ->
+        [one] { $numberOfReviews } review
+       *[other] { $numberOfReviews } reviews
+    }

@@ -10,10 +10,17 @@
 #include "nsAppShell.h"
 #include "nsIXPConnect.h"
 #include "nsJSUtils.h"
+#include "js/Warnings.h"  // JS::WarnUTF8
 #include "xpcpublic.h"
 
 #include "mozilla/ScopeExit.h"
 #include "mozilla/dom/ScriptSettings.h"
+
+// Disable the C++ 2a warning. See bug #1509926
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wc++2a-compat"
+#endif
 
 namespace mozilla {
 namespace widget {
@@ -290,7 +297,7 @@ nsresult BoxData(const nsAString& aEvent, JSContext* aCx, JS::HandleValue aData,
 
   NS_ConvertUTF16toUTF8 event(aEvent);
   if (JS_IsExceptionPending(aCx)) {
-    JS_ReportWarningUTF8(aCx, "Error dispatching %s", event.get());
+    JS::WarnUTF8(aCx, "Error dispatching %s", event.get());
   } else {
     JS_ReportErrorUTF8(aCx, "Invalid event data for %s", event.get());
   }
@@ -397,7 +404,7 @@ nsresult UnboxArrayPrimitive(JSContext* aCx, const jni::Object::LocalRef& aData,
   JNIEnv* const env = aData.Env();
   const ArrayType jarray = ArrayType(aData.Get());
   JNIType* const array = (env->*GetElements)(jarray, nullptr);
-  JS::AutoValueVector elements(aCx);
+  JS::RootedVector<JS::Value> elements(aCx);
 
   if (NS_WARN_IF(!array)) {
     env->ExceptionClear();
@@ -560,7 +567,7 @@ nsresult UnboxData(jni::String::Param aEvent, JSContext* aCx,
 
   nsCString event = aEvent->ToCString();
   if (JS_IsExceptionPending(aCx)) {
-    JS_ReportWarningUTF8(aCx, "Error dispatching %s", event.get());
+    JS::WarnUTF8(aCx, "Error dispatching %s", event.get());
   } else {
     JS_ReportErrorUTF8(aCx, "Invalid event data for %s", event.get());
   }
@@ -1032,3 +1039,7 @@ nsresult EventDispatcher::UnboxBundle(JSContext* aCx, jni::Object::Param aData,
 
 }  // namespace widget
 }  // namespace mozilla
+
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif

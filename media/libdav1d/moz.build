@@ -30,18 +30,37 @@ SOURCES += [f for f in entrypoint_source_files]
 DEFINES['DAV1D_API'] = ''
 
 if CONFIG['MOZ_DAV1D_ASM']:
-    # Default stack alignment is 16 bytes
     DIRS += ['asm']
-    if CONFIG['OS_TARGET'] in ('WINNT', 'Darwin') and CONFIG['CPU_ARCH'] == 'x86_64':
-         # Update stack alignment to 32 bytes
-         if CONFIG['CC_TYPE'] == 'clang':
-             CFLAGS += ['-mstack-alignment=32']
-             for ep in entrypoint_source_files:
-                 SOURCES[ep].flags += ['-mstackrealign']
-         elif CONFIG['CC_TYPE'] == 'gcc':
-             CFLAGS += ['-mpreferred-stack-boundary=5']
-             for ep in entrypoint_source_files:
-                 SOURCES[ep].flags += ['-mincoming-stack-boundary=4']
+
+    # Store the stack alignment that will be used.
+    stack_alignment = 0
+
+    # Default stack alignment can be 4 bytes on x86.
+    if CONFIG['CPU_ARCH'] == 'x86':
+        if CONFIG['OS_TARGET'] == 'WINNT':
+            # Allow the default to avoid crashes
+            stack_alignment = 4
+        else:
+            # Update stack alignment to 16 bytes.
+            stack_alignment = 16
+            if CONFIG['CC_TYPE'] == 'clang':
+                CFLAGS += ['-mstack-alignment=16']
+                for ep in entrypoint_source_files:
+                    SOURCES[ep].flags += ['-mstackrealign']
+            elif CONFIG['CC_TYPE'] == 'gcc':
+                CFLAGS += ['-mpreferred-stack-boundary=4']
+                for ep in entrypoint_source_files:
+                    SOURCES[ep].flags += ['-mincoming-stack-boundary=2']
+    elif CONFIG['CPU_ARCH'] == 'x86_64':
+        # The default stack alignment in x86_64 is 16 bytes.
+        stack_alignment = 16
+    else:
+        error('Cpu arch %s is not expected' % CONFIG['CPU_ARCH'])
+
+    # Set the macro here instead of config.h
+    if stack_alignment == 0:
+        error('Stack alignment cannot be zero.')
+    DEFINES['STACK_ALIGNMENT'] = stack_alignment
 
 if CONFIG['OS_TARGET'] == 'Linux':
     # For fuzzing, We only support building on Linux currently.

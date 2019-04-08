@@ -11,8 +11,8 @@
 #include "mozilla/dom/TabParent.h"           // for TabParent
 #include "mozilla/EventDispatcher.h"         // for EventDispatcher
 #include "mozilla/layout/RenderFrame.h"      // For RenderFrame
+#include "mozilla/PresShell.h"               // For PresShell and nsIPresShell
 #include "nsIContentInlines.h"               // for nsINode::IsEditable()
-#include "nsIPresShell.h"                    // for nsIPresShell
 #include "nsLayoutUtils.h"                   // for nsLayoutUtils
 
 #define ENABLE_FT_LOGGING 0
@@ -49,7 +49,7 @@ static already_AddRefed<nsIPresShell> GetRetargetEventPresShell(
     return nullptr;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = retargetEventDoc->GetShell();
+  nsCOMPtr<nsIPresShell> presShell = retargetEventDoc->GetPresShell();
   return presShell.forget();
 }
 
@@ -221,6 +221,19 @@ FocusTarget::FocusTarget(nsIPresShell* aRootPresShell,
   ScrollTargets target;
   target.mHorizontal = nsLayoutUtils::FindIDForScrollableFrame(horizontal);
   target.mVertical = nsLayoutUtils::FindIDForScrollableFrame(vertical);
+  if (XRE_IsContentProcess()) {
+    target.mHorizontalRenderRoot = gfxUtils::GetContentRenderRoot();
+    target.mVerticalRenderRoot = gfxUtils::GetContentRenderRoot();
+  } else {
+    target.mHorizontalRenderRoot =
+        horizontal ? gfxUtils::RecursivelyGetRenderRootForFrame(
+                         horizontal->GetScrolledFrame())
+                   : wr::RenderRoot::Default;
+    target.mVerticalRenderRoot =
+        vertical ? gfxUtils::RecursivelyGetRenderRootForFrame(
+                       vertical->GetScrolledFrame())
+                 : wr::RenderRoot::Default;
+  }
   mData = AsVariant(target);
 
   FT_LOG("Creating scroll target with seq=%" PRIu64 ", kl=%d, h=%" PRIu64

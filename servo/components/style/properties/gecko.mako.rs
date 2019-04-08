@@ -40,8 +40,6 @@ use crate::gecko_bindings::structs::nsCSSPropertyID;
 use crate::gecko_bindings::structs::mozilla::PseudoStyleType;
 use crate::gecko_bindings::sugar::ns_style_coord::{CoordDataValue, CoordData, CoordDataMut};
 use crate::gecko_bindings::sugar::refptr::RefPtr;
-use crate::gecko::values::convert_nscolor_to_rgba;
-use crate::gecko::values::convert_rgba_to_nscolor;
 use crate::gecko::values::GeckoStyleCoordConvertible;
 use crate::gecko::values::round_border_to_device_pixels;
 use crate::logical_geometry::WritingMode;
@@ -66,16 +64,25 @@ use crate::values::generics::url::UrlOrNone;
 pub mod style_structs {
     % for style_struct in data.style_structs:
     pub use super::${style_struct.gecko_struct_name} as ${style_struct.name};
+
+    unsafe impl Send for ${style_struct.name} {}
+    unsafe impl Sync for ${style_struct.name} {}
     % endfor
+
 }
 
 /// FIXME(emilio): This is completely duplicated with the other properties code.
-pub type ComputedValuesInner = crate::gecko_bindings::structs::ServoComputedData;
+pub type ComputedValuesInner = structs::ServoComputedData;
 
 #[repr(C)]
-pub struct ComputedValues(crate::gecko_bindings::structs::mozilla::ComputedStyle);
+pub struct ComputedValues(structs::mozilla::ComputedStyle);
 
 impl ComputedValues {
+    #[inline]
+    pub (crate) fn as_gecko_computed_style(&self) -> &structs::ComputedStyle {
+        &self.0
+    }
+
     pub fn new(
         pseudo: Option<<&PseudoElement>,
         custom_properties: Option<Arc<CustomPropertiesMap>>,
@@ -388,34 +395,6 @@ def set_gecko_property(ffi_name, expr):
     }
 </%def>
 
-<%def name="impl_color_setter(ident, gecko_ffi_name)">
-    #[allow(unreachable_code)]
-    #[allow(non_snake_case)]
-    pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        ${set_gecko_property(gecko_ffi_name, "v.into()")}
-    }
-</%def>
-
-<%def name="impl_color_copy(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    pub fn copy_${ident}_from(&mut self, other: &Self) {
-        let color = ${get_gecko_property(gecko_ffi_name, self_param = "other")};
-        ${set_gecko_property(gecko_ffi_name, "color")};
-    }
-
-    #[allow(non_snake_case)]
-    pub fn reset_${ident}(&mut self, other: &Self) {
-        self.copy_${ident}_from(other)
-    }
-</%def>
-
-<%def name="impl_color_clone(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        ${get_gecko_property(gecko_ffi_name)}.into()
-    }
-</%def>
-
 <%def name="impl_keyword(ident, gecko_ffi_name, keyword, cast_type='u8', **kwargs)">
 <%call expr="impl_keyword_setter(ident, gecko_ffi_name, keyword, cast_type, **kwargs)"></%call>
 <%call expr="impl_simple_copy(ident, gecko_ffi_name, **kwargs)"></%call>
@@ -437,24 +416,6 @@ def set_gecko_property(ffi_name, expr):
     #[allow(non_snake_case)]
     pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         Au(self.gecko.${gecko_ffi_name}).into()
-    }
-</%def>
-
-<%def name="impl_color(ident, gecko_ffi_name)">
-<%call expr="impl_color_setter(ident, gecko_ffi_name)"></%call>
-<%call expr="impl_color_copy(ident, gecko_ffi_name)"></%call>
-<%call expr="impl_color_clone(ident, gecko_ffi_name)"></%call>
-</%def>
-
-<%def name="impl_rgba_color(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        ${set_gecko_property(gecko_ffi_name, "convert_rgba_to_nscolor(&v)")}
-    }
-    <%call expr="impl_simple_copy(ident, gecko_ffi_name)"></%call>
-    #[allow(non_snake_case)]
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        convert_nscolor_to_rgba(${get_gecko_property(gecko_ffi_name)})
     }
 </%def>
 
@@ -817,7 +778,7 @@ def set_gecko_property(ffi_name, expr):
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
         match v {
             UrlOrNone::Url(ref url) => {
-                self.gecko.${gecko_ffi_name}.set_move(url.0.url_value.clone())
+                self.gecko.${gecko_ffi_name}.set_move(url.clone_url_value())
             }
             UrlOrNone::None => {
                 unsafe {
@@ -929,7 +890,7 @@ transform_functions = [
                 debug_assert!(!${item}${index + 1}.0.is_empty());
             % endif
             ${css_value_setters[item] % (
-                "bindings::Gecko_CSSValue_GetArrayItem(gecko_value, %d)" % (index + 1),
+                "(&mut *bindings::Gecko_CSSValue_GetArrayItem(gecko_value, %d))" % (index + 1),
                 item + str(index + 1)
             )};
         % endfor
@@ -980,7 +941,7 @@ transform_functions = [
             % endif
             <%
                 getter = css_value_getters[item] % (
-                    "bindings::Gecko_CSSValue_GetArrayItemConst(gecko_value, %d)" % (index + 1)
+                    "(&*bindings::Gecko_CSSValue_GetArrayItemConst(gecko_value, %d))" % (index + 1)
                 )
             %>
             ${getter},
@@ -989,6 +950,7 @@ transform_functions = [
     },
 </%def>
 
+#[allow(unused_parens)]
 fn set_single_transform_function(
     servo_value: &values::computed::TransformOperation,
     gecko_value: &mut structs::nsCSSValue /* output */
@@ -1031,6 +993,7 @@ pub fn convert_transform(
     output.set_move(list);
 }
 
+#[allow(unused_parens)]
 fn clone_single_transform_function(
     gecko_value: &structs::nsCSSValue
 ) -> values::computed::TransformOperation {
@@ -1227,17 +1190,8 @@ impl Clone for ${style_struct.gecko_struct_name} {
 
     # Types used with predefined_type()-defined properties that we can auto-generate.
     predefined_types = {
-        "Color": impl_color,
-        "ColorOrAuto": impl_color,
-        "length::LengthOrAuto": impl_style_coord,
-        "length::LengthOrNormal": impl_style_coord,
-        "length::NonNegativeLengthOrAuto": impl_style_coord,
         "length::NonNegativeLengthPercentageOrNormal": impl_style_coord,
-        "Length": impl_absolute_length,
-        "LengthOrNormal": impl_style_coord,
-        "LengthPercentageOrAuto": impl_style_coord,
         "MozScriptMinSize": impl_absolute_length,
-        "RGBAColor": impl_rgba_color,
         "SVGLength": impl_svg_length,
         "SVGOpacity": impl_svg_opacity,
         "SVGPaint": impl_svg_paint,
@@ -1367,7 +1321,7 @@ fn static_assert() {
         self.gecko.mBorderStyle[${side.index}]
     }
 
-    <% impl_color("border_%s_color" % side.ident, "mBorder%sColor" % side.name) %>
+    <% impl_simple("border_%s_color" % side.ident, "mBorder%sColor" % side.name) %>
 
     <% impl_non_negative_length("border_%s_width" % side.ident,
                                 "mComputedBorder.%s" % side.ident,
@@ -1972,18 +1926,20 @@ fn static_assert() {
     <% impl_font_settings("font_variation_settings", "gfxFontVariation", "VariationValue", "f32", "f32") %>
 
     pub fn set_font_family(&mut self, v: longhands::font_family::computed_value::T) {
-        use crate::gecko_bindings::structs::FontFamilyType;
+        use crate::values::computed::font::GenericFontFamily;
 
         let is_system_font = v.is_system_font;
         self.gecko.mFont.systemFont = is_system_font;
         self.gecko.mGenericID = if is_system_font {
-            structs::kGenericFont_NONE
+            GenericFontFamily::None
         } else {
-            v.families.single_generic().unwrap_or(structs::kGenericFont_NONE)
+            v.families.single_generic().unwrap_or(GenericFontFamily::None)
         };
-        self.gecko.mFont.fontlist.mFontlist.mBasePtr.set_move(v.families.0.clone());
+        self.gecko.mFont.fontlist.mFontlist.mBasePtr.set_move(
+            v.families.shared_font_list().clone()
+        );
         // Fixed-up if needed in Cascade::fixup_font_stuff.
-        self.gecko.mFont.fontlist.mDefaultFontType = FontFamilyType::eFamily_none;
+        self.gecko.mFont.fontlist.mDefaultFontType = GenericFontFamily::None;
     }
 
     pub fn copy_font_family_from(&mut self, other: &Self) {
@@ -1997,36 +1953,16 @@ fn static_assert() {
     }
 
     pub fn clone_font_family(&self) -> longhands::font_family::computed_value::T {
-        use crate::gecko_bindings::structs::FontFamilyType;
         use crate::values::computed::font::{FontFamily, SingleFontFamily, FontFamilyList};
 
         let fontlist = &self.gecko.mFont.fontlist;
         let shared_fontlist = unsafe { fontlist.mFontlist.mBasePtr.to_safe() };
 
         let families = if shared_fontlist.mNames.is_empty() {
-            let default = fontlist.mDefaultFontType;
-            let default = match default {
-                FontFamilyType::eFamily_serif => {
-                    SingleFontFamily::Generic(atom!("serif"))
-                }
-                _ => {
-                    // This can break with some combinations of user prefs, see
-                    // bug 1442195 for example. It doesn't really matter in this
-                    // case...
-                    //
-                    // FIXME(emilio): Probably should be storing the whole
-                    // default font name instead though.
-                    debug_assert_eq!(
-                        default,
-                        FontFamilyType::eFamily_sans_serif,
-                        "Default generic should be serif or sans-serif"
-                    );
-                    SingleFontFamily::Generic(atom!("sans-serif"))
-                }
-            };
+            let default = SingleFontFamily::Generic(fontlist.mDefaultFontType);
             FontFamilyList::new(Box::new([default]))
         } else {
-            FontFamilyList(shared_fontlist)
+            FontFamilyList::SharedFontList(shared_fontlist)
         };
 
         FontFamily {
@@ -3769,7 +3705,7 @@ fn static_assert() {
                 },
                 Url(ref url) => {
                     unsafe {
-                        bindings::Gecko_nsStyleFilter_SetURLValue(gecko_filter, url.0.url_value.get());
+                        bindings::Gecko_nsStyleFilter_SetURLValue(gecko_filter, url.url_value_ptr());
                     }
                 },
             }
@@ -4150,7 +4086,7 @@ fn set_style_svg_path(
             % if ident == "clip_path":
             ShapeSource::ImageOrUrl(ref url) => {
                 unsafe {
-                    bindings::Gecko_StyleShapeSource_SetURLValue(${ident}, url.0.url_value.get())
+                    bindings::Gecko_StyleShapeSource_SetURLValue(${ident}, url.url_value_ptr())
                 }
             }
             % elif ident == "shape_outside":
@@ -4392,23 +4328,10 @@ clip-path
     }
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="Color"
-                  skip_longhands="*">
-    pub fn set_color(&mut self, v: longhands::color::computed_value::T) {
-        let result = convert_rgba_to_nscolor(&v);
-        ${set_gecko_property("mColor", "result")}
-    }
-
-    <%call expr="impl_simple_copy('color', 'mColor')"></%call>
-
-    pub fn clone_color(&self) -> longhands::color::computed_value::T {
-        let color = ${get_gecko_property("mColor")} as u32;
-        convert_nscolor_to_rgba(color)
-    }
+<%self:impl_trait style_struct_name="Color">
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="InheritedUI"
-                  skip_longhands="cursor scrollbar-color">
+<%self:impl_trait style_struct_name="InheritedUI" skip_longhands="cursor">
     pub fn set_cursor(&mut self, v: longhands::cursor::computed_value::T) {
         self.gecko.mCursor = v.keyword;
         unsafe {
@@ -4470,48 +4393,6 @@ clip-path
 
         longhands::cursor::computed_value::T { images, keyword }
     }
-
-    pub fn set_scrollbar_color(&mut self, v: longhands::scrollbar_color::computed_value::T) {
-        use crate::gecko_bindings::structs::StyleComplexColor;
-        use crate::values::generics::ui::ScrollbarColor;
-        match v {
-            ScrollbarColor::Auto => {
-                self.gecko.mScrollbarFaceColor = StyleComplexColor::auto();
-                self.gecko.mScrollbarTrackColor = StyleComplexColor::auto();
-            }
-            ScrollbarColor::Colors { thumb, track } => {
-                self.gecko.mScrollbarFaceColor = thumb.into();
-                self.gecko.mScrollbarTrackColor = track.into();
-            }
-        }
-    }
-
-    pub fn copy_scrollbar_color_from(&mut self, other: &Self) {
-        self.gecko.mScrollbarFaceColor = other.gecko.mScrollbarFaceColor;
-        self.gecko.mScrollbarTrackColor = other.gecko.mScrollbarTrackColor;
-    }
-
-    pub fn reset_scrollbar_color(&mut self, other: &Self) {
-        self.copy_scrollbar_color_from(other);
-    }
-
-    pub fn clone_scrollbar_color(&self) -> longhands::scrollbar_color::computed_value::T {
-        use crate::gecko_bindings::structs::StyleComplexColor_Tag as Tag;
-        use crate::values::generics::ui::ScrollbarColor;
-        debug_assert!(
-            (self.gecko.mScrollbarFaceColor.mTag == Tag::eAuto) ==
-            (self.gecko.mScrollbarTrackColor.mTag == Tag::eAuto),
-            "Whether the two colors are `auto` should match",
-        );
-        if self.gecko.mScrollbarFaceColor.mTag == Tag::eAuto {
-            ScrollbarColor::Auto
-        } else {
-            ScrollbarColor::Colors {
-                thumb: self.gecko.mScrollbarFaceColor.into(),
-                track: self.gecko.mScrollbarTrackColor.into(),
-            }
-        }
-    }
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Column"
@@ -4548,7 +4429,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Counters"
-                  skip_longhands="content counter-increment counter-reset">
+                  skip_longhands="content counter-increment counter-reset counter-set">
     pub fn ineffective_content_property(&self) -> bool {
         self.gecko.mContents.is_empty()
     }
@@ -4777,7 +4658,7 @@ clip-path
         )
     }
 
-    % for counter_property in ["Increment", "Reset"]:
+    % for counter_property in ["Increment", "Reset", "Set"]:
         pub fn set_counter_${counter_property.lower()}(
             &mut self,
             v: longhands::counter_${counter_property.lower()}::computed_value::T

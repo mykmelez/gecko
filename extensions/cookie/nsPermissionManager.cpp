@@ -2156,6 +2156,25 @@ nsPermissionManager::RemoveByType(const nsACString& aType) {
       });
 }
 
+NS_IMETHODIMP
+nsPermissionManager::RemoveByTypeSince(const nsACString& aType,
+                                       int64_t aModificationTime) {
+  ENSURE_NOT_CHILD_PROCESS;
+
+  int32_t typeIndex = GetTypeIndex(aType, false);
+  // If type == -1, the type isn't known,
+  // so just return NS_OK
+  if (typeIndex == -1) {
+    return NS_OK;
+  }
+
+  return RemovePermissionEntries(
+      [typeIndex, aModificationTime](const PermissionEntry& aPermEntry) {
+        return uint32_t(typeIndex) == aPermEntry.mType &&
+               aModificationTime <= aPermEntry.mModificationTime;
+      });
+}
+
 void nsPermissionManager::CloseDB(bool aRebuildOnSuccess) {
   // Null the statements, this will finalize them.
   mStmtInsert = nullptr;
@@ -3411,12 +3430,13 @@ nsPermissionManager::WhenPermissionsAvailable(nsIPrincipal* aPrincipal,
 
   RefPtr<nsIRunnable> runnable = aRunnable;
   GenericPromise::All(thread, promises)
-      ->Then(thread, __func__, [runnable]() { runnable->Run(); },
-             []() {
-               NS_WARNING(
-                   "nsPermissionManager permission promise rejected. We're "
-                   "probably shutting down.");
-             });
+      ->Then(
+          thread, __func__, [runnable]() { runnable->Run(); },
+          []() {
+            NS_WARNING(
+                "nsPermissionManager permission promise rejected. We're "
+                "probably shutting down.");
+          });
   return NS_OK;
 }
 

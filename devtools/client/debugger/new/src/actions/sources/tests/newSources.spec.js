@@ -45,9 +45,9 @@ describe("sources - new sources", () => {
   });
 
   it("should automatically select a pending source", async () => {
-    const { dispatch, getState } = createStore(threadClient);
+    const { dispatch, getState, cx } = createStore(threadClient);
     const baseSource = makeSource("base.js");
-    await dispatch(actions.selectSourceURL(baseSource.url));
+    await dispatch(actions.selectSourceURL(cx, baseSource.url));
 
     expect(getSelectedSource(getState())).toBe(undefined);
     await dispatch(actions.newSource(baseSource));
@@ -135,5 +135,28 @@ describe("sources - new sources", () => {
     expect(barCljs && barCljs.url).toEqual("bar.cljs");
     const bazzCljs = getSourceByURL(getState(), "bazz.cljs");
     expect(bazzCljs && bazzCljs.url).toEqual("bazz.cljs");
+  });
+
+  describe("sources - sources with querystrings", () => {
+    it(`should find two sources when same source with
+      querystring`, async () => {
+      const { getSourcesUrlsInSources } = selectors;
+      const { dispatch, getState } = createStore(threadClient);
+      await dispatch(actions.newSource(makeSource("base.js?v=1")));
+      await dispatch(actions.newSource(makeSource("base.js?v=2")));
+      await dispatch(actions.newSource(makeSource("diff.js?v=1")));
+
+      const base1 = "http://localhost:8000/examples/base.js?v=1";
+      const diff1 = "http://localhost:8000/examples/diff.js?v=1";
+      const diff2 = "http://localhost:8000/examples/diff.js?v=1";
+
+      expect(getSourcesUrlsInSources(getState(), base1)).toHaveLength(2);
+      expect(getSourcesUrlsInSources(getState(), base1)).toMatchSnapshot();
+
+      expect(getSourcesUrlsInSources(getState(), diff1)).toHaveLength(1);
+      await dispatch(actions.newSource(makeSource("diff.js?v=2")));
+      expect(getSourcesUrlsInSources(getState(), diff2)).toHaveLength(2);
+      expect(getSourcesUrlsInSources(getState(), diff1)).toHaveLength(2);
+    });
   });
 });

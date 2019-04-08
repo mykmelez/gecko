@@ -16,6 +16,7 @@ const actionTypes = {
   ADB_ADDON_UNINSTALL_FAILURE: "ADB_ADDON_UNINSTALL_FAILURE",
   ADB_ADDON_STATUS_UPDATED: "ADB_ADDON_STATUS_UPDATED",
   CONNECT_RUNTIME_FAILURE: "CONNECT_RUNTIME_FAILURE",
+  CONNECT_RUNTIME_NOT_RESPONDING: "CONNECT_RUNTIME_NOT_RESPONDING",
   CONNECT_RUNTIME_START: "CONNECT_RUNTIME_START",
   CONNECT_RUNTIME_SUCCESS: "CONNECT_RUNTIME_SUCCESS",
   DEBUG_TARGET_COLLAPSIBILITY_UPDATED: "DEBUG_TARGET_COLLAPSIBILITY_UPDATED",
@@ -95,6 +96,8 @@ const PAGE_TYPES = {
 };
 
 const PREFERENCES = {
+  // Preference that drives the display of the "Tabs" category on This Firefox.
+  LOCAL_TAB_DEBUGGING_ENABLED: "devtools.aboutdebugging.local-tab-debugging",
   // Preference that drives the display of the "Processes" debug target category.
   PROCESS_DEBUGGING_ENABLED: "devtools.aboutdebugging.process-debugging",
   // Preference that drives the display of system addons in about:debugging.

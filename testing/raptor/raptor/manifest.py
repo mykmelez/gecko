@@ -63,6 +63,9 @@ def validate_test_ini(test_details):
         if setting == 'measure' and test_details['type'] == 'benchmark':
             continue
         if setting not in test_details:
+            # if page-cycles is not specified, it's ok as long as browser-cycles is there
+            if setting == "page-cycles" and test_details.get('browser_cycles') is not None:
+                continue
             valid_settings = False
             LOG.error("ERROR: setting '%s' is required but not found in %s"
                       % (setting, test_details['manifest']))
@@ -103,7 +106,9 @@ def write_test_settings_json(args, test_details, oskey):
     test_settings = {
         "raptor-options": {
             "type": test_details['type'],
+            "cold": test_details['cold'],
             "test_url": test_url,
+            "expected_browser_cycles": test_details['expected_browser_cycles'],
             "page_cycles": int(test_details['page_cycles']),
             "host": args.host,
         }
@@ -129,20 +134,21 @@ def write_test_settings_json(args, test_details, oskey):
 
     test_settings['raptor-options']['unit'] = test_details.get("unit", "ms")
 
-    if test_details.get("lower_is_better", "true") == "false":
-        test_settings['raptor-options']['lower_is_better'] = False
-    else:
-        test_settings['raptor-options']['lower_is_better'] = True
+    test_settings['raptor-options']['lower_is_better'] = bool_from_str(
+        test_details.get("lower_is_better", "true"))
 
-    # support optional subtest unit/lower_is_better fields, default to main test values if not set
+    # support optional subtest unit/lower_is_better fields
     val = test_details.get('subtest_unit', test_settings['raptor-options']['unit'])
     test_settings['raptor-options']['subtest_unit'] = val
-    val = test_details.get('subtest_lower_is_better',
-                           test_settings['raptor-options']['lower_is_better'])
-    if val == "false":
-        test_settings['raptor-options']['subtest_lower_is_better'] = False
+    subtest_lower_is_better = test_details.get('subtest_lower_is_better', None)
+
+    if subtest_lower_is_better is None:
+        # default to main test values if not set
+        test_settings['raptor-options']['subtest_lower_is_better'] = (
+            test_settings['raptor-options']['lower_is_better'])
     else:
-        test_settings['raptor-options']['subtest_lower_is_better'] = True
+        test_settings['raptor-options']['subtest_lower_is_better'] = bool_from_str(
+            subtest_lower_is_better)
 
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
@@ -223,7 +229,7 @@ def get_raptor_test_list(args, oskey):
     # gecko-profiling enabled, or when --page-cycles cmd line arg was used (that overrides all)
     for next_test in tests_to_run:
         LOG.info("configuring settings for test %s" % next_test['name'])
-        max_page_cycles = next_test['page_cycles']
+        max_page_cycles = next_test.get('page_cycles', 1)
         if args.gecko_profile is True:
             next_test['gecko_profile'] = True
             LOG.info("gecko-profiling enabled")
@@ -236,13 +242,35 @@ def get_raptor_test_list(args, oskey):
             next_test['page_cycles'] = args.page_cycles
             LOG.info("set page-cycles to %d as specified on cmd line" % args.page_cycles)
         else:
-            if int(next_test['page_cycles']) > max_page_cycles:
+            if int(next_test.get('page_cycles', 1)) > max_page_cycles:
                 next_test['page_cycles'] = max_page_cycles
                 LOG.info("page-cycles set to %d" % next_test['page_cycles'])
         # if --page-timeout was provided on the command line, use that instead of INI
         if args.page_timeout is not None:
             LOG.info("setting page-timeout to %d as specified on cmd line" % args.page_timeout)
             next_test['page_timeout'] = args.page_timeout
+        # if --browser-cycles was provided on the command line, use that instead of INI
+        if args.browser_cycles is not None:
+            LOG.info("setting browser-cycles to %d as specified on cmd line" % args.browser_cycles)
+            next_test['browser_cycles'] = args.browser_cycles
+
+        if next_test.get("cold", "false") == "true":
+            # when running in cold mode, set browser-cycles to the page-cycles value; as we want
+            # the browser to restart between page-cycles; and set page-cycles to 1 as we only
+            # want 1 single page-load for every browser-cycle
+            next_test['cold'] = True
+            next_test['expected_browser_cycles'] = int(next_test['browser_cycles'])
+            next_test['page_cycles'] = 1
+            # also ensure '-cold' is in test name so perfherder results indicate warm cold-load
+            if "-cold" not in next_test['name']:
+                next_test['name'] += "-cold"
+        else:
+            # when running in warm mode, just set test-cycles to 1 and leave page-cycles as/is
+            next_test['cold'] = False
+            next_test['expected_browser_cycles'] = 1
+
+        # either warm or cold-mode, initialize the starting current 'browser-cycle'
+        next_test['browser_cycle'] = 1
 
         if next_test.get('use_live_sites', "false") == "true":
             # when using live sites we want to turn off playback
@@ -282,3 +310,12 @@ def get_raptor_test_list(args, oskey):
         LOG.critical("abort: specified test name doesn't exist")
 
     return tests_to_run
+
+
+def bool_from_str(boolean_string):
+    if boolean_string == 'true':
+        return True
+    elif boolean_string == 'false':
+        return False
+    else:
+        raise ValueError("Expected either 'true' or 'false'")

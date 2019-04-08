@@ -126,6 +126,12 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "type": "int",
             "help": "How long to wait (ms) for one page_cycle to complete, before timing out"
         }],
+        [["--browser-cycles"], {
+            "dest": "browser_cycles",
+            "type": "int",
+            "help": "The number of times a cold load test is repeated (for cold load tests only, "
+                    "where the browser is shutdown and restarted between test iterations)"
+        }],
         [["--host"], {
             "dest": "host",
             "help": "Hostname from which to serve urls (default: 127.0.0.1). "
@@ -199,6 +205,9 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             self.test = self.config['test']
             self.app = self.config.get("app", "firefox")
             self.binary_path = self.config.get("binary_path", None)
+
+            if self.app in ('refbrow', 'fenix'):
+                self.app_name = self.binary_path
 
         self.installer_url = self.config.get("installer_url")
         self.raptor_json_url = self.config.get("raptor_json_url")

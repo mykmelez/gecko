@@ -64,6 +64,7 @@ macosx64/opt:
         script: "mozharness/scripts/fx_desktop_build.py"
         secrets: true
         tooltool-downloads: internal
+    run-on-projects: ['mozilla-central', 'try']
     toolchains:
         - linux64-binutils
         - linux64-cctools-port
@@ -286,20 +287,20 @@ macosx64-add-on-devel/opt:
         - linux64-nasm
         - linux64-node
 
-macosx64-nightly/opt:
-    description: "MacOS X x64 Cross-compile Nightly"
+macosx64-shippable/opt:
+    description: "MacOS X x64 Cross-compile"
     attributes:
-        nightly: true
+        shippable: true
         enable-full-crashsymbols: true
     shipping-phase: build
     shipping-product: firefox
     index:
         product: firefox
         job-name: macosx64-opt
-        type: nightly
+        type: shippable
     treeherder:
-        platform: osx-cross/opt
-        symbol: N
+        platform: osx-shippable/opt
+        symbol: B
         tier: 1
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
     worker:

@@ -45,7 +45,6 @@ class nsIContent;
 
 class nsPresContext;
 struct nsTimingFunction;
-struct RawServoRuleNode;
 struct TreeMatchContext;
 
 namespace mozilla {
@@ -96,12 +95,11 @@ class ServoStyleSet {
 
   static ServoStyleSet* Current() { return sInServoTraversal; }
 
-  ServoStyleSet();
+  explicit ServoStyleSet(dom::Document&);
   ~ServoStyleSet();
 
-  void Init(nsPresContext* aPresContext);
-  void BeginShutdown() {}
-  void Shutdown();
+  void ShellAttachedToDocument();
+  void ShellDetachedFromDocument();
 
   // Called when a rules in a stylesheet in this set, or a child sheet of that,
   // are mutated from CSSOM.
@@ -324,7 +322,7 @@ class ServoStyleSet {
       const mozilla::ComputedStyle* aStyle,
       nsTArray<RefPtr<RawServoAnimationValue>>& aAnimationValues);
 
-  bool AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
+  void AppendFontFaceRules(nsTArray<nsFontFaceRuleContainer>& aArray);
 
   const RawServoCounterStyleRule* CounterStyleRuleForName(nsAtom* aName);
 
@@ -356,7 +354,7 @@ class ServoStyleSet {
    */
   already_AddRefed<ComputedStyle> ResolveForDeclarations(
       const ComputedStyle* aParentOrNull,
-      RawServoDeclarationBlockBorrowed aDeclarations);
+      const RawServoDeclarationBlock* aDeclarations);
 
   already_AddRefed<RawServoAnimationValue> ComputeAnimationValue(
       dom::Element* aElement, RawServoDeclarationBlock* aDeclaration,
@@ -506,10 +504,8 @@ class ServoStyleSet {
 
   void RemoveSheetOfType(SheetType aType, StyleSheet* aSheet);
 
-  // The owner document of this style set. Null if this is an XBL style set.
-  //
-  // TODO(emilio): This should become a DocumentOrShadowRoot, and be owned by it
-  // directly instead of the shell, eventually.
+  // The owner document of this style set. Never null, and always outlives the
+  // StyleSet.
   dom::Document* mDocument;
 
   const nsPresContext* GetPresContext() const {

@@ -29,9 +29,11 @@
 
 #include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/FontTableURIProtocolHandler.h"
 #include "nsITimer.h"
 #include "nsLayoutUtils.h"
@@ -564,7 +566,11 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
               pctx->Document()->GetReadyStateEnum() <
                   Document::READYSTATE_COMPLETE) {
             nsPIDOMWindowInner* win = pctx->Document()->GetInnerWindow();
-            if (win) {
+            uint32_t frameRateMultiplier = pctx->GetNextFrameRateMultiplier();
+            if (!frameRateMultiplier) {
+              pctx->DidUseFrameRateMultiplier();
+            }
+            if (win && frameRateMultiplier) {
               dom::Performance* perf = win->GetPerformance();
               // Limit slower refresh rate to 5 seconds between the
               // first contentful paint and page load.
@@ -574,8 +580,9 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
                   // Handle this case similarly to the code above, but just
                   // use idle queue.
                   TimeDuration rate = mVsyncRefreshDriverTimer->GetTimerRate();
-                  uint32_t slowRate =
-                      static_cast<uint32_t>(rate.ToMilliseconds() * 4);
+                  uint32_t slowRate = static_cast<uint32_t>(
+                      rate.ToMilliseconds() * frameRateMultiplier);
+                  pctx->DidUseFrameRateMultiplier();
                   nsCOMPtr<nsIRunnable> vsyncEvent = NewRunnableMethod<>(
                       "RefreshDriverVsyncObserver::NormalPriorityNotify[IDLE]",
                       this, &RefreshDriverVsyncObserver::NormalPriorityNotify);
@@ -1490,7 +1497,7 @@ struct DocumentFrameCallbacks {
   explicit DocumentFrameCallbacks(Document* aDocument) : mDocument(aDocument) {}
 
   RefPtr<Document> mDocument;
-  Document::FrameRequestCallbackList mCallbacks;
+  nsTArray<Document::FrameRequest> mCallbacks;
 };
 
 static nsDocShell* GetDocShell(nsPresContext* aPresContext) {
@@ -1682,7 +1689,14 @@ void nsRefreshDriver::RunFrameRequestCallbacks(TimeStamp aNowTime) {
         // else window is partially torn down already
       }
       for (auto& callback : docCallbacks.mCallbacks) {
-        callback->Call(timeStamp);
+        if (docCallbacks.mDocument->IsCanceledFrameRequestCallback(
+                callback.mHandle)) {
+          continue;
+        }
+        // MOZ_KnownLive is OK, because the stack array frameRequestCallbacks
+        // keeps callback alive and the mCallback strong reference can't be
+        // mutated by the call.
+        MOZ_KnownLive(callback.mCallback)->Call(timeStamp);
       }
     }
   }
@@ -1770,7 +1784,7 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
   mSkippedPaints = false;
   mWarningThreshold = 1;
 
-  nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
+  RefPtr<PresShell> presShell = mPresContext->GetPresShell();
   if (!presShell ||
       (!HasObservers() && !HasImageRequests() &&
        mVisualViewportResizeEvents.IsEmpty() && mScrollEvents.IsEmpty() &&

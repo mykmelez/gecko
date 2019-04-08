@@ -32,7 +32,6 @@
 #include "vm/RegExpObject.h"
 #include "vm/SharedMem.h"
 #include "vm/TypedArrayObject.h"
-#include "vm/UnboxedObject.h"
 
 namespace js {
 
@@ -1003,7 +1002,7 @@ class MRootList : public TempObject {
     return append(static_cast<T>(ptr));
   }
   MOZ_MUST_USE bool append(const ReceiverGuard& guard) {
-    return append(guard.group) && append(guard.shape);
+    return append(guard.getGroup()) && append(guard.getShape());
   }
 };
 
@@ -2494,12 +2493,9 @@ class MObjectState : public MVariadicInstruction,
                      public NoFloatPolicyAfter<1>::Data {
  private:
   uint32_t numSlots_;
-  uint32_t numFixedSlots_;         // valid if isUnboxed() == false.
-  OperandIndexMap* operandIndex_;  // valid if isUnboxed() == true.
+  uint32_t numFixedSlots_;
 
-  bool isUnboxed() const { return operandIndex_ != nullptr; }
-
-  MObjectState(JSObject* templateObject, OperandIndexMap* operandIndex);
+  explicit MObjectState(JSObject* templateObject);
   explicit MObjectState(MObjectState* state);
 
   MOZ_MUST_USE bool init(TempAllocator& alloc, MDefinition* obj);
@@ -2522,10 +2518,7 @@ class MObjectState : public MVariadicInstruction,
   MOZ_MUST_USE bool initFromTemplateObject(TempAllocator& alloc,
                                            MDefinition* undefinedVal);
 
-  size_t numFixedSlots() const {
-    MOZ_ASSERT(!isUnboxed());
-    return numFixedSlots_;
-  }
+  size_t numFixedSlots() const { return numFixedSlots_; }
   size_t numSlots() const { return numSlots_; }
 
   MDefinition* getSlot(uint32_t slot) const { return getOperand(slot + 1); }
@@ -2553,19 +2546,6 @@ class MObjectState : public MVariadicInstruction,
   }
   void setDynamicSlot(uint32_t slot, MDefinition* def) {
     setSlot(slot + numFixedSlots(), def);
-  }
-
-  // Interface reserved for unboxed objects.
-  bool hasOffset(uint32_t offset) const {
-    MOZ_ASSERT(isUnboxed());
-    return offset < operandIndex_->map.length() &&
-           operandIndex_->map[offset] != 0;
-  }
-  MDefinition* getOffset(uint32_t offset) const {
-    return getOperand(operandIndex_->map[offset]);
-  }
-  void setOffset(uint32_t offset, MDefinition* def) {
-    replaceOperand(operandIndex_->map[offset], def);
   }
 
   MOZ_MUST_USE bool writeRecoverData(
@@ -7954,55 +7934,6 @@ class MStoreUnboxedString : public MQuaternaryInstruction,
   ALLOW_CLONE(MStoreUnboxedString)
 };
 
-// Passes through an object, after ensuring it is converted from an unboxed
-// object to a native representation.
-class MConvertUnboxedObjectToNative : public MUnaryInstruction,
-                                      public SingleObjectPolicy::Data {
-  CompilerObjectGroup group_;
-
-  explicit MConvertUnboxedObjectToNative(MDefinition* obj, ObjectGroup* group)
-      : MUnaryInstruction(classOpcode, obj), group_(group) {
-    setGuard();
-    setMovable();
-    setResultType(MIRType::Object);
-  }
-
- public:
-  INSTRUCTION_HEADER(ConvertUnboxedObjectToNative)
-  NAMED_OPERANDS((0, object))
-
-  static MConvertUnboxedObjectToNative* New(TempAllocator& alloc,
-                                            MDefinition* obj,
-                                            ObjectGroup* group);
-
-  ObjectGroup* group() const { return group_; }
-  bool congruentTo(const MDefinition* ins) const override {
-    if (!congruentIfOperandsEqual(ins)) {
-      return false;
-    }
-    return ins->toConvertUnboxedObjectToNative()->group() == group();
-  }
-  AliasSet getAliasSet() const override {
-    // This instruction can read and write to all parts of the object, but
-    // is marked as non-effectful so it can be consolidated by LICM and GVN
-    // and avoid inhibiting other optimizations.
-    //
-    // This is valid to do because when unboxed objects might have a native
-    // group they can be converted to, we do not optimize accesses to the
-    // unboxed objects and do not guard on their group or shape (other than
-    // in this opcode).
-    //
-    // Later accesses can assume the object has a native representation
-    // and optimize accordingly. Those accesses cannot be reordered before
-    // this instruction, however. This is prevented by chaining this
-    // instruction with the object itself, in the same way as MBoundsCheck.
-    return AliasSet::None();
-  }
-  bool appendRoots(MRootList& roots) const override {
-    return roots.append(group_);
-  }
-};
-
 // Array.prototype.pop or Array.prototype.shift on a dense array.
 class MArrayPopShift : public MUnaryInstruction,
                        public SingleObjectPolicy::Data {
@@ -8082,9 +8013,6 @@ class MArraySlice : public MTernaryInstruction,
 
   gc::InitialHeap initialHeap() const { return initialHeap_; }
 
-  AliasSet getAliasSet() const override {
-    return AliasSet::Store(AliasSet::Element | AliasSet::ObjectFields);
-  }
   bool possiblyCalls() const override { return true; }
   bool appendRoots(MRootList& roots) const override {
     return roots.append(templateObj_);
@@ -9099,11 +9027,6 @@ class MGuardShape : public MUnaryInstruction, public SingleObjectPolicy::Data {
     setMovable();
     setResultType(MIRType::Object);
     setResultTypeSet(obj->resultTypeSet());
-
-    // Disallow guarding on unboxed object shapes. The group is better to
-    // guard on, and guarding on the shape can interact badly with
-    // MConvertUnboxedObjectToNative.
-    MOZ_ASSERT(shape->getObjectClass() != &UnboxedPlainObject::class_);
   }
 
  public:
@@ -9186,11 +9109,6 @@ class MGuardObjectGroup : public MUnaryInstruction,
     setGuard();
     setMovable();
     setResultType(MIRType::Object);
-
-    // Unboxed groups which might be converted to natives can't be guarded
-    // on, due to MConvertUnboxedObjectToNative.
-    MOZ_ASSERT_IF(group->maybeUnboxedLayoutDontCheckGeneration(),
-                  !group->unboxedLayoutDontCheckGeneration().nativeGroup());
   }
 
  public:
@@ -9251,66 +9169,6 @@ class MGuardObjectIdentity : public MBinaryInstruction,
     if (bailOnEquality() != ins->toGuardObjectIdentity()->bailOnEquality()) {
       return false;
     }
-    return congruentIfOperandsEqual(ins);
-  }
-  AliasSet getAliasSet() const override {
-    return AliasSet::Load(AliasSet::ObjectFields);
-  }
-};
-
-// Guard on the presence or absence of an unboxed object's expando.
-class MGuardUnboxedExpando : public MUnaryInstruction,
-                             public SingleObjectPolicy::Data {
-  bool requireExpando_;
-  BailoutKind bailoutKind_;
-
-  MGuardUnboxedExpando(MDefinition* obj, bool requireExpando,
-                       BailoutKind bailoutKind)
-      : MUnaryInstruction(classOpcode, obj),
-        requireExpando_(requireExpando),
-        bailoutKind_(bailoutKind) {
-    setGuard();
-    setMovable();
-    setResultType(MIRType::Object);
-  }
-
- public:
-  INSTRUCTION_HEADER(GuardUnboxedExpando)
-  TRIVIAL_NEW_WRAPPERS
-  NAMED_OPERANDS((0, object))
-
-  bool requireExpando() const { return requireExpando_; }
-  BailoutKind bailoutKind() const { return bailoutKind_; }
-  bool congruentTo(const MDefinition* ins) const override {
-    if (!congruentIfOperandsEqual(ins)) {
-      return false;
-    }
-    if (requireExpando() != ins->toGuardUnboxedExpando()->requireExpando()) {
-      return false;
-    }
-    return true;
-  }
-  AliasSet getAliasSet() const override {
-    return AliasSet::Load(AliasSet::ObjectFields);
-  }
-};
-
-// Load an unboxed plain object's expando.
-class MLoadUnboxedExpando : public MUnaryInstruction,
-                            public SingleObjectPolicy::Data {
- private:
-  explicit MLoadUnboxedExpando(MDefinition* object)
-      : MUnaryInstruction(classOpcode, object) {
-    setResultType(MIRType::Object);
-    setMovable();
-  }
-
- public:
-  INSTRUCTION_HEADER(LoadUnboxedExpando)
-  TRIVIAL_NEW_WRAPPERS
-  NAMED_OPERANDS((0, object))
-
-  bool congruentTo(const MDefinition* ins) const override {
     return congruentIfOperandsEqual(ins);
   }
   AliasSet getAliasSet() const override {
@@ -9665,7 +9523,8 @@ class MCallGetProperty : public MUnaryInstruction,
     if (!idempotent_) {
       return AliasSet::Store(AliasSet::Any);
     }
-    return AliasSet::None();
+    return AliasSet::Load(AliasSet::ObjectFields | AliasSet::FixedSlot |
+                          AliasSet::DynamicSlot);
   }
   bool possiblyCalls() const override { return true; }
   bool appendRoots(MRootList& roots) const override {
@@ -10979,35 +10838,42 @@ class MCheckReturn : public MBinaryInstruction, public BoxInputsPolicy::Data {
 // the outermost script (i.e. not the inlined script).
 class MRecompileCheck : public MNullaryInstruction {
  public:
-  enum RecompileCheckType {
-    RecompileCheck_OptimizationLevel,
-    RecompileCheck_Inlining
+  enum class RecompileCheckType : uint8_t {
+    // If we're not at the highest optimization level, keep incrementing the
+    // warm-up counter for the outermost script on entry. The warmup check will
+    // trigger recompilation to tier up. The lazy link mechanism will be used to
+    // tier up once recompilation is done.
+    OptimizationLevel,
+
+    // If we're not at the highest optimization level, keep incrementing the
+    // warm-up counter at loop edges. This check will trigger invalidation for
+    // very long-running loops to ensure we still tier up even if we don't
+    // invoke the lazy link stub.
+    OptimizationLevelOSR,
+
+    // If we're not at the highest optimization level, keep incrementing the
+    // warm-up counter for inlined scripts. This check does not trigger any
+    // recompilation or invalidation, it exists to ensure inlined scripts have
+    // an accurate warm-up count.
+    OptimizationLevelInlined,
+
+    // Used at the last optimization level for callees that weren't hot enough
+    // to be inlined. If a callee becomes hot enough we force recompilation of
+    // the caller's Ion script.
+    Inlining
   };
 
  private:
   JSScript* script_;
   uint32_t recompileThreshold_;
-  bool forceRecompilation_;
-  bool increaseWarmUpCounter_;
+  RecompileCheckType type_;
 
   MRecompileCheck(JSScript* script, uint32_t recompileThreshold,
                   RecompileCheckType type)
       : MNullaryInstruction(classOpcode),
         script_(script),
-        recompileThreshold_(recompileThreshold) {
-    switch (type) {
-      case RecompileCheck_OptimizationLevel:
-        forceRecompilation_ = false;
-        increaseWarmUpCounter_ = true;
-        break;
-      case RecompileCheck_Inlining:
-        forceRecompilation_ = true;
-        increaseWarmUpCounter_ = false;
-        break;
-      default:
-        MOZ_CRASH("Unexpected recompile check type");
-    }
-
+        recompileThreshold_(recompileThreshold),
+        type_(type) {
     setGuard();
   }
 
@@ -11019,9 +10885,23 @@ class MRecompileCheck : public MNullaryInstruction {
 
   uint32_t recompileThreshold() const { return recompileThreshold_; }
 
-  bool forceRecompilation() const { return forceRecompilation_; }
+  bool forceInvalidation() const {
+    return type_ == RecompileCheckType::OptimizationLevelOSR;
+  }
 
-  bool increaseWarmUpCounter() const { return increaseWarmUpCounter_; }
+  bool forceRecompilation() const {
+    return type_ == RecompileCheckType::Inlining;
+  }
+
+  bool checkCounter() const {
+    return type_ != RecompileCheckType::OptimizationLevelInlined;
+  }
+
+  bool increaseWarmUpCounter() const {
+    return (type_ == RecompileCheckType::OptimizationLevel ||
+            type_ == RecompileCheckType::OptimizationLevelInlined ||
+            type_ == RecompileCheckType::OptimizationLevelOSR);
+  }
 
   AliasSet getAliasSet() const override { return AliasSet::None(); }
 };
@@ -12336,6 +12216,9 @@ inline MIRType MIRTypeForTypedArrayRead(Scalar::Type arrayType,
       return MIRType::Float32;
     case Scalar::Float64:
       return MIRType::Double;
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
+      return MIRType::BigInt;
     default:
       break;
   }

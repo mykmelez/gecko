@@ -6,12 +6,13 @@
 #ifndef mozilla_dom_Document_h___
 #define mozilla_dom_Document_h___
 
-#include "mozilla/FlushType.h"  // for enum
-#include "mozilla/Pair.h"       // for Pair
-#include "nsAutoPtr.h"          // for member
-#include "nsCOMArray.h"         // for member
-#include "nsCompatibility.h"    // for member
-#include "nsCOMPtr.h"           // for member
+#include "mozilla/EventStates.h"  // for EventStates
+#include "mozilla/FlushType.h"    // for enum
+#include "mozilla/Pair.h"         // for Pair
+#include "nsAutoPtr.h"            // for member
+#include "nsCOMArray.h"           // for member
+#include "nsCompatibility.h"      // for member
+#include "nsCOMPtr.h"             // for member
 #include "nsICookieSettings.h"
 #include "nsGkAtoms.h"  // for static class members
 #include "nsIApplicationCache.h"
@@ -23,7 +24,6 @@
 #include "nsILoadGroup.h"  // for member (in nsCOMPtr)
 #include "nsINode.h"       // for base class
 #include "nsIParser.h"
-#include "nsIPresShell.h"
 #include "nsIChannelEventSink.h"
 #include "nsIProgressEventSink.h"
 #include "nsIRadioGroupContainer.h"
@@ -54,6 +54,7 @@
 #include "mozilla/dom/ContentBlockingLog.h"
 #include "mozilla/dom/DispatcherTrait.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
+#include "mozilla/HashTable.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/SegmentedVector.h"
@@ -138,6 +139,7 @@ class EventListenerManager;
 class FullscreenExit;
 class FullscreenRequest;
 class PendingAnimationTracker;
+class PresShell;
 class ServoStyleSet;
 class SMILAnimationController;
 enum class StyleCursorKind : uint8_t;
@@ -470,8 +472,8 @@ class Document : public nsINode,
                                              func_, params_);                 \
     /* FIXME(emilio): Apparently we can keep observing from the BFCache? That \
        looks bogus. */                                                        \
-    if (nsIPresShell* shell = GetObservingShell()) {                          \
-      shell->func_ params_;                                                   \
+    if (PresShell* presShell = GetObservingPresShell()) {                     \
+      presShell->func_ params_;                                               \
     }                                                                         \
   } while (0)
 
@@ -1243,27 +1245,20 @@ class Document : public nsINode,
    * method is responsible for calling BeginObservingDocument() on the
    * presshell if the presshell should observe document mutations.
    */
-  already_AddRefed<nsIPresShell> CreateShell(
-      nsPresContext* aContext, nsViewManager* aViewManager,
-      UniquePtr<ServoStyleSet> aStyleSet);
-  void DeleteShell();
+  already_AddRefed<PresShell> CreatePresShell(nsPresContext* aContext,
+                                              nsViewManager* aViewManager);
+  void DeletePresShell();
 
-  nsIPresShell* GetShell() const {
+  PresShell* GetPresShell() const {
     return GetBFCacheEntry() ? nullptr : mPresShell;
   }
 
-  nsIPresShell* GetObservingShell() const {
-    return mPresShell && mPresShell->IsObservingDocument() ? mPresShell
-                                                           : nullptr;
-  }
+  inline PresShell* GetObservingPresShell() const;
 
   // Return whether the presshell for this document is safe to flush.
   bool IsSafeToFlush() const;
 
-  nsPresContext* GetPresContext() const {
-    nsIPresShell* shell = GetShell();
-    return shell ? shell->GetPresContext() : nullptr;
-  }
+  inline nsPresContext* GetPresContext() const;
 
   bool HasShellOrBFCacheEntry() const { return mPresShell || mBFCacheEntry; }
 
@@ -1635,6 +1630,14 @@ class Document : public nsINode,
   void SetBody(nsGenericHTMLElement* aBody, ErrorResult& rv);
   // Get the "head" element in the sense of document.head.
   HTMLSharedElement* GetHead();
+
+  ServoStyleSet* StyleSetForPresShellOrMediaQueryEvaluation() const {
+    return mStyleSet.get();
+  }
+
+  // Whether we filled the style set with any style sheet. Only meant to be used
+  // from DocumentOrShadowRoot::Traverse.
+  bool StyleSetFilled() const { return mStyleSetFilled; }
 
   /**
    * Accessors to the collection of stylesheets owned by this document.
@@ -2018,6 +2021,8 @@ class Document : public nsINode,
   // This should only be called by callers whose state is also reflected in the
   // implementation of Document::GetDocumentState.
   void DocumentStatesChanged(EventStates aStateMask);
+
+  void ResetDocumentDirection();
 
   // Observation hooks for style data to propagate notifications
   // to document observers
@@ -2518,7 +2523,7 @@ class Document : public nsINode,
    * null.
    */
   void SetDisplayDocument(Document* aDisplayDocument) {
-    MOZ_ASSERT(!GetShell() && !GetContainer() && !GetWindow(),
+    MOZ_ASSERT(!GetPresShell() && !GetContainer() && !GetWindow(),
                "Shouldn't set mDisplayDocument on documents that already "
                "have a presentation or a docshell or a window");
     MOZ_ASSERT(aDisplayDocument, "Must not be null");
@@ -2863,7 +2868,7 @@ class Document : public nsINode,
    * pseudoclass so once can know whether a document is expected to be rendered
    * left-to-right or right-to-left.
    */
-  virtual bool IsDocumentRightToLeft() { return false; }
+  bool IsDocumentRightToLeft();
 
   /**
    * Called by Parser for link rel=preconnect
@@ -2883,6 +2888,14 @@ class Document : public nsINode,
    * clone).
    */
   void SetStateObject(nsIStructuredCloneContainer* scContainer);
+
+  /**
+   * Set the document's pending state object to the same state object as
+   * aDocument.
+   */
+  void SetStateObjectFrom(Document* aDocument) {
+    SetStateObject(aDocument->mStateObjectContainer);
+  }
 
   /**
    * Returns Doc_Theme_None if there is no lightweight theme specified,
@@ -2938,16 +2951,34 @@ class Document : public nsINode,
 
   SVGSVGElement* GetSVGRootElement() const;
 
+  struct FrameRequest {
+    FrameRequest(FrameRequestCallback& aCallback, int32_t aHandle);
+
+    // Comparator operators to allow RemoveElementSorted with an
+    // integer argument on arrays of FrameRequest
+    bool operator==(int32_t aHandle) const { return mHandle == aHandle; }
+    bool operator<(int32_t aHandle) const { return mHandle < aHandle; }
+
+    RefPtr<FrameRequestCallback> mCallback;
+    int32_t mHandle;
+  };
+
   nsresult ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
                                         int32_t* aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray<RefPtr<FrameRequestCallback>> FrameRequestCallbackList;
+  /**
+   * Returns true if the handle refers to a callback that was canceled that
+   * we did not find in our list of callbacks (e.g. because it is one of those
+   * in the set of callbacks currently queued to be run).
+   */
+  bool IsCanceledFrameRequestCallback(int32_t aHandle) const;
+
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.
    */
-  void TakeFrameRequestCallbacks(FrameRequestCallbackList& aCallbacks);
+  void TakeFrameRequestCallbacks(nsTArray<FrameRequest>& aCallbacks);
 
   /**
    * @return true if this document's frame request callbacks should be
@@ -3781,7 +3812,14 @@ class Document : public nsINode,
   void RemoveStyleSheetsFromStyleSets(
       const nsTArray<RefPtr<StyleSheet>>& aSheets, SheetType aType);
   void ResetStylesheetsToURI(nsIURI* aURI);
-  void FillStyleSet(ServoStyleSet* aStyleSet);
+  void FillStyleSet();
+  void FillStyleSetUserAndUASheets();
+  void FillStyleSetDocumentSheets();
+  void CompatibilityModeChanged();
+  bool NeedsQuirksSheet() const {
+    // SVG documents never load quirk.css.
+    return mCompatMode == eCompatibility_NavQuirks && !IsSVGDocument();
+  }
   void AddStyleSheetToStyleSets(StyleSheet* aSheet);
   void RemoveStyleSheetFromStyleSets(StyleSheet* aSheet);
   void NotifyStyleSheetAdded(StyleSheet* aSheet, bool aDocumentSheet);
@@ -3805,6 +3843,7 @@ class Document : public nsINode,
   // Lazy-initialization to have mDocGroup initialized in prior to the
   // SelectorCaches.
   UniquePtr<SelectorCache> mSelectorCache;
+  UniquePtr<ServoStyleSet> mStyleSet;
 
  protected:
   friend class nsDocumentOnStack;
@@ -3849,7 +3888,7 @@ class Document : public nsINode,
   // mPresShell is becoming null; in that case it will be used to get hold of
   // the relevant refresh driver.
   void UpdateFrameRequestCallbackSchedulingState(
-      nsIPresShell* aOldShell = nullptr);
+      PresShell* aOldPresShell = nullptr);
 
   // Helper for GetScrollingElement/IsScrollingElement.
   bool IsPotentiallyScrollable(HTMLBodyElement* aBody);
@@ -4162,9 +4201,11 @@ class Document : public nsINode,
 
   bool mNeedsReleaseAfterStackRefCntRelease : 1;
 
-  // Whether we have filled our pres shell's style set with the document's
-  // additional sheets and sheets from the nsStyleSheetService.
+  // Whether we have filled our style set with all the stylesheets.
   bool mStyleSetFilled : 1;
+
+  // Whether we have a quirks mode stylesheet in the style set.
+  bool mQuirkSheetAdded : 1;
 
   // Keeps track of whether we have a pending
   // 'style-sheet-applicable-state-changed' notification.
@@ -4329,7 +4370,7 @@ class Document : public nsINode,
   // won't be collected
   uint32_t mMarkedCCGeneration;
 
-  nsIPresShell* mPresShell;
+  PresShell* mPresShell;
 
   nsCOMArray<nsINode> mSubtreeModifiedTargets;
   uint32_t mSubtreeModifiedDepth;
@@ -4395,9 +4436,11 @@ class Document : public nsINode,
 
   nsCOMPtr<nsIDocumentEncoder> mCachedEncoder;
 
-  struct FrameRequest;
-
   nsTArray<FrameRequest> mFrameRequestCallbacks;
+
+  // The set of frame request callbacks that were canceled but which we failed
+  // to find in mFrameRequestCallbacks.
+  HashSet<int32_t> mCanceledFrameRequestCallbacks;
 
   // This object allows us to evict ourself from the back/forward cache.  The
   // pointer is non-null iff we're currently in the bfcache.
@@ -4480,7 +4523,7 @@ class Document : public nsINode,
   // Our update nesting level
   uint32_t mUpdateNestLevel;
 
-  enum ViewportType : uint8_t { DisplayWidthHeight, Specified, Unknown };
+  enum ViewportType : uint8_t { DisplayWidthHeight, Specified, Unknown, Empty };
 
   ViewportType mViewportType;
 

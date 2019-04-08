@@ -437,6 +437,12 @@ class RefTest(object):
             else:
                 browserEnv["ASAN_OPTIONS"] = "detect_leaks=0"
 
+        # Set environment defaults for jstestbrowser. Keep in sync with the
+        # defaults used in js/src/tests/lib/tests.py.
+        if options.suite == "jstestbrowser":
+            browserEnv["TZ"] = "PST8PDT"
+            browserEnv["LC_ALL"] = "en_US.UTF-8"
+
         for v in options.environment:
             ix = v.find("=")
             if ix <= 0:
@@ -461,6 +467,13 @@ class RefTest(object):
         """
 
         self._populate_logger(options)
+
+        # options.log has done its work, in _populate_logger; remove it so that
+        # options can be deepcopied. An alternative would be to modify
+        # mozlog.structuredlog.StructuredLogger to support copy.deepcopy,
+        # https://docs.python.org/2.7/library/copy.html
+        if hasattr(options, 'log'):
+            delattr(options, 'log')
 
         # Number of times to repeat test(s) when running with --repeat
         VERIFY_REPEAT = 10

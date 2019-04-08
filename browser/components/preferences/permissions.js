@@ -206,7 +206,7 @@ var gPermissionManager = {
 
   addPermission(capability) {
     let textbox = document.getElementById("url");
-    let input_url = textbox.value.replace(/^\s*/, ""); // trim any leading space
+    let input_url = textbox.value.trim(); // trim any leading and trailing space
     let principals = [];
     try {
       // The origin accessor on the principal object will throw if the
@@ -220,7 +220,7 @@ var gPermissionManager = {
         let uri = Services.io.newURI(input_url);
         let principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
         if (principal.origin.startsWith("moz-nullprincipal:")) {
-          throw "Null principal";
+          throw new Error("Null principal");
         }
         principals.push(principal);
       } catch (ex) {
@@ -375,12 +375,12 @@ var gPermissionManager = {
     // to update the UI
     this.uninit();
 
-    for (let p of this._permissionsToAdd.values()) {
-      Services.perms.addFromPrincipal(p.principal, p.type, p.capability);
-    }
-
     for (let p of this._permissionsToDelete.values()) {
       Services.perms.removeFromPrincipal(p.principal, p.type);
+    }
+
+    for (let p of this._permissionsToAdd.values()) {
+      Services.perms.addFromPrincipal(p.principal, p.type, p.capability);
     }
 
     window.close();

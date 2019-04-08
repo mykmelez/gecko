@@ -52,7 +52,7 @@ webidl Node;
 webidl NodeList;
 webidl Storage;
 
-[scriptable, uuid(4d6732ca-9da7-4176-b8a1-8dde15cd0bf9)]
+[builtinclass, scriptable, uuid(4d6732ca-9da7-4176-b8a1-8dde15cd0bf9)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -837,13 +837,15 @@ interface nsIDOMWindowUtils : nsISupports {
    * Note: this does not take effect right away. Rather, the visual scroll
    *       request is sent to APZ with the next transaction, and will be
    *       reflected in the main thread with the subsequent APZ repaint request.
-   * Please see the caveats mentioned at nsIPresShell::
-   * SetPendingVisualViewportOffset(), and request APZ review if adding a new
-   * call to this.
+   * Please see the caveats mentioned at nsIPresShell::ScrollToVisual(), and
+   * request APZ review if adding a new call to this.
    */
   const long UPDATE_TYPE_RESTORE = 0;
   const long UPDATE_TYPE_MAIN_THREAD = 1;
-  void scrollToVisual(in float aOffsetX, in float aOffsetY, in long aUpdateType);
+  const long SCROLL_MODE_INSTANT = 0;
+  const long SCROLL_MODE_SMOOTH = 1;
+  void scrollToVisual(in float aOffsetX, in float aOffsetY,
+                      in long aUpdateType, in long aScrollMode);
 
   /**
    * Returns the offset of the window's visual viewport relative to the
@@ -935,7 +937,8 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute float fullZoom;
 
   /**
-   * Dispatches aEvent via the nsIPresShell object of the window's document.
+   * Dispatches aEvent as a trusted event via the nsIPresShell object of the
+   * window's document.
    * The event is dispatched to aTarget, which should be an object
    * which implements nsIContent interface (#element, #text, etc).
    *
@@ -946,9 +949,9 @@ interface nsIDOMWindowUtils : nsISupports {
    * @note Event handlers won't get aEvent as parameter, but a similar event.
    *       Also, aEvent should not be reused.
    */
+  [can_run_script]
   boolean dispatchDOMEventViaPresShell(in Node aTarget,
-                                       in Event aEvent,
-                                       in boolean aTrusted);
+                                       in Event aEvent);
 
   /**
    * Sets WidgetEvent::mFlags::mOnlyChromeDispatch to true to ensure that
@@ -1464,6 +1467,11 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute AString focusedInputType;
 
   /**
+   * Get the action hint of the currently focused html input, if any.
+   */
+  readonly attribute AString focusedActionHint;
+
+  /**
    * Find the view ID for a given element. This is the reverse of
    * findElementWithViewId().
    */
@@ -1762,7 +1770,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * This method doesn't do anything useful.  It was solely added for the
    * purpose of the test for bug 503926.
    */
-  void xpconnectArgument(in nsIDOMWindowUtils aThis);
+  void xpconnectArgument(in nsISupports aObj);
 
   /**
    * Helper for JS components that need to send permission requests with
@@ -1928,6 +1936,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * save them to a folder relative to the current working directory.
    */
   void wrCapture();
+
+  /**
+   * Toggle recording of composition on and off.
+   */
+  void setCompositionRecording(in boolean aValue);
 
   /**
    * Returns whether the document we're associated to has recorded a given CSS

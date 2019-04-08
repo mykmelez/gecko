@@ -1576,19 +1576,19 @@ bool js::str_normalize(JSContext* cx, unsigned argc, Value* vp) {
     PodCopy(chars.begin(), srcChars.begin().get(), spanLength);
   }
 
-  int32_t size =
-      intl::CallICU(cx,
-                    [normalizer, &srcChars, spanLength](
-                        UChar* chars, uint32_t size, UErrorCode* status) {
-                      mozilla::RangedPtr<const char16_t> remainingStart =
-                          srcChars.begin() + spanLength;
-                      size_t remainingLength = srcChars.length() - spanLength;
+  int32_t size = intl::CallICU(
+      cx,
+      [normalizer, &srcChars, spanLength](UChar* chars, uint32_t size,
+                                          UErrorCode* status) {
+        mozilla::RangedPtr<const char16_t> remainingStart =
+            srcChars.begin() + spanLength;
+        size_t remainingLength = srcChars.length() - spanLength;
 
-                      return unorm2_normalizeSecondAndAppend(
-                          normalizer, chars, spanLength, size,
-                          remainingStart.get(), remainingLength, status);
-                    },
-                    chars);
+        return unorm2_normalizeSecondAndAppend(normalizer, chars, spanLength,
+                                               size, remainingStart.get(),
+                                               remainingLength, status);
+      },
+      chars);
   if (size < 0) {
     return false;
   }
@@ -3080,7 +3080,7 @@ static ArrayObject* SplitHelper(JSContext* cx, HandleLinearString str,
   }
 
   // Step 3 (reordered).
-  AutoValueVector splits(cx);
+  RootedValueVector splits(cx);
 
   // Step 8 (reordered).
   size_t lastEndIndex = 0;
@@ -3657,39 +3657,7 @@ static const JSFunctionSpec string_static_methods[] = {
     JS_INLINABLE_FN("fromCodePoint", js::str_fromCodePoint, 1, 0,
                     StringFromCodePoint),
 
-    JS_SELF_HOSTED_FN("raw", "String_static_raw", 1, 0),
-    JS_SELF_HOSTED_FN("substring", "String_static_substring", 3, 0),
-    JS_SELF_HOSTED_FN("substr", "String_static_substr", 3, 0),
-    JS_SELF_HOSTED_FN("slice", "String_static_slice", 3, 0),
-
-    JS_SELF_HOSTED_FN("match", "String_generic_match", 2, 0),
-    JS_SELF_HOSTED_FN("replace", "String_generic_replace", 3, 0),
-    JS_SELF_HOSTED_FN("search", "String_generic_search", 2, 0),
-    JS_SELF_HOSTED_FN("split", "String_generic_split", 3, 0),
-
-    JS_SELF_HOSTED_FN("toLowerCase", "String_static_toLowerCase", 1, 0),
-    JS_SELF_HOSTED_FN("toUpperCase", "String_static_toUpperCase", 1, 0),
-    JS_SELF_HOSTED_FN("charAt", "String_static_charAt", 2, 0),
-    JS_SELF_HOSTED_FN("charCodeAt", "String_static_charCodeAt", 2, 0),
-    JS_SELF_HOSTED_FN("includes", "String_static_includes", 2, 0),
-    JS_SELF_HOSTED_FN("indexOf", "String_static_indexOf", 2, 0),
-    JS_SELF_HOSTED_FN("lastIndexOf", "String_static_lastIndexOf", 2, 0),
-    JS_SELF_HOSTED_FN("startsWith", "String_static_startsWith", 2, 0),
-    JS_SELF_HOSTED_FN("endsWith", "String_static_endsWith", 2, 0),
-    JS_SELF_HOSTED_FN("trim", "String_static_trim", 1, 0),
-    JS_SELF_HOSTED_FN("trimLeft", "String_static_trimLeft", 1, 0),
-    JS_SELF_HOSTED_FN("trimRight", "String_static_trimRight", 1, 0),
-    JS_SELF_HOSTED_FN("toLocaleLowerCase", "String_static_toLocaleLowerCase", 1,
-                      0),
-    JS_SELF_HOSTED_FN("toLocaleUpperCase", "String_static_toLocaleUpperCase", 1,
-                      0),
-#if EXPOSE_INTL_API
-    JS_SELF_HOSTED_FN("normalize", "String_static_normalize", 1, 0),
-#endif
-    JS_SELF_HOSTED_FN("concat", "String_static_concat", 2, 0),
-
-    JS_SELF_HOSTED_FN("localeCompare", "String_static_localeCompare", 2, 0),
-    JS_FS_END};
+    JS_SELF_HOSTED_FN("raw", "String_static_raw", 1, 0), JS_FS_END};
 
 /* static */
 Shape* StringObject::assignInitialShape(JSContext* cx,

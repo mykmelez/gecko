@@ -2226,7 +2226,7 @@ window._gBrowser = {
         userContextId: params.userContextId,
       });
     }
-    if (Services.scriptSecurityManager.isSystemPrincipal(params.triggeringPrincipal)) {
+    if (params.triggeringPrincipal.isSystemPrincipal) {
       throw new Error("System principal should never be passed into addWebTab()");
     }
     return this.addTab(aURI, params);
@@ -2386,8 +2386,7 @@ window._gBrowser = {
         t.owner = ownerTab;
       }
 
-      // Ensure we have an index if one was not provided. _insertTabAt
-      // will do some additional validation.
+      // Ensure we have an index if one was not provided.
       if (typeof index != "number") {
         // Move the new tab after another tab if needed.
         if (!bulkOrderedOpen &&
@@ -2412,19 +2411,20 @@ window._gBrowser = {
             this._lastRelatedTabMap.set(openerTab, t);
           }
         } else {
-          // This is intentionally past bounds, see the comment below on insertBefore.
-          index = this.tabs.length;
+          index = Infinity;
         }
       }
-      // Ensure position respectes tab pinned state.
+      // Ensure index is within bounds.
       if (pinned) {
+        index = Math.max(index, 0);
         index = Math.min(index, this._numPinnedTabs);
       } else {
         index = Math.max(index, this._numPinnedTabs);
+        index = Math.min(index, this.tabs.length);
       }
 
-      // use .item() instead of [] because dragging to the end of the strip goes out of
-      // bounds: .item() returns null (so it acts like appendChild), but [] throws
+      // Use .item() instead of [] because we need .item() to return null in
+      // order to append the tab at the end in case index == tabs.length.
       let tabAfter = this.tabs.item(index);
       this.tabContainer.insertBefore(t, tabAfter);
       if (tabAfter) {
@@ -4581,7 +4581,7 @@ window._gBrowser = {
 
         // For non-system/expanded principals, we bail and show the checkbox
         if (promptPrincipal.URI &&
-            !Services.scriptSecurityManager.isSystemPrincipal(promptPrincipal)) {
+            !promptPrincipal.isSystemPrincipal) {
           let permission = Services.perms.testPermissionFromPrincipal(promptPrincipal,
             "focus-tab-by-prompt");
           if (permission != Services.perms.ALLOW_ACTION) {
@@ -4745,6 +4745,19 @@ window._gBrowser = {
                           SitePermissions.SCOPE_GLOBAL,
                           browser);
     });
+
+    let tabContextFTLInserter = () => {
+      MozXULElement.insertFTLIfNeeded("browser/tabContextMenu.ftl");
+      // Un-lazify the l10n-ids now that the FTL file has been inserted.
+      document.getElementById("tabContextMenu").querySelectorAll("[data-lazy-l10n-id]").forEach(el => {
+        el.setAttribute("data-l10n-id", el.getAttribute("data-lazy-l10n-id"));
+        el.removeAttribute("data-lazy-l10n-id");
+      });
+      this.tabContainer.removeEventListener("mouseover", tabContextFTLInserter);
+      this.tabContainer.removeEventListener("focus", tabContextFTLInserter, true);
+    };
+    this.tabContainer.addEventListener("mouseover", tabContextFTLInserter);
+    this.tabContainer.addEventListener("focus", tabContextFTLInserter, true);
   },
 
   setSuccessor(aTab, successorTab) {
@@ -5402,11 +5415,7 @@ var TabContextMenu = {
 
     let contextMoveTabOptions = document.getElementById("context_moveTabOptions");
     contextMoveTabOptions.disabled = gBrowser.allTabsSelected();
-    let moveTabOptionsStringPrefix = multiselectionContext ? "multiselectcontext" : "nonmultiselectcontext";
-    let moveTabOptionsLabel = contextMoveTabOptions.getAttribute(moveTabOptionsStringPrefix + "label");
-    let moveTabOptionsAccessKey = contextMoveTabOptions.getAttribute(moveTabOptionsStringPrefix + "accesskey");
-    contextMoveTabOptions.setAttribute("label", moveTabOptionsLabel);
-    contextMoveTabOptions.setAttribute("accesskey", moveTabOptionsAccessKey);
+    document.l10n.setAttributes(contextMoveTabOptions, multiselectionContext ? "move-tabs" : "move-tab");
     let selectedTabs = gBrowser.selectedTabs;
     let contextMoveTabToEnd = document.getElementById("context_moveToEnd");
     let allSelectedTabsAdjacent = selectedTabs.every((element, index, array) => {

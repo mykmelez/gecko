@@ -18,6 +18,7 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/DeclarationBlock.h"
+#include "mozilla/PresShell.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/SourceText.h"
 #include "nsFocusManager.h"
@@ -25,7 +26,6 @@
 #include "nsNameSpaceManager.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
-#include "nsIPresShell.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptError.h"
@@ -746,9 +746,9 @@ void nsXULElement::UnregisterAccessKey(const nsAString& aOldValue) {
   //
   Document* doc = GetComposedDoc();
   if (doc && !aOldValue.IsEmpty()) {
-    nsIPresShell* shell = doc->GetShell();
+    PresShell* presShell = doc->GetPresShell();
 
-    if (shell) {
+    if (presShell) {
       Element* element = this;
 
       // find out what type of content node this is
@@ -761,7 +761,7 @@ void nsXULElement::UnregisterAccessKey(const nsAString& aOldValue) {
       }
 
       if (element) {
-        shell->GetPresContext()->EventStateManager()->UnregisterAccessKey(
+        presShell->GetPresContext()->EventStateManager()->UnregisterAccessKey(
             element, aOldValue.First());
       }
     }
@@ -865,9 +865,7 @@ nsresult nsXULElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
         } else if (aName == nsGkAtoms::localedir) {
           // if the localedir changed on the root element, reset the document
           // direction
-          if (document->IsXULDocument()) {
-            document->AsXULDocument()->ResetDocumentDirection();
-          }
+          document->ResetDocumentDirection();
         } else if (aName == nsGkAtoms::lwtheme ||
                    aName == nsGkAtoms::lwthemetextcolor) {
           // if the lwtheme changed, make sure to reset the document lwtheme
@@ -892,9 +890,7 @@ nsresult nsXULElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
         if (aName == nsGkAtoms::localedir) {
           // if the localedir changed on the root element, reset the document
           // direction
-          if (doc->IsXULDocument()) {
-            doc->AsXULDocument()->ResetDocumentDirection();
-          }
+          doc->ResetDocumentDirection();
         } else if ((aName == nsGkAtoms::lwtheme ||
                     aName == nsGkAtoms::lwthemetextcolor)) {
           // if the lwtheme changed, make sure to restyle appropriately

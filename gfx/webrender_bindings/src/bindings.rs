@@ -7,6 +7,7 @@ use std::os::windows::ffi::OsStringExt;
 use std::os::unix::ffi::OsStringExt;
 use std::io::Cursor;
 use std::{mem, slice, ptr, env};
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -19,15 +20,13 @@ use std::os::raw::{c_int};
 use std::time::Duration;
 use gleam::gl;
 
-use webrender::api::*;
-use webrender::api::units::*;
-use webrender::{ReadPixelsFormat, Renderer, RendererOptions, RendererStats, ThreadListener};
-use webrender::{ExternalImage, ExternalImageHandler, ExternalImageSource};
-use webrender::DebugFlags;
-use webrender::{ApiRecordingReceiver, BinaryRecorder};
-use webrender::{AsyncPropertySampler, PipelineInfo, SceneBuilderHooks};
-use webrender::{UploadMethod, VertexUsageHint, ProfilerHooks, set_profiler_hooks};
-use webrender::{Device, Shaders, WrShaders, ShaderPrecacheFlags};
+use webrender::{
+    api::*, api::units::*, ApiRecordingReceiver, AsyncPropertySampler, AsyncScreenshotHandle,
+    BinaryRecorder, DebugFlags, Device, ExternalImage, ExternalImageHandler, ExternalImageSource,
+    PipelineInfo, ProfilerHooks, ReadPixelsFormat, Renderer, RendererOptions, RendererStats,
+    SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod, VertexUsageHint,
+    WrShaders, set_profiler_hooks,
+};
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dBlobImageHandler;
 use program_cache::{WrProgramCache, remove_disk_cache};
@@ -108,6 +107,8 @@ type WrEpoch = Epoch;
 pub type WrIdNamespace = IdNamespace;
 
 /// cbindgen:field-names=[mNamespace, mHandle]
+type WrDocumentId = DocumentId;
+/// cbindgen:field-names=[mNamespace, mHandle]
 type WrPipelineId = PipelineId;
 /// cbindgen:field-names=[mNamespace, mHandle]
 /// cbindgen:derive-neq=true
@@ -186,19 +187,19 @@ impl WrStackingContextClip {
     }
 }
 
-fn make_slice<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
+unsafe fn make_slice<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
     if ptr.is_null() {
         &[]
     } else {
-        unsafe { slice::from_raw_parts(ptr, len) }
+        slice::from_raw_parts(ptr, len)
     }
 }
 
-fn make_slice_mut<'a, T>(ptr: *mut T, len: usize) -> &'a mut [T] {
+unsafe fn make_slice_mut<'a, T>(ptr: *mut T, len: usize) -> &'a mut [T] {
     if ptr.is_null() {
         &mut []
     } else {
-        unsafe { slice::from_raw_parts_mut(ptr, len) }
+        slice::from_raw_parts_mut(ptr, len)
     }
 }
 
@@ -210,6 +211,14 @@ pub struct DocumentHandle {
 impl DocumentHandle {
     pub fn new(api: RenderApi, size: FramebufferIntSize, layer: i8) -> DocumentHandle {
         let doc = api.add_document(size, layer);
+        DocumentHandle {
+            api: api,
+            document_id: doc
+        }
+    }
+
+    pub fn new_with_id(api: RenderApi, size: FramebufferIntSize, layer: i8, id: u32) -> DocumentHandle {
+        let doc = api.add_document_with_id(size, layer, id);
         DocumentHandle {
             api: api,
             document_id: doc
@@ -311,41 +320,45 @@ pub extern "C" fn wr_vec_u8_free(v: WrVecU8) {
 }
 
 #[repr(C)]
-pub struct ByteSlice {
+pub struct ByteSlice<'a> {
     buffer: *const u8,
     len: usize,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl ByteSlice {
-    pub fn new(slice: &[u8]) -> ByteSlice {
+impl<'a> ByteSlice<'a> {
+    pub fn new(slice: &'a [u8]) -> ByteSlice<'a> {
         ByteSlice {
             buffer: slice.as_ptr(),
             len: slice.len(),
+            _phantom: PhantomData,
         }
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        make_slice(self.buffer, self.len)
+    pub fn as_slice(&self) -> &'a [u8] {
+        unsafe { make_slice(self.buffer, self.len) }
     }
 }
 
 #[repr(C)]
-pub struct MutByteSlice {
+pub struct MutByteSlice<'a> {
     buffer: *mut u8,
     len: usize,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl MutByteSlice {
-    pub fn new(slice: &mut [u8]) -> MutByteSlice {
+impl<'a> MutByteSlice<'a> {
+    pub fn new(slice: &'a mut [u8]) -> MutByteSlice<'a> {
         let len = slice.len();
         MutByteSlice {
             buffer: slice.as_mut_ptr(),
             len: len,
+            _phantom: PhantomData,
         }
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        make_slice_mut(self.buffer, self.len)
+    pub fn as_mut_slice(&mut self) -> &'a mut [u8] {
+        unsafe { make_slice_mut(self.buffer, self.len) }
     }
 }
 
@@ -439,7 +452,7 @@ impl ExternalImageHandler for WrExternalImageHandler {
             uv: TexelRect::new(image.u0, image.v0, image.u1, image.v1),
             source: match image.image_type {
                 WrExternalImageType::NativeTexture => ExternalImageSource::NativeTexture(image.handle),
-                WrExternalImageType::RawData => ExternalImageSource::RawData(make_slice(image.buff, image.size)),
+                WrExternalImageType::RawData => ExternalImageSource::RawData(unsafe { make_slice(image.buff, image.size) }),
                 WrExternalImageType::Invalid => ExternalImageSource::Invalid,
             },
         }
@@ -568,8 +581,8 @@ extern "C" {
     fn wr_notifier_nop_frame_done(window_id: WrWindowId);
     fn wr_notifier_external_event(window_id: WrWindowId,
                                   raw_event: usize);
-    fn wr_schedule_render(window_id: WrWindowId);
-    fn wr_finished_scene_build(window_id: WrWindowId, pipeline_info: WrPipelineInfo);
+    fn wr_schedule_render(window_id: WrWindowId, document_id: WrDocumentId);
+    fn wr_finished_scene_build(window_id: WrWindowId, document_id: WrDocumentId, pipeline_info: WrPipelineInfo);
 
     fn wr_transaction_notification_notified(handler: usize, when: Checkpoint);
 }
@@ -659,6 +672,59 @@ pub extern "C" fn wr_renderer_render(renderer: &mut Renderer,
     }
 }
 
+#[no_mangle]
+pub extern "C" fn wr_renderer_get_screenshot_async(
+    renderer: &mut Renderer,
+    window_x: i32,
+    window_y: i32,
+    window_width: i32,
+    window_height: i32,
+    buffer_width: i32,
+    buffer_height: i32,
+    image_format: ImageFormat,
+    screenshot_width: *mut i32,
+    screenshot_height: *mut i32,
+) -> AsyncScreenshotHandle {
+    assert!(!screenshot_width.is_null());
+    assert!(!screenshot_height.is_null());
+
+    let (handle, size) = renderer.get_screenshot_async(
+        DeviceIntRect::new(
+            DeviceIntPoint::new(window_x, window_y),
+            DeviceIntSize::new(window_width, window_height),
+        ),
+        DeviceIntSize::new(buffer_width, buffer_height),
+        image_format,
+    );
+
+    unsafe {
+        *screenshot_width = size.width;
+        *screenshot_height = size.height;
+    }
+
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_map_and_recycle_screenshot(
+    renderer: &mut Renderer,
+    handle: AsyncScreenshotHandle,
+    dst_buffer: *mut u8,
+    dst_buffer_len: usize,
+    dst_stride: usize,
+) -> bool {
+    renderer.map_and_recycle_screenshot(
+        handle,
+        unsafe { make_slice_mut(dst_buffer, dst_buffer_len) },
+        dst_stride,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn wr_renderer_release_profiler_structures(renderer: &mut Renderer) {
+    renderer.release_profiler_structures();
+}
+
 // Call wr_renderer_render() before calling this function.
 #[no_mangle]
 pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
@@ -672,18 +738,6 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
     renderer.read_pixels_into(FramebufferIntSize::new(width, height).into(),
                               ReadPixelsFormat::Standard(ImageFormat::BGRA8),
                               &mut slice);
-}
-
-#[no_mangle]
-pub extern "C" fn wr_renderer_current_epoch(renderer: &mut Renderer,
-                                            pipeline_id: WrPipelineId,
-                                            out_epoch: &mut WrEpoch)
-                                            -> bool {
-    if let Some(epoch) = renderer.current_epoch(pipeline_id) {
-        *out_epoch = epoch;
-        return true;
-    }
-    return false;
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
@@ -705,14 +759,31 @@ pub unsafe extern "C" fn wr_renderer_accumulate_memory_report(renderer: &mut Ren
 #[repr(C)]
 pub struct WrPipelineEpoch {
     pipeline_id: WrPipelineId,
+    document_id: WrDocumentId,
     epoch: WrEpoch,
 }
 
-impl<'a> From<(&'a WrPipelineId, &'a WrEpoch)> for WrPipelineEpoch {
-    fn from(tuple: (&WrPipelineId, &WrEpoch)) -> WrPipelineEpoch {
+impl<'a> From<(&'a(WrPipelineId, WrDocumentId), &'a WrEpoch)> for WrPipelineEpoch {
+    fn from(tuple: (&(WrPipelineId, WrDocumentId), &WrEpoch)) -> WrPipelineEpoch {
         WrPipelineEpoch {
-            pipeline_id: *tuple.0,
+            pipeline_id: (tuple.0).0,
+            document_id: (tuple.0).1,
             epoch: *tuple.1
+        }
+    }
+}
+
+#[repr(C)]
+pub struct WrRemovedPipeline {
+    pipeline_id: WrPipelineId,
+    document_id: WrDocumentId,
+}
+
+impl<'a> From<&'a (WrPipelineId, WrDocumentId)> for WrRemovedPipeline {
+    fn from(tuple: &(WrPipelineId, WrDocumentId)) -> WrRemovedPipeline {
+        WrRemovedPipeline {
+            pipeline_id: tuple.0,
+            document_id: tuple.1,
         }
     }
 }
@@ -730,14 +801,15 @@ pub struct WrPipelineInfo {
     // up in this array means that the data structures have been torn down on
     // the webrender side, and so any remaining data structures on the caller
     // side can now be torn down also.
-    removed_pipelines: FfiVec<PipelineId>,
+    removed_pipelines: FfiVec<WrRemovedPipeline>,
 }
 
 impl WrPipelineInfo {
     fn new(info: &PipelineInfo) -> Self {
         WrPipelineInfo {
             epochs: FfiVec::from_vec(info.epochs.iter().map(WrPipelineEpoch::from).collect()),
-            removed_pipelines: FfiVec::from_vec(info.removed_pipelines.clone()),
+            removed_pipelines: FfiVec::from_vec(info.removed_pipelines.iter()
+                                                .map(WrRemovedPipeline::from).collect()),
         }
     }
 }
@@ -811,7 +883,8 @@ extern "C" {
     // These callbacks are invoked from the render backend thread (aka the APZ
     // sampler thread)
     fn apz_register_sampler(window_id: WrWindowId);
-    fn apz_sample_transforms(window_id: WrWindowId, transaction: &mut Transaction);
+    fn apz_sample_transforms(window_id: WrWindowId, transaction: &mut Transaction,
+                             document_id: WrDocumentId);
     fn apz_deregister_sampler(window_id: WrWindowId);
 }
 
@@ -843,7 +916,7 @@ impl SceneBuilderHooks for APZCallbacks {
         }
     }
 
-    fn post_scene_swap(&self, info: PipelineInfo, sceneswap_time: u64) {
+    fn post_scene_swap(&self, document_id: DocumentId, info: PipelineInfo, sceneswap_time: u64) {
         unsafe {
             let info = WrPipelineInfo::new(&info);
             record_telemetry_time(TelemetryProbe::SceneSwapTime, sceneswap_time);
@@ -854,12 +927,12 @@ impl SceneBuilderHooks for APZCallbacks {
         // After a scene swap we should schedule a render for the next vsync,
         // otherwise there's no guarantee that the new scene will get rendered
         // anytime soon
-        unsafe { wr_finished_scene_build(self.window_id, info) }
+        unsafe { wr_finished_scene_build(self.window_id, document_id, info) }
         unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
     }
 
-    fn post_resource_update(&self) {
-        unsafe { wr_schedule_render(self.window_id) }
+    fn post_resource_update(&self, document_id: DocumentId) {
+        unsafe { wr_schedule_render(self.window_id, document_id) }
         unsafe { gecko_profiler_end_marker(b"SceneBuilding\0".as_ptr() as *const c_char); }
     }
 
@@ -893,9 +966,9 @@ impl AsyncPropertySampler for SamplerCallback {
         unsafe { apz_register_sampler(self.window_id) }
     }
 
-    fn sample(&self) -> Vec<FrameMsg> {
+    fn sample(&self, document_id: DocumentId) -> Vec<FrameMsg> {
         let mut transaction = Transaction::new();
-        unsafe { apz_sample_transforms(self.window_id, &mut transaction) };
+        unsafe { apz_sample_transforms(self.window_id, &mut transaction, document_id) };
         // TODO: also omta_sample_transforms(...)
         transaction.get_frame_ops()
     }
@@ -1057,6 +1130,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 thread_pool: *mut WrThreadPool,
                                 size_of_op: VoidPtrToSizeFn,
                                 enclosing_size_of_op: VoidPtrToSizeFn,
+                                document_id: u32,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
                                 out_max_texture_size: *mut i32)
@@ -1076,7 +1150,6 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     } else {
         gl = unsafe { gl::GlFns::load_with(|symbol| get_proc_address(gl_context, symbol)) };
     }
-    gl.clear_color(0.0, 0.0, 0.0, 1.0);
 
     let version = gl.get_string(gl::VERSION);
 
@@ -1101,6 +1174,13 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     let cached_programs = match program_cache {
         Some(program_cache) => Some(Rc::clone(&program_cache.rc_get())),
         None => None,
+    };
+
+    let color = if cfg!(target_os = "android") {
+        // The color is for avoiding black flash before receiving display list.
+        ColorF::new(1.0, 1.0, 1.0, 1.0)
+    } else {
+        ColorF::new(0.0, 0.0, 0.0, 0.0)
     };
 
     let opts = RendererOptions {
@@ -1130,7 +1210,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         scene_builder_hooks: Some(Box::new(APZCallbacks::new(window_id))),
         sampler: Some(Box::new(SamplerCallback::new(window_id))),
         max_texture_size: Some(8192), // Moz2D doesn't like textures bigger than this
-        clear_color: Some(ColorF::new(0.0, 0.0, 0.0, 0.0)),
+        clear_color: Some(color),
         precache_flags,
         namespace_alloc_by_client: true,
         enable_picture_caching,
@@ -1141,10 +1221,11 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     // Ensure the WR profiler callbacks are hooked up to the Gecko profiler.
     set_profiler_hooks(Some(&PROFILER_HOOKS));
 
+    let window_size = FramebufferIntSize::new(window_width, window_height);
     let notifier = Box::new(CppNotifier {
         window_id: window_id,
     });
-    let (renderer, sender) = match Renderer::new(gl, notifier, opts, shaders) {
+    let (renderer, sender) = match Renderer::new(gl, notifier, opts, shaders, window_size) {
         Ok((renderer, sender)) => (renderer, sender),
         Err(e) => {
             warn!(" Failed to create a Renderer: {:?}", e);
@@ -1159,10 +1240,10 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
     unsafe {
         *out_max_texture_size = renderer.get_max_texture_size();
     }
-    let window_size = FramebufferIntSize::new(window_width, window_height);
     let layer = 0;
     *out_handle = Box::into_raw(Box::new(
-            DocumentHandle::new(sender.create_api_by_client(next_namespace_id()), window_size, layer)));
+            DocumentHandle::new_with_id(sender.create_api_by_client(next_namespace_id()),
+                                        window_size, layer, document_id)));
     *out_renderer = Box::into_raw(Box::new(renderer));
 
     return true;
@@ -1174,13 +1255,15 @@ pub extern "C" fn wr_api_create_document(
     out_handle: &mut *mut DocumentHandle,
     doc_size: FramebufferIntSize,
     layer: i8,
+    document_id: u32
 ) {
     assert!(unsafe { is_in_compositor_thread() });
 
-    *out_handle = Box::into_raw(Box::new(DocumentHandle::new(
+    *out_handle = Box::into_raw(Box::new(DocumentHandle::new_with_id(
         root_dh.api.clone_sender().create_api_by_client(next_namespace_id()),
         doc_size,
-        layer
+        layer,
+        document_id
     )));
 }
 
@@ -1329,8 +1412,7 @@ pub extern "C" fn wr_transaction_set_display_list(
     txn: &mut Transaction,
     epoch: WrEpoch,
     background: ColorF,
-    viewport_width: f32,
-    viewport_height: f32,
+    viewport_size: LayoutSize,
     pipeline_id: WrPipelineId,
     content_size: LayoutSize,
     dl_descriptor: BuiltDisplayListDescriptor,
@@ -1349,7 +1431,7 @@ pub extern "C" fn wr_transaction_set_display_list(
     txn.set_display_list(
         epoch,
         color,
-        LayoutSize::new(viewport_width, viewport_height),
+        viewport_size,
         (pipeline_id, content_size, dl),
         preserve_frame_state,
     );
@@ -1367,7 +1449,8 @@ pub extern "C" fn wr_transaction_set_document_view(
 }
 
 #[no_mangle]
-pub extern "C" fn wr_transaction_generate_frame(txn: &mut Transaction) {
+pub extern "C" fn wr_transaction_generate_frame(
+    txn: &mut Transaction) {
     txn.generate_frame();
 }
 
@@ -1390,7 +1473,7 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     };
 
     if transform_count > 0 {
-        let transform_slice = make_slice(transform_array, transform_count);
+        let transform_slice = unsafe { make_slice(transform_array, transform_count) };
 
         properties.transforms.reserve(transform_slice.len());
         for element in transform_slice.iter() {
@@ -1404,7 +1487,7 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     }
 
     if opacity_count > 0 {
-        let opacity_slice = make_slice(opacity_array, opacity_count);
+        let opacity_slice = unsafe { make_slice(opacity_array, opacity_count) };
 
         properties.floats.reserve(opacity_slice.len());
         for element in opacity_slice.iter() {
@@ -1434,7 +1517,7 @@ pub extern "C" fn wr_transaction_append_transform_properties(
         floats: Vec::new(),
     };
 
-    let transform_slice = make_slice(transform_array, transform_count);
+    let transform_slice = unsafe { make_slice(transform_array, transform_count) };
     properties.transforms.reserve(transform_slice.len());
     for element in transform_slice.iter() {
         let prop = PropertyValue {
@@ -1951,22 +2034,22 @@ pub extern "C" fn wr_dp_push_stacking_context(
 ) -> WrSpatialId {
     debug_assert!(unsafe { !is_in_render_thread() });
 
-    let c_filters = make_slice(filters, filter_count);
+    let c_filters = unsafe { make_slice(filters, filter_count) };
     let mut filters : Vec<FilterOp> = c_filters.iter().map(|c_filter| {
                                                            *c_filter
     }).collect();
 
-    let c_filter_datas = make_slice(filter_datas, filter_datas_count);
+    let c_filter_datas = unsafe { make_slice(filter_datas, filter_datas_count) };
     let r_filter_datas : Vec<FilterData> = c_filter_datas.iter().map(|c_filter_data| {
         FilterData {
             func_r_type: c_filter_data.funcR_type,
-            r_values: make_slice(c_filter_data.R_values, c_filter_data.R_values_count).to_vec(),
+            r_values: unsafe { make_slice(c_filter_data.R_values, c_filter_data.R_values_count).to_vec() },
             func_g_type: c_filter_data.funcG_type,
-            g_values: make_slice(c_filter_data.G_values, c_filter_data.G_values_count).to_vec(),
+            g_values: unsafe { make_slice(c_filter_data.G_values, c_filter_data.G_values_count).to_vec() },
             func_b_type: c_filter_data.funcB_type,
-            b_values: make_slice(c_filter_data.B_values, c_filter_data.B_values_count).to_vec(),
+            b_values: unsafe { make_slice(c_filter_data.B_values, c_filter_data.B_values_count).to_vec() },
             func_a_type: c_filter_data.funcA_type,
-            a_values: make_slice(c_filter_data.A_values, c_filter_data.A_values_count).to_vec(),
+            a_values: unsafe { make_slice(c_filter_data.A_values, c_filter_data.A_values_count).to_vec() },
         }
     }).collect();
 
@@ -2085,7 +2168,7 @@ pub extern "C" fn wr_dp_define_clipchain(state: &mut WrState,
         .map(|id| ClipChainId(*id, state.pipeline_id));
 
     let pipeline_id = state.pipeline_id;
-    let clips = make_slice(clips, clips_count)
+    let clips = unsafe { make_slice(clips, clips_count) }
         .iter()
         .map(|clip_id| clip_id.to_webrender(pipeline_id));
 
@@ -2107,7 +2190,7 @@ pub extern "C" fn wr_dp_define_clip_with_parent_clip(
         &mut state.frame_builder,
         parent.to_webrender(state.pipeline_id),
         clip_rect,
-        make_slice(complex, complex_count),
+        unsafe { make_slice(complex, complex_count) },
         unsafe { mask.as_ref() }.map(|m| *m),
     )
 }
@@ -2125,7 +2208,7 @@ pub extern "C" fn wr_dp_define_clip_with_parent_clip_chain(
         &mut state.frame_builder,
         parent.to_webrender(state.pipeline_id),
         clip_rect,
-        make_slice(complex, complex_count),
+        unsafe { make_slice(complex, complex_count) },
         unsafe { mask.as_ref() }.map(|m| *m),
     )
 }
@@ -2422,7 +2505,7 @@ pub extern "C" fn wr_dp_push_text(state: &mut WrState,
                                   glyph_options: *const GlyphOptions) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let glyph_slice = make_slice(glyphs, glyph_count as usize);
+    let glyph_slice = unsafe { make_slice(glyphs, glyph_count as usize) };
 
     let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
     prim_info.is_backface_visible = is_backface_visible;
@@ -2578,7 +2661,7 @@ pub extern "C" fn wr_dp_push_border_gradient(state: &mut WrState,
                                              outset: SideOffsets2D<f32>) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let stops_slice = make_slice(stops, stops_count);
+    let stops_slice = unsafe { make_slice(stops, stops_count) };
     let stops_vector = stops_slice.to_owned();
 
     let gradient = state.frame_builder.dl_builder.create_gradient(
@@ -2625,7 +2708,7 @@ pub extern "C" fn wr_dp_push_border_radial_gradient(state: &mut WrState,
                                                     outset: SideOffsets2D<f32>) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let stops_slice = make_slice(stops, stops_count);
+    let stops_slice = unsafe { make_slice(stops, stops_count) };
     let stops_vector = stops_slice.to_owned();
 
     let slice = SideOffsets2D::new(
@@ -2678,7 +2761,7 @@ pub extern "C" fn wr_dp_push_linear_gradient(state: &mut WrState,
                                              tile_spacing: LayoutSize) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let stops_slice = make_slice(stops, stops_count);
+    let stops_slice = unsafe { make_slice(stops, stops_count) };
     let stops_vector = stops_slice.to_owned();
 
     let gradient = state.frame_builder
@@ -2714,7 +2797,7 @@ pub extern "C" fn wr_dp_push_radial_gradient(state: &mut WrState,
                                              tile_spacing: LayoutSize) {
     debug_assert!(unsafe { is_in_main_thread() });
 
-    let stops_slice = make_slice(stops, stops_count);
+    let stops_slice = unsafe { make_slice(stops, stops_count) };
     let stops_vector = stops_slice.to_owned();
 
     let gradient = state.frame_builder

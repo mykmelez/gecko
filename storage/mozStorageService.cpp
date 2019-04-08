@@ -303,14 +303,14 @@ void Service::minimizeMemory() {
     RefPtr<Connection> conn = connections[i];
     // For non-main-thread owning/opening threads, we may be racing against them
     // closing their connection or their thread.  That's okay, see below.
-    if (!conn->connectionReady()) continue;
+    if (!conn->connectionReady()) {
+      continue;
+    }
 
     NS_NAMED_LITERAL_CSTRING(shrinkPragma, "PRAGMA shrink_memory");
-    nsCOMPtr<mozIStorageConnection> syncConn = do_QueryInterface(
-        NS_ISUPPORTS_CAST(mozIStorageAsyncConnection *, conn));
     bool onOpenedThread = false;
 
-    if (!syncConn) {
+    if (!conn->operationSupported(Connection::SYNCHRONOUS)) {
       // This is a mozIStorageAsyncConnection, it can only be used on the main
       // thread, so we can do a straight API call.
       nsCOMPtr<mozIStoragePendingStatement> ps;
@@ -453,7 +453,8 @@ Service::OpenSpecialDatabase(const char *aStorageKey,
     return NS_ERROR_INVALID_ARG;
   }
 
-  RefPtr<Connection> msc = new Connection(this, SQLITE_OPEN_READWRITE, false);
+  RefPtr<Connection> msc =
+      new Connection(this, SQLITE_OPEN_READWRITE, Connection::SYNCHRONOUS);
 
   rv = storageFile ? msc->initialize(storageFile) : msc->initialize();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -604,7 +605,8 @@ Service::OpenAsyncDatabase(nsIVariant *aDatabaseStore,
   }
 
   // Create connection on this thread, but initialize it on its helper thread.
-  RefPtr<Connection> msc = new Connection(this, flags, true, ignoreLockingMode);
+  RefPtr<Connection> msc =
+      new Connection(this, flags, Connection::ASYNCHRONOUS, ignoreLockingMode);
   nsCOMPtr<nsIEventTarget> target = msc->getAsyncExecutionTarget();
   MOZ_ASSERT(target,
              "Cannot initialize a connection that has been closed already");
@@ -623,7 +625,7 @@ Service::OpenDatabase(nsIFile *aDatabaseFile,
   // reasons.
   int flags =
       SQLITE_OPEN_READWRITE | SQLITE_OPEN_SHAREDCACHE | SQLITE_OPEN_CREATE;
-  RefPtr<Connection> msc = new Connection(this, flags, false);
+  RefPtr<Connection> msc = new Connection(this, flags, Connection::SYNCHRONOUS);
 
   nsresult rv = msc->initialize(aDatabaseFile);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -641,7 +643,7 @@ Service::OpenUnsharedDatabase(nsIFile *aDatabaseFile,
   // reasons.
   int flags =
       SQLITE_OPEN_READWRITE | SQLITE_OPEN_PRIVATECACHE | SQLITE_OPEN_CREATE;
-  RefPtr<Connection> msc = new Connection(this, flags, false);
+  RefPtr<Connection> msc = new Connection(this, flags, Connection::SYNCHRONOUS);
 
   nsresult rv = msc->initialize(aDatabaseFile);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -659,7 +661,7 @@ Service::OpenDatabaseWithFileURL(nsIFileURL *aFileURL,
   // reasons.
   int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_SHAREDCACHE |
               SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
-  RefPtr<Connection> msc = new Connection(this, flags, false);
+  RefPtr<Connection> msc = new Connection(this, flags, Connection::SYNCHRONOUS);
 
   nsresult rv = msc->initialize(aFileURL);
   NS_ENSURE_SUCCESS(rv, rv);
