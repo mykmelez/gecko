@@ -361,7 +361,6 @@ namespace mozilla {
 extern const mozilla::Module kLocalCertServiceModule;
 }
 extern const mozilla::Module kKeyValueModule;
-extern const mozilla::Module kXULStoreModule;
 extern const mozilla::Module kXREModule;
 extern const mozilla::Module kEmbeddingModule;
 #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_ANDROID)
@@ -461,7 +460,6 @@ nsresult nsComponentManagerImpl::Init() {
   RegisterModule(&kLayoutModule);
   RegisterModule(&mozilla::kLocalCertServiceModule);
   RegisterModule(&kKeyValueModule);
-  RegisterModule(&kXULStoreModule);
   RegisterModule(&kXREModule);
   RegisterModule(&kEmbeddingModule);
 #if defined(XP_WIN) || defined(MOZ_WIDGET_COCOA) || defined(MOZ_WIDGET_ANDROID)

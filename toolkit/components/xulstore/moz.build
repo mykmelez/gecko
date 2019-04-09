@@ -28,8 +28,8 @@ EXTRA_JS_MODULES += [
 
 XPIDL_MODULE = 'xulstore'
 
-UNIFIED_SOURCES += [
-    'nsXULStoreModule.cpp',
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 FINAL_LIBRARY = 'xul'

@@ -43,8 +43,6 @@
 
 #define NS_KEY_VALUE_SERVICE_CONTRACTID "@mozilla.org/key-value-service;1"
 
-#define NS_XUL_STORE_SERVICE_CONTRACTID "@mozilla.org/xul/xulstore;1"
-
 /////////////////////////////////////////////////////////////////////////////
 
 // {84E11F80-CA55-11DD-AD8B-0800200C9A66}
@@ -119,13 +117,5 @@
   {                                                  \
     0x6cc1a0a8, 0xaf97, 0x4d41, {                    \
       0x9b, 0x4a, 0x58, 0xdc, 0xec, 0x46, 0xeb, 0xce \
-    }                                                \
-  }
-
-// be70bf11-0c28-4a02-a38c-0148538d42cf
-#define NS_XUL_STORE_SERVICE_CID                     \
-  {                                                  \
-    0xbe70bf11, 0x0c28, 0x4a02, {                    \
-      0xa3, 0x8c, 0x01, 0x48, 0x53, 0x8d, 0x42, 0xcf \
     }                                                \
   }

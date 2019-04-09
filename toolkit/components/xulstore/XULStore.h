@@ -16,6 +16,7 @@
 #define XULStore_h
 
 #include "nsCOMPtr.h"
+#include "nsIXULStore.h"
 #include "nsString.h"
 
 namespace mozilla {
@@ -24,6 +25,16 @@ class XULStoreIterator;
 
 using mozilla::UniquePtr;
 using mozilla::XULStoreIterator;
+
+extern "C" {
+void xulstore_constructor(nsIXULStore** result);
+}
+
+already_AddRefed<nsIXULStore> NewXULStore() {
+  nsCOMPtr<nsIXULStore> xulStore;
+  xulstore_constructor(getter_AddRefs(xulStore));
+  return xulStore.forget();
+}
 
 extern "C" {
 nsresult xulstore_set_value(const nsAString* doc, const nsAString* id,

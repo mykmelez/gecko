@@ -4,14 +4,14 @@
 
 use crate as XULStore;
 use crate::{iter::XULStoreIterator, statics::update_profile_dir};
-use libc::{c_char, c_void};
-use nserror::{nsresult, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NO_AGGREGATION, NS_OK};
+use libc::c_char;
+use nserror::{nsresult, NS_ERROR_NOT_IMPLEMENTED, NS_OK};
 use nsstring::{nsAString, nsString};
 use std::cell::RefCell;
 use std::ptr;
 use xpcom::{
-    interfaces::{nsIJSEnumerator, nsIStringEnumerator, nsISupports},
-    nsIID, RefPtr,
+    interfaces::{nsIJSEnumerator, nsIStringEnumerator, nsISupports, nsIXULStore},
+    RefPtr,
 };
 
 // XULStore no longer expresses an XPCOM API.  Instead, JS consumers import
@@ -26,19 +26,11 @@ use xpcom::{
 // and all of the methods in XULStore.h that access data in the new store
 // similarly trigger instantiation of that static (and thus data migration).
 #[no_mangle]
-pub unsafe extern "C" fn nsXULStoreServiceConstructor(
-    outer: *const nsISupports,
-    iid: &nsIID,
-    result: *mut *mut c_void,
-) -> nsresult {
-    *result = ptr::null_mut();
-
-    if !outer.is_null() {
-        return NS_ERROR_NO_AGGREGATION;
-    }
-
-    let service: RefPtr<XULStoreService> = XULStoreService::new();
-    service.QueryInterface(iid, result)
+pub unsafe extern "C" fn xulstore_constructor(
+    result: *mut *const nsIXULStore,
+) {
+    let xul_store = XULStoreService::new();
+    RefPtr::new(xul_store.coerce::<nsIXULStore>()).forget(&mut *result);
 }
 
 #[derive(xpcom)]
