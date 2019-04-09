@@ -32,7 +32,7 @@ use crate::{
     persist::persist,
 };
 use nsstring::nsAString;
-use std::{collections::BTreeMap, fmt::Display};
+use std::fmt::Display;
 
 const SEPARATOR: char = '\u{0009}';
 
@@ -66,9 +66,9 @@ pub(crate) fn set_value(
         None => return Ok(()),
     };
     data.entry(doc.to_string())
-        .or_insert_with(BTreeMap::new)
+        .or_default()
         .entry(id.to_string())
-        .or_insert_with(BTreeMap::new)
+        .or_default()
         .insert(attr.to_string(), value.clone());
 
     persist(make_key(doc, id, attr), Some(value))?;
