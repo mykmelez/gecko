@@ -184,8 +184,7 @@ fn maybe_migrate_data(env: &Rkv, store: SingleStore) {
         }
 
         let file = File::open(old_datastore.clone())?;
-        let json: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>> =
-            serde_json::from_reader(file)?;
+        let json: XULStoreCache = serde_json::from_reader(file)?;
 
         let mut writer = env.write()?;
 
