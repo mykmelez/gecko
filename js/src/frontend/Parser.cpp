@@ -6733,7 +6733,7 @@ template <class ParseHandler, typename Unit>
 bool GeneralParser<ParseHandler, Unit>::classMember(
     YieldHandling yieldHandling, DefaultHandling defaultHandling,
     const ParseContext::ClassStatement& classStmt, HandlePropertyName className,
-    uint32_t classStartOffset, bool hasHeritage, size_t& numFields,
+    uint32_t classStartOffset, HasHeritage hasHeritage, size_t& numFields,
     size_t& numFieldKeys, ListNodeType& classMembers, bool* done) {
   *done = false;
 
@@ -6795,14 +6795,19 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       return false;
     }
 
+    if (propAtom == cx_->names().constructor) {
+      errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+      return false;
+    }
+
     if (!abortIfSyntaxParser()) {
       return false;
     }
 
     numFields++;
 
-    FunctionNodeType initializer =
-        fieldInitializerOpt(yieldHandling, propName, propAtom, numFieldKeys);
+    FunctionNodeType initializer = fieldInitializerOpt(
+        yieldHandling, hasHeritage, propName, propAtom, numFieldKeys);
     if (!initializer) {
       return false;
     }
@@ -6840,8 +6845,9 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       errorAt(propNameOffset, JSMSG_DUPLICATE_PROPERTY, "constructor");
       return false;
     }
-    propType = hasHeritage ? PropertyType::DerivedConstructor
-                           : PropertyType::Constructor;
+    propType = hasHeritage == HasHeritage::Yes
+                   ? PropertyType::DerivedConstructor
+                   : PropertyType::Constructor;
   } else if (isStatic && propAtom == cx_->names().prototype) {
     errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
     return false;
@@ -6885,15 +6891,15 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
 template <class ParseHandler, typename Unit>
 bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
     const ParseContext::ClassStatement& classStmt, HandlePropertyName className,
-    uint32_t classStartOffset, uint32_t classEndOffset, size_t numFields,
-    ListNodeType& classMembers) {
+    HasHeritage hasHeritage, uint32_t classStartOffset, uint32_t classEndOffset,
+    size_t numFields, ListNodeType& classMembers) {
   // Fields cannot re-use the constructor obtained via JSOP_CLASSCONSTRUCTOR or
   // JSOP_DERIVEDCONSTRUCTOR due to needing to emit calls to the field
   // initializers in the constructor. So, synthesize a new one.
   if (classStmt.constructorBox == nullptr && numFields > 0) {
     // synthesizeConstructor assigns to classStmt.constructorBox
     FunctionNodeType synthesizedCtor =
-        synthesizeConstructor(className, classStartOffset);
+        synthesizeConstructor(className, classStartOffset, hasHeritage);
     if (!synthesizedCtor) {
       return false;
     }
@@ -6932,12 +6938,6 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
       if (numFields > 0) {
         ctorbox->function()->lazyScript()->setHasThisBinding();
       }
-
-      // Field initializers can be retrieved if the class and constructor are
-      // being compiled at the same time, but we need to stash the field
-      // information if the constructor is being compiled lazily.
-      FieldInitializers fieldInfo(numFields);
-      ctorbox->function()->lazyScript()->setFieldInitializers(fieldInfo);
     }
   }
 
@@ -7002,11 +7002,13 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
       return null();
     }
 
-    bool hasHeritage;
-    if (!tokenStream.matchToken(&hasHeritage, TokenKind::Extends)) {
+    bool hasHeritageBool;
+    if (!tokenStream.matchToken(&hasHeritageBool, TokenKind::Extends)) {
       return null();
     }
-    if (hasHeritage) {
+    HasHeritage hasHeritage =
+        hasHeritageBool ? HasHeritage::Yes : HasHeritage::No;
+    if (hasHeritage == HasHeritage::Yes) {
       if (!tokenStream.getToken(&tt)) {
         return null();
       }
@@ -7078,8 +7080,9 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
     }
 
     classEndOffset = pos().end;
-    if (!finishClassConstructor(classStmt, className, classStartOffset,
-                                classEndOffset, numFields, classMembers)) {
+    if (!finishClassConstructor(classStmt, className, hasHeritage,
+                                classStartOffset, classEndOffset, numFields,
+                                classMembers)) {
       return null();
     }
 
@@ -7132,8 +7135,11 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
 template <class ParseHandler, typename Unit>
 typename ParseHandler::FunctionNodeType
 GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
-    HandleAtom className, uint32_t classNameOffset) {
-  FunctionSyntaxKind functionSyntaxKind = FunctionSyntaxKind::ClassConstructor;
+    HandleAtom className, uint32_t classNameOffset, HasHeritage hasHeritage) {
+  FunctionSyntaxKind functionSyntaxKind =
+      hasHeritage == HasHeritage::Yes
+          ? FunctionSyntaxKind::DerivedClassConstructor
+          : FunctionSyntaxKind::ClassConstructor;
 
   // Create the function object.
   RootedFunction fun(cx_, newFunction(className, functionSyntaxKind,
@@ -7201,6 +7207,42 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
     return null();
   }
 
+  if (hasHeritage == HasHeritage::Yes) {
+    NameNodeType thisName = newThisName();
+    if (!thisName) {
+      return null();
+    }
+
+    UnaryNodeType superBase =
+        handler_.newSuperBase(thisName, synthesizedBodyPos);
+    if (!superBase) {
+      return null();
+    }
+
+    ListNodeType arguments = handler_.newArguments(synthesizedBodyPos);
+    if (!arguments) {
+      return null();
+    }
+
+    CallNodeType superCall = handler_.newSuperCall(superBase, arguments, false);
+    if (!superCall) {
+      return null();
+    }
+
+    BinaryNodeType setThis = handler_.newSetThis(thisName, superCall);
+    if (!setThis) {
+      return null();
+    }
+
+    UnaryNodeType exprStatement =
+        handler_.newExprStatement(setThis, synthesizedBodyPos.end);
+    if (!exprStatement) {
+      return null();
+    }
+
+    handler_.addStatementToList(stmtList, exprStatement);
+  }
+
   auto initializerBody = finishLexicalScope(lexicalScope, stmtList);
   if (!initializerBody) {
     return null();
@@ -7224,8 +7266,8 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
 template <class ParseHandler, typename Unit>
 typename ParseHandler::FunctionNodeType
 GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
-    YieldHandling yieldHandling, Node propName, HandleAtom propAtom,
-    size_t& numFieldKeys) {
+    YieldHandling yieldHandling, HasHeritage hasHeritage, Node propName,
+    HandleAtom propAtom, size_t& numFieldKeys) {
   bool hasInitializer = false;
   if (!tokenStream.matchToken(&hasInitializer, TokenKind::Assign,
                               TokenStream::None)) {
@@ -7267,7 +7309,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   if (!funbox) {
     return null();
   }
-  funbox->initWithEnclosingParseContext(pc_, FunctionSyntaxKind::Expression);
+  funbox->initFieldInitializer(pc_, hasHeritage);
   handler_.setFunctionBox(funNode, funbox);
 
   // We can't use tokenStream.setFunctionStart, because that uses pos().begin,
@@ -9087,6 +9129,11 @@ bool GeneralParser<ParseHandler, Unit>::checkLabelOrIdentifierReference(
     MOZ_ASSERT(hint == ReservedWordTokenKind(ident),
                "hint doesn't match actual token kind");
     tt = hint;
+  }
+
+  if (!pc_->sc()->allowArguments() && ident == cx_->names().arguments) {
+    error(JSMSG_BAD_ARGUMENTS);
+    return false;
   }
 
   if (tt == TokenKind::Name || tt == TokenKind::PrivateName) {
