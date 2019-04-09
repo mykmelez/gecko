@@ -3,35 +3,36 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // @flow
-import React, { PureComponent } from "react";
-import ReactDOM from "react-dom";
+import { PureComponent } from "react";
 import classnames from "classnames";
-import { getDocument } from "../../utils/editor";
-import Svg from "../shared/Svg";
 import { showMenu } from "devtools-contextmenu";
+
+import { getDocument } from "../../utils/editor";
 import { breakpointItems, createBreakpointItems } from "./menus/breakpoints";
 
 // eslint-disable-next-line max-len
 import type { ColumnBreakpoint as ColumnBreakpointType } from "../../selectors/visibleColumnBreakpoints";
 import type { BreakpointItemActions } from "./menus/breakpoints";
-import type { Source } from "../../types";
+import type { Source, Context } from "../../types";
 
 type Bookmark = {
   clear: Function
 };
 
 type Props = {
+  cx: Context,
   editor: Object,
   source: Source,
   columnBreakpoint: ColumnBreakpointType,
   breakpointActions: BreakpointItemActions
 };
 
-const breakpointImg = document.createElement("button");
-ReactDOM.render(<Svg name={"column-marker"} />, breakpointImg);
+const breakpointButton = document.createElement("button");
+breakpointButton.innerHTML =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 11 13" width="11" height="13"><path d="M5.07.5H1.5c-.54 0-1 .46-1 1v10c0 .54.46 1 1 1h3.57c.58 0 1.15-.26 1.53-.7l3.7-5.3-3.7-5.3C6.22.76 5.65.5 5.07.5z"/></svg>';
 
 function makeBookmark({ breakpoint }, { onClick, onContextMenu }) {
-  const bp = breakpointImg.cloneNode(true);
+  const bp = breakpointButton.cloneNode(true);
 
   const isActive = breakpoint && !breakpoint.disabled;
   const isDisabled = breakpoint && breakpoint.disabled;
@@ -88,11 +89,11 @@ export default class ColumnBreakpoint extends PureComponent<Props> {
   onClick = (event: MouseEvent) => {
     event.stopPropagation();
     event.preventDefault();
-    const { columnBreakpoint, breakpointActions } = this.props;
+    const { cx, columnBreakpoint, breakpointActions } = this.props;
     if (columnBreakpoint.breakpoint) {
-      breakpointActions.removeBreakpoint(columnBreakpoint.breakpoint);
+      breakpointActions.removeBreakpoint(cx, columnBreakpoint.breakpoint);
     } else {
-      breakpointActions.addBreakpoint(columnBreakpoint.location);
+      breakpointActions.addBreakpoint(cx, columnBreakpoint.location);
     }
   };
 
@@ -100,13 +101,14 @@ export default class ColumnBreakpoint extends PureComponent<Props> {
     event.stopPropagation();
     event.preventDefault();
     const {
+      cx,
       columnBreakpoint: { breakpoint, location },
       breakpointActions
     } = this.props;
 
     const items = breakpoint
-      ? breakpointItems(breakpoint, breakpointActions)
-      : createBreakpointItems(location, breakpointActions);
+      ? breakpointItems(cx, breakpoint, breakpointActions)
+      : createBreakpointItems(cx, location, breakpointActions);
 
     showMenu(event, items);
   };

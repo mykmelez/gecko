@@ -1068,14 +1068,6 @@ mozilla::ipc::IPCResult ContentParent::RecvLaunchRDDProcess(
       Preferences::GetBool("media.rdd-process.enabled", false)) {
     RDDProcessManager* rdd = RDDProcessManager::Get();
     if (rdd) {
-      // If there is already an RDDChild, then we've already launched the
-      // RDD process.  We don't need to do anything else.  Specifically,
-      // we want to avoid calling CreateContentBridge again because that
-      // causes the RemoteDecoderManagerParent to rebuild needlessly.
-      if (rdd->GetRDDChild()) {
-        return IPC_OK();
-      }
-
       rdd->LaunchRDDProcess();
 
       bool rddOpened = rdd->CreateContentBridge(OtherPid(), aEndpoint);
@@ -4100,10 +4092,11 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptError(
     const nsString& aMessage, const nsString& aSourceName,
     const nsString& aSourceLine, const uint32_t& aLineNumber,
     const uint32_t& aColNumber, const uint32_t& aFlags,
-    const nsCString& aCategory, const bool& aFromPrivateWindow) {
+    const nsCString& aCategory, const bool& aFromPrivateWindow,
+    const bool& aFromChromeContext) {
   return RecvScriptErrorInternal(aMessage, aSourceName, aSourceLine,
                                  aLineNumber, aColNumber, aFlags, aCategory,
-                                 aFromPrivateWindow);
+                                 aFromPrivateWindow, aFromChromeContext);
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvScriptErrorWithStack(
@@ -4111,10 +4104,10 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptErrorWithStack(
     const nsString& aSourceLine, const uint32_t& aLineNumber,
     const uint32_t& aColNumber, const uint32_t& aFlags,
     const nsCString& aCategory, const bool& aFromPrivateWindow,
-    const ClonedMessageData& aFrame) {
-  return RecvScriptErrorInternal(aMessage, aSourceName, aSourceLine,
-                                 aLineNumber, aColNumber, aFlags, aCategory,
-                                 aFromPrivateWindow, &aFrame);
+    const bool& aFromChromeContext, const ClonedMessageData& aFrame) {
+  return RecvScriptErrorInternal(
+      aMessage, aSourceName, aSourceLine, aLineNumber, aColNumber, aFlags,
+      aCategory, aFromPrivateWindow, aFromChromeContext, &aFrame);
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvScriptErrorInternal(
@@ -4122,7 +4115,7 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptErrorInternal(
     const nsString& aSourceLine, const uint32_t& aLineNumber,
     const uint32_t& aColNumber, const uint32_t& aFlags,
     const nsCString& aCategory, const bool& aFromPrivateWindow,
-    const ClonedMessageData* aStack) {
+    const bool& aFromChromeContext, const ClonedMessageData* aStack) {
   RefPtr<nsConsoleService> consoleService = GetConsoleService();
   if (!consoleService) {
     return IPC_OK();
@@ -4157,9 +4150,9 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptErrorInternal(
     msg = new nsScriptError();
   }
 
-  nsresult rv =
-      msg->Init(aMessage, aSourceName, aSourceLine, aLineNumber, aColNumber,
-                aFlags, aCategory.get(), aFromPrivateWindow);
+  nsresult rv = msg->Init(aMessage, aSourceName, aSourceLine, aLineNumber,
+                          aColNumber, aFlags, aCategory.get(),
+                          aFromPrivateWindow, aFromChromeContext);
   if (NS_FAILED(rv)) return IPC_OK();
 
   consoleService->LogMessageWithMode(msg, nsConsoleService::SuppressLog);
@@ -5719,13 +5712,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     // BrowsingContext in another process. This is illegal since the
     // only thing that could create that child BrowsingContext is a
     // parent docshell in the same process as that BrowsingContext.
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "Trying to attach to out of process parent context");
 
-    // TODO(farre): We're doing nothing now, but is that exactly what
-    // we want? Maybe we want to crash the child currently calling
-    // SendAttachBrowsingContext and/or the child that originally
-    // called SendAttachBrowsingContext or possibly all children that
-    // has a BrowsingContext connected to the child that currently
-    // called SendAttachBrowsingContext? [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach to out of process parent context "
              "0x%08" PRIx64,
@@ -5738,9 +5727,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
     // This is highly suspicious. BrowsingContexts should only be
     // attached at most once, but finding one indicates that someone
     // is doing something they shouldn't.
+    MOZ_DIAGNOSTIC_ASSERT(false,
+                          "Trying to attach already attached browsing context");
 
-    // TODO(farre): To crash or not to crash. Same reasoning as in
-    // above TODO. [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to attach already attached 0x%08" PRIx64
              " to 0x%08" PRIx64,
@@ -5772,9 +5761,8 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
+    MOZ_DIAGNOSTIC_ASSERT(false, "Trying to detach out of process context");
 
-    // TODO(farre): To crash or not to crash. Same reasoning as in
-    // above TODO. [Bug 1471598]
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to detach out of process context 0x%08" PRIx64,
              aContext->Id()));

@@ -41,7 +41,6 @@
 #include "nsTableRowFrame.h"
 #include "nsTableCellFrame.h"
 #include "nsHTMLParts.h"
-#include "nsIPresShell.h"
 #include "nsUnicharUtils.h"
 #include "nsViewManager.h"
 #include "nsStyleConsts.h"
@@ -10583,7 +10582,8 @@ void nsCSSFrameConstructor::ConstructBlock(
   // clang-format on
 
   nsBlockFrame* blockFrame = do_QueryFrame(*aNewFrame);
-  MOZ_ASSERT(blockFrame->IsBlockFrame() || blockFrame->IsDetailsFrame(),
+  MOZ_ASSERT(blockFrame &&
+                 (blockFrame->IsBlockFrame() || blockFrame->IsDetailsFrame()),
              "not a block frame nor a details frame?");
 
   // Create column hierarchy if necessary.

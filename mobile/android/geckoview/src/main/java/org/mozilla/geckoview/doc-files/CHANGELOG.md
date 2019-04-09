@@ -31,11 +31,23 @@ exclude: true
 [68.6]: ../ContentBlocking.html$CB_DEFAULT
 [68.7]: ../ContentBlocking.html$CB_STRICT
 
-- Added [`GeckoSession.SessionState.fromString`][. This can be used to deserialize a
-  `GeckoSession.SessionState` instance previously serialized to a `String` vai
-  `GeckoSession.SessionState.toString`.
+- Added [`GeckoSession.SessionState.fromString`][68.8]. This can be used to
+  deserialize a `GeckoSession.SessionState` instance previously serialized to
+  a `String` via `GeckoSession.SessionState.toString`.
 
-[68.4]: ../GeckoSession.SessionState.html#fromString-java.lang.String-
+[68.8]: ../GeckoSession.SessionState.html#fromString-java.lang.String-
+
+- Added [`GeckoRuntimeSettings#setPreferredColorScheme`][68.9] to override
+  the default color theme for web content ("light" or "dark").
+
+[68.9]: ../GeckoRuntimeSettings.html#setPreferredColorScheme-int-
+
+- Added [`GeckoRuntimeSettings.Builder#configFilePath`][68.10] to set
+  a path to a configuration file from which GeckoView will read
+  configuration options such as Gecko process arguments, environment
+  variables, and preferences.
+
+[68.10]: ../GeckoRuntimeSettings.Builder.html#configFilePath-java.lang.String-
 
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
@@ -243,4 +255,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: d35c31c60693caf8467b98a196b382707c3bd044
+[api-version]: affe9cc5dc22f0700867a1ac7f9b55a033a4b88c

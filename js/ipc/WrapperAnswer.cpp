@@ -772,7 +772,7 @@ bool WrapperAnswer::RecvRegExpToShared(const ObjectId& objId, ReturnStatus* rs,
   }
   source->Assign(sourceStr);
 
-  *flags = JS::GetRegExpFlags(cx, obj);
+  *flags = JS::GetRegExpFlags(cx, obj).value();
 
   return ok(rs);
 }
@@ -799,7 +799,7 @@ bool WrapperAnswer::RecvGetPropertyKeys(const ObjectId& objId,
 
   LOG("%s.getPropertyKeys()", ReceiverObj(objId));
 
-  AutoIdVector props(cx);
+  RootedIdVector props(cx);
   if (!js::GetPropertyKeys(cx, obj, flags, &props)) {
     return fail(jsapi, rs);
   }

@@ -14,12 +14,21 @@ import {
   getBreakpointPositionsForSource
 } from "../../selectors";
 
-import type { MappedLocation, SourceLocation } from "../../types";
-import type { ThunkArgs } from "../../actions/types";
+import type {
+  MappedLocation,
+  SourceLocation,
+  BreakpointPositions,
+  Context
+} from "../../types";
 import { makeBreakpointId } from "../../utils/breakpoint";
+import {
+  memoizeableAction,
+  type MemoizedAction
+} from "../../utils/memoizableAction";
+
 import typeof SourceMaps from "../../../packages/devtools-source-map/src";
 
-const requests = new Map();
+// const requests = new Map();
 
 async function mapLocations(
   generatedLocations: SourceLocation[],
@@ -64,7 +73,7 @@ function convertToList(results, source) {
   return positions;
 }
 
-async function _setBreakpointPositions(sourceId, thunkArgs) {
+async function _setBreakpointPositions(cx, sourceId, thunkArgs) {
   const { client, dispatch, getState, sourceMaps } = thunkArgs;
   let generatedSource = getSource(getState(), sourceId);
   if (!generatedSource) {
@@ -113,55 +122,35 @@ async function _setBreakpointPositions(sourceId, thunkArgs) {
   if (!source) {
     return;
   }
+
   dispatch({
     type: "ADD_BREAKPOINT_POSITIONS",
+    cx,
     source: source,
     positions
   });
+
+  return positions;
 }
 
-function buildCacheKey(sourceId: string, thunkArgs: ThunkArgs): string {
-  const generatedSource = getSource(
-    thunkArgs.getState(),
-    isOriginalId(sourceId) ? originalToGeneratedId(sourceId) : sourceId
-  );
-
-  let key = sourceId;
-
-  if (generatedSource) {
-    for (const actor of generatedSource.actors) {
-      key += `:${actor.actor}`;
-    }
-  }
-  return key;
-}
-
-export function setBreakpointPositions(sourceId: string) {
-  return async (thunkArgs: ThunkArgs) => {
-    const { getState } = thunkArgs;
-    if (hasBreakpointPositions(getState(), sourceId)) {
-      return getBreakpointPositionsForSource(getState(), sourceId);
-    }
-
-    const cacheKey = buildCacheKey(sourceId, thunkArgs);
-
-    if (!requests.has(cacheKey)) {
-      requests.set(
-        cacheKey,
-        (async () => {
-          try {
-            await _setBreakpointPositions(sourceId, thunkArgs);
-          } catch (e) {
-            // TODO: Address exceptions originating from 1536618
-            // `Debugger.Source belongs to a different Debugger`
-          } finally {
-            requests.delete(cacheKey);
-          }
-        })()
-      );
-    }
-
-    await requests.get(cacheKey);
-    return getBreakpointPositionsForSource(getState(), sourceId);
-  };
-}
+export const setBreakpointPositions: MemoizedAction<
+  { cx: Context, sourceId: string },
+  ?BreakpointPositions
+> = memoizeableAction("setBreakpointPositions", {
+  hasValue: ({ sourceId }, { getState }) =>
+    hasBreakpointPositions(getState(), sourceId),
+  getValue: ({ sourceId }, { getState }) =>
+    getBreakpointPositionsForSource(getState(), sourceId),
+  createKey({ sourceId }, { getState }) {
+    const generatedSource = getSource(
+      getState(),
+      isOriginalId(sourceId) ? originalToGeneratedId(sourceId) : sourceId
+    );
+    const actors = generatedSource
+      ? generatedSource.actors.map(({ actor }) => actor)
+      : [];
+    return [sourceId, ...actors].join(":");
+  },
+  action: ({ cx, sourceId }, thunkArgs) =>
+    _setBreakpointPositions(cx, sourceId, thunkArgs)
+});

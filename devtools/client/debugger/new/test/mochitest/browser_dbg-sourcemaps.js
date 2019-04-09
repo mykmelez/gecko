@@ -57,7 +57,10 @@ add_task(async function() {
     "times2.js",
     "opts.js"
   );
-  const { getState } = dbg;
+  const {
+    selectors: { getBreakpointCount },
+    getState
+  } = dbg;
 
   ok(true, "Original sources exist");
   const bundleSrc = findSource(dbg, "bundle.js");
@@ -88,7 +91,7 @@ add_task(async function() {
 
   // Test breaking on a breakpoint
   await addBreakpoint(dbg, "entry.js", 15);
-  is(dbg.selectors.getBreakpointCount(getState()), 1, "One breakpoint exists");
+  is(getBreakpointCount(getState()), 1, "One breakpoint exists");
   assertBreakpointExists(dbg, entrySrc, 15);
 
   invokeInTab("keepMeAlive");
@@ -98,12 +101,12 @@ add_task(async function() {
   await stepIn(dbg);
   assertPausedLocation(dbg);
 
-  await dbg.actions.jumpToMappedSelectedLocation();
+  await dbg.actions.jumpToMappedSelectedLocation(getContext(dbg));
   await stepOver(dbg);
   assertPausedLocation(dbg);
   assertDebugLine(dbg, 71);
 
-  await dbg.actions.jumpToMappedSelectedLocation();
+  await dbg.actions.jumpToMappedSelectedLocation(getContext(dbg));
   await stepOut(dbg);
   assertPausedLocation(dbg);
   assertDebugLine(dbg, 16);

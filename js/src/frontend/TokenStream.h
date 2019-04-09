@@ -206,13 +206,13 @@
 #include "frontend/ErrorReporter.h"
 #include "frontend/TokenKind.h"
 #include "js/CompileOptions.h"
+#include "js/RegExpFlags.h"  // JS::RegExpFlag, JS::RegExpFlags
 #include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "util/Text.h"
 #include "util/Unicode.h"
 #include "vm/ErrorReporting.h"
 #include "vm/JSAtom.h"
-#include "vm/RegExpConstants.h"
 #include "vm/StringType.h"
 
 struct JSContext;
@@ -380,7 +380,7 @@ struct Token {
     } number;
 
     /** Regular expression flags; use charBuffer to access source chars. */
-    RegExpFlag reflags;
+    JS::RegExpFlags reflags;
   } u;
 
 #ifdef DEBUG
@@ -407,9 +407,8 @@ struct Token {
     u.atom = atom;
   }
 
-  void setRegExpFlags(RegExpFlag flags) {
+  void setRegExpFlags(JS::RegExpFlags flags) {
     MOZ_ASSERT(type == TokenKind::RegExp);
-    MOZ_ASSERT((flags & AllFlags) == flags);
     u.reflags = flags;
   }
 
@@ -432,9 +431,8 @@ struct Token {
     return u.atom;
   }
 
-  RegExpFlag regExpFlags() const {
+  JS::RegExpFlags regExpFlags() const {
     MOZ_ASSERT(type == TokenKind::RegExp);
-    MOZ_ASSERT((u.reflags & AllFlags) == u.reflags);
     return u.reflags;
   }
 
@@ -1943,6 +1941,22 @@ class GeneralTokenStreamChars : public SpecializedTokenStreamCharsBase<Unit> {
     return static_cast<TokenStreamSpecific*>(this);
   }
 
+ private:
+  // Computing accurate column numbers requires linearly iterating through all
+  // source units in the line to account for multi-unit code points; on long
+  // lines requiring many column computations, this becomes quadratic.
+  //
+  // However, because usually we need columns for advancing offsets through
+  // scripts, caching the last ((line number, offset) => relative column)
+  // mapping -- in similar manner to how |SourceUnits::lastIndex_| is used to
+  // cache (offset => line number) mappings -- lets us avoid re-iterating
+  // through the line prefix in most cases.
+
+  mutable uint32_t lastLineForColumn_ = UINT32_MAX;
+  mutable uint32_t lastOffsetForColumn_ = UINT32_MAX;
+  mutable uint32_t lastColumn_ = 0;
+
+ protected:
   uint32_t computeColumn(LineToken lineToken, uint32_t offset) const;
   void computeLineAndColumn(uint32_t offset, uint32_t* line,
                             uint32_t* column) const;
@@ -1999,7 +2013,8 @@ class GeneralTokenStreamChars : public SpecializedTokenStreamCharsBase<Unit> {
     token->setName(name);
   }
 
-  void newRegExpToken(RegExpFlag reflags, TokenStart start, TokenKind* out) {
+  void newRegExpToken(JS::RegExpFlags reflags, TokenStart start,
+                      TokenKind* out) {
     Token* token =
         newToken(TokenKind::RegExp, start, TokenStreamShared::Operand, out);
     token->setRegExpFlags(reflags);
@@ -2802,7 +2817,8 @@ template <typename Unit>
 template <class AnyCharsAccess>
 inline TokenStreamPosition<Unit>::TokenStreamPosition(
     AutoKeepAtoms& keepAtoms,
-    TokenStreamSpecific<Unit, AnyCharsAccess>& tokenStream) {
+    TokenStreamSpecific<Unit, AnyCharsAccess>& tokenStream)
+    : currentToken(tokenStream.anyCharsAccess().currentToken()) {
   TokenStreamAnyChars& anyChars = tokenStream.anyCharsAccess();
 
   buf =

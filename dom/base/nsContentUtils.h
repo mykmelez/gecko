@@ -1025,7 +1025,8 @@ class nsContentUtils {
    */
   static void LogSimpleConsoleError(const nsAString& aErrorText,
                                     const char* classification,
-                                    bool aFromPrivateWindow);
+                                    bool aFromPrivateWindow,
+                                    bool aFromChromeContext);
 
   /**
    * Report a non-localized error message to the error console.
@@ -2758,6 +2759,13 @@ class nsContentUtils {
    * allowed for a non-CORS XHR or fetch request.
    */
   static bool IsAllowedNonCorsLanguage(const nsACString& aHeaderValue);
+
+  /**
+   * Returns whether a given header and value is a CORS-safelisted request
+   * header per https://fetch.spec.whatwg.org/#cors-safelisted-request-header
+   */
+  static bool IsCORSSafelistedRequestHeader(const nsACString& aName,
+                                            const nsACString& aValue);
 
   /**
    * Returns whether a given header is forbidden for an XHR or fetch

@@ -39,6 +39,7 @@
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
@@ -75,6 +76,7 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
 #include "mozilla/Unused.h"
+#include "MobileViewportManager.h"
 #include "VisualViewport.h"
 #include "LayersLogging.h"  // for Stringify
 #include <algorithm>
@@ -393,7 +395,7 @@ bool nsHTMLScrollFrame::TryLayout(ScrollReflowInput* aState,
   }
 
   nsSize visualViewportSize = scrollPortSize;
-  nsIPresShell* presShell = PresShell();
+  mozilla::PresShell* presShell = PresShell();
   if (mHelper.mIsRoot && presShell->IsVisualViewportSizeSet()) {
     nsSize compositionSize =
         nsLayoutUtils::CalculateCompositionSizeForFrame(this, false);
@@ -1848,9 +1850,9 @@ class ScrollFrameHelper::AsyncScroll final : public nsARefreshObserver {
 
     RefreshDriver(aCallee)->AddRefreshObserver(this, FlushType::Style);
     mCallee = aCallee;
-    nsIPresShell* shell = mCallee->mOuter->PresShell();
-    MOZ_ASSERT(shell);
-    shell->SuppressDisplayport(true);
+    PresShell* presShell = mCallee->mOuter->PresShell();
+    MOZ_ASSERT(presShell);
+    presShell->SuppressDisplayport(true);
   }
 
   virtual void WillRefresh(mozilla::TimeStamp aTime) override {
@@ -1867,9 +1869,9 @@ class ScrollFrameHelper::AsyncScroll final : public nsARefreshObserver {
   void RemoveObserver() {
     if (mCallee) {
       RefreshDriver(mCallee)->RemoveRefreshObserver(this, FlushType::Style);
-      nsIPresShell* shell = mCallee->mOuter->PresShell();
-      MOZ_ASSERT(shell);
-      shell->SuppressDisplayport(false);
+      PresShell* presShell = mCallee->mOuter->PresShell();
+      MOZ_ASSERT(presShell);
+      presShell->SuppressDisplayport(false);
       mCallee = nullptr;
     }
   }
@@ -2363,7 +2365,7 @@ static void AdjustViews(nsIFrame* aFrame) {
 }
 
 void ScrollFrameHelper::MarkScrollbarsDirtyForReflow() const {
-  nsIPresShell* presShell = mOuter->PresShell();
+  PresShell* presShell = mOuter->PresShell();
   if (mVScrollbarBox) {
     presShell->FrameNeedsReflow(mVScrollbarBox, nsIPresShell::eResize,
                                 NS_FRAME_IS_DIRTY);
@@ -2978,6 +2980,9 @@ static void AppendToTop(nsDisplayListBuilder* aBuilder,
     newItem = MakeDisplayItem<nsDisplayWrapList>(aBuilder, aSourceFrame,
                                                  aSource, asr, false, 1);
   }
+  if (!newItem) {
+    return;
+  }
 
   if (aFlags & APPEND_POSITIONED) {
     // We want overlay scrollbars to always be on top of the scrolled content,
@@ -3559,11 +3564,11 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       if (info != CompositorHitTestInvisibleToHit) {
         auto* hitInfo = MakeDisplayItem<nsDisplayCompositorHitTestInfo>(
             aBuilder, mScrolledFrame, info, 1);
-
-        aBuilder->SetCompositorHitTestInfo(hitInfo->HitTestArea(),
-                                           hitInfo->HitTestFlags());
-
-        set.BorderBackground()->AppendToTop(hitInfo);
+        if (hitInfo) {
+          aBuilder->SetCompositorHitTestInfo(hitInfo->HitTestArea(),
+                                             hitInfo->HitTestFlags());
+          set.BorderBackground()->AppendToTop(hitInfo);
+        }
       }
     }
 
@@ -3608,8 +3613,10 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
             aBuilder, mOuter,
             dirtyRect + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
             NS_RGBA(0, 0, 255, 64), false);
-        color->SetOverrideZIndex(INT32_MAX);
-        set.PositionedDescendants()->AppendToTop(color);
+        if (color) {
+          color->SetOverrideZIndex(INT32_MAX);
+          set.PositionedDescendants()->AppendToTop(color);
+        }
       }
     }
 
@@ -3677,9 +3684,9 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     DisplayListClipState::AutoSaveRestore clipState(aBuilder);
     clipState.ClipContentDescendants(clipRect, haveRadii ? radii : nullptr);
 
-    set.Content()->AppendToTop(MakeDisplayItem<nsDisplayAsyncZoom>(
+    set.Content()->AppendNewToTop<nsDisplayAsyncZoom>(
         aBuilder, mOuter, &resultList, aBuilder->CurrentActiveScrolledRoot(),
-        viewID));
+        viewID);
   }
 
   nsDisplayListCollection scrolledContent(aBuilder);
@@ -3713,7 +3720,9 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
             MakeDisplayItem<nsDisplayCompositorHitTestInfo>(
                 aBuilder, mScrolledFrame, info, 1,
                 Some(mScrollPort + aBuilder->ToReferenceFrame(mOuter)));
-        AppendInternalItemToTop(scrolledContent, hitInfo, Some(INT32_MAX));
+        if (hitInfo) {
+          AppendInternalItemToTop(scrolledContent, hitInfo, Some(INT32_MAX));
+        }
       }
     }
 
@@ -3743,9 +3752,11 @@ void ScrollFrameHelper::MaybeAddTopLayerItems(nsDisplayListBuilder* aBuilder,
         nsDisplayWrapList* wrapList = MakeDisplayItem<nsDisplayWrapList>(
             aBuilder, viewportFrame, &topLayerList,
             aBuilder->CurrentActiveScrolledRoot(), false, 2);
-        wrapList->SetOverrideZIndex(
-            std::numeric_limits<decltype(wrapList->ZIndex())>::max());
-        aLists.PositionedDescendants()->AppendToTop(wrapList);
+        if (wrapList) {
+          wrapList->SetOverrideZIndex(
+              std::numeric_limits<decltype(wrapList->ZIndex())>::max());
+          aLists.PositionedDescendants()->AppendToTop(wrapList);
+        }
       }
     }
   }
@@ -3783,7 +3794,7 @@ bool ScrollFrameHelper::DecideScrollableLayer(
             rootPresContext = pc->GetRootPresContext();
           }
           if (rootPresContext) {
-            const nsIPresShell* const rootPresShell =
+            const mozilla::PresShell* const rootPresShell =
                 rootPresContext->PresShell();
             nsIFrame* rootFrame = rootPresShell->GetRootScrollFrame();
             if (!rootFrame) {
@@ -3895,7 +3906,7 @@ bool ScrollFrameHelper::DecideScrollableLayer(
       // The displayPort getter takes care of adjusting for resolution. So if
       // we have resolution but no displayPort then we need to adjust for
       // resolution here.
-      nsIPresShell* presShell = mOuter->PresShell();
+      PresShell* presShell = mOuter->PresShell();
       *aVisibleRect =
           aVisibleRect->RemoveResolution(presShell->GetResolution());
       *aDirtyRect = aDirtyRect->RemoveResolution(presShell->GetResolution());
@@ -4056,7 +4067,7 @@ nsRect ScrollFrameHelper::GetScrollRangeForClamping() const {
 }
 
 nsSize ScrollFrameHelper::GetVisualViewportSize() const {
-  nsIPresShell* presShell = mOuter->PresShell();
+  PresShell* presShell = mOuter->PresShell();
   if (mIsRoot && presShell->IsVisualViewportSizeSet()) {
     return presShell->GetVisualViewportSize();
   }
@@ -4064,7 +4075,7 @@ nsSize ScrollFrameHelper::GetVisualViewportSize() const {
 }
 
 nsPoint ScrollFrameHelper::GetVisualViewportOffset() const {
-  nsIPresShell* presShell = mOuter->PresShell();
+  PresShell* presShell = mOuter->PresShell();
   if (mIsRoot && presShell->IsVisualViewportSizeSet()) {
     return presShell->GetVisualViewportOffset();
   }
@@ -4072,8 +4083,7 @@ nsPoint ScrollFrameHelper::GetVisualViewportOffset() const {
 }
 
 nsRect ScrollFrameHelper::GetVisualOptimalViewingRect() const {
-  nsIPresShell* presShell = mOuter->PresShell();
-
+  PresShell* presShell = mOuter->PresShell();
   if (mIsRoot && presShell->IsVisualViewportSizeSet() &&
       presShell->IsVisualViewportOffsetSet()) {
     return nsRect(mScrollPort.TopLeft() - GetScrollPosition() +
@@ -5685,7 +5695,7 @@ bool ScrollFrameHelper::ReflowFinished() {
   if (mIsRoot && mMinimumScaleSizeChanged &&
       mOuter->PresShell()->GetIsViewportOverridden() &&
       !mOuter->PresShell()->IsResolutionUpdatedByApz()) {
-    nsIPresShell* presShell = mOuter->PresShell();
+    PresShell* presShell = mOuter->PresShell();
     RefPtr<MobileViewportManager> manager =
         presShell->GetMobileViewportManager();
     MOZ_ASSERT(manager);
@@ -5953,7 +5963,7 @@ void ScrollFrameHelper::LayoutScrollbars(nsBoxLayoutState& aState,
                                          const nsRect& aOldScrollArea) {
   NS_ASSERTION(!mSuppressScrollbarUpdate, "This should have been suppressed");
 
-  nsIPresShell* presShell = mOuter->PresShell();
+  PresShell* presShell = mOuter->PresShell();
 
   bool hasResizer = HasResizer();
   bool scrollbarOnLeft = !IsScrollbarOnRight();
@@ -6410,8 +6420,7 @@ UniquePtr<PresState> ScrollFrameHelper::SaveState() const {
   state->allowScrollOriginDowngrade() = allowScrollOriginDowngrade;
   if (mIsRoot) {
     // Only save resolution properties for root scroll frames
-    nsIPresShell* shell = mOuter->PresShell();
-    state->resolution() = shell->GetResolution();
+    state->resolution() = mOuter->PresShell()->GetResolution();
   }
   return state;
 }
@@ -6427,9 +6436,8 @@ void ScrollFrameHelper::RestoreState(PresState* aState) {
   MOZ_ASSERT(mIsRoot || aState->resolution() == 1.0);
 
   if (mIsRoot) {
-    nsIPresShell* presShell = mOuter->PresShell();
-    presShell->SetResolutionAndScaleTo(aState->resolution(),
-                                       nsIPresShell::ChangeOrigin::eMainThread);
+    mOuter->PresShell()->SetResolutionAndScaleTo(
+        aState->resolution(), nsIPresShell::ChangeOrigin::eMainThread);
   }
 }
 

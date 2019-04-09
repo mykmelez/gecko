@@ -48,6 +48,7 @@ from mozbuild.backend import (
     backends,
 )
 
+from mozversioncontrol import get_repository_object
 
 BUILD_WHAT_HELP = '''
 What to build. Can be a top-level make target or a relative directory. If
@@ -1430,8 +1431,7 @@ class PackageFrontend(MachCommandBase):
                 records[record.filename] = DownloadRecord(
                     url, record.filename, record.size, record.digest,
                     record.algorithm, unpack=record.unpack,
-                    version=record.version, visibility=record.visibility,
-                    setup=record.setup)
+                    version=record.version, visibility=record.visibility)
 
         if from_build:
             if 'MOZ_AUTOMATION' in os.environ:
@@ -1576,7 +1576,7 @@ class PackageFrontend(MachCommandBase):
                     'sha256': h.hexdigest(),
                 }
             if record.unpack and not no_unpack:
-                unpack_file(local, record.setup)
+                unpack_file(local)
                 os.unlink(local)
 
         if not downloaded:
@@ -1701,8 +1701,10 @@ class StaticAnalysis(MachCommandBase):
                      help='Write clang-tidy output in a file')
     @CommandArgument('--format', default='text', choices=('text', 'json'),
                      help='Output format to write in a file')
+    @CommandArgument('--outgoing', default=False, action='store_true',
+                     help='Run static analysis checks on outgoing files from mercurial repository')
     def check(self, source=None, jobs=2, strip=1, verbose=False,
-              checks='-*', fix=False, header_filter='', output=None, format='text'):
+              checks='-*', fix=False, header_filter='', output=None, format='text', outgoing=False):
         from mozbuild.controller.building import (
             StaticAnalysisFooter,
             StaticAnalysisOutputManager,
@@ -1716,6 +1718,12 @@ class StaticAnalysis(MachCommandBase):
         rc = rc or self._get_clang_tools(verbose=verbose)
         if rc != 0:
             return rc
+
+        # Use outgoing files instead of source files
+        if outgoing:
+            repo = get_repository_object(self.topsrcdir)
+            files = repo.get_outgoing_files()
+            source = map(os.path.abspath, files)
 
         # Split in several chunks to avoid hitting Python's limit of 100 groups in re
         compile_db = json.loads(open(self._compile_db, 'r').read())
@@ -2406,11 +2414,17 @@ class StaticAnalysis(MachCommandBase):
     @CommandArgument('--format', '-f', choices=('diff', 'json'), default='diff', dest='output_format',
                      help='Specify the output format used: diff is the raw patch provided by '
                      'clang-format, json is a list of atomic changes to process.')
-    def clang_format(self, assume_filename, path, commit, output_path=None, output_format='diff', verbose=False):
+    @CommandArgument('--outgoing', default=False, action='store_true',
+                     help='Run clang-format on outgoing files from mercurial repository')
+    def clang_format(self, assume_filename, path, commit, output_path=None, output_format='diff', verbose=False, outgoing=False):
         # Run clang-format or clang-format-diff on the local changes
         # or files/directories
-        if path is not None:
-            path = self._conv_to_abspath(path)
+        if path is None and outgoing:
+            repo = get_repository_object(self.topsrcdir)
+            path = repo.get_outgoing_files()
+
+        if path:
+            path = map(os.path.abspath, path)
 
         os.chdir(self.topsrcdir)
 
@@ -2647,13 +2661,6 @@ class StaticAnalysis(MachCommandBase):
         return builder._run_make(directory=self.topobjdir, target='export',
                                  line_handler=None, silent=not verbose,
                                  num_jobs=jobs)
-
-    def _conv_to_abspath(self, paths):
-        # Converts all the paths to absolute pathnames
-        tmp_path = []
-        for f in paths:
-            tmp_path.append(os.path.abspath(f))
-        return tmp_path
 
     def _set_clang_tools_paths(self):
         rc, config, _ = self._get_config_environment()

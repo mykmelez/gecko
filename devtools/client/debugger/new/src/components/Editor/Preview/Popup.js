@@ -24,7 +24,8 @@ const {
 import actions from "../../../actions";
 import {
   getAllPopupObjectProperties,
-  getCurrentThread
+  getCurrentThread,
+  getThreadContext
 } from "../../../selectors";
 import Popover from "../../shared/Popover";
 import PreviewFunction from "../../shared/PreviewFunction";
@@ -36,9 +37,11 @@ import "./Popup.css";
 
 import type { EditorRange } from "../../../utils/editor/types";
 import type { Coords } from "../../shared/Popover";
+import type { ThreadContext } from "../../../types";
 
 type PopupValue = Object | null;
 type Props = {
+  cx: ThreadContext,
   popupObjectProperties: Object,
   popoverPos: Object,
   value: PopupValue,
@@ -51,7 +54,9 @@ type Props = {
   addExpression: typeof actions.addExpression,
   selectSourceURL: typeof actions.selectSourceURL,
   openLink: typeof actions.openLink,
-  openElementInInspector: typeof actions.openElementInInspectorCommand
+  openElementInInspector: typeof actions.openElementInInspectorCommand,
+  highlightDomElement: typeof actions.highlightDomElement,
+  unHighlightDomElement: typeof actions.unHighlightDomElement
 };
 
 type State = {
@@ -90,6 +95,7 @@ export class Popup extends Component<Props, State> {
 
   async componentWillMount() {
     const {
+      cx,
       value,
       setPopupObjectProperties,
       popupObjectProperties
@@ -106,7 +112,7 @@ export class Popup extends Component<Props, State> {
       const onLoadItemProperties = loadItemProperties(root, createObjectClient);
       if (onLoadItemProperties !== null) {
         const properties = await onLoadItemProperties;
-        setPopupObjectProperties(root.contents.value, properties);
+        setPopupObjectProperties(cx, root.contents.value, properties);
       }
     }
   }
@@ -179,7 +185,7 @@ export class Popup extends Component<Props, State> {
   };
 
   renderFunctionPreview() {
-    const { selectSourceURL, value } = this.props;
+    const { cx, selectSourceURL, value } = this.props;
 
     if (!value) {
       return null;
@@ -189,7 +195,9 @@ export class Popup extends Component<Props, State> {
     return (
       <div
         className="preview-popup"
-        onClick={() => selectSourceURL(location.url, { line: location.line })}
+        onClick={() =>
+          selectSourceURL(cx, location.url, { line: location.line })
+        }
       >
         <PreviewFunction func={value} />
       </div>
@@ -243,7 +251,12 @@ export class Popup extends Component<Props, State> {
   }
 
   renderObjectInspector(roots: Array<Object>) {
-    const { openLink, openElementInInspector } = this.props;
+    const {
+      openLink,
+      openElementInInspector,
+      highlightDomElement,
+      unHighlightDomElement
+    } = this.props;
 
     return (
       <ObjectInspector
@@ -255,6 +268,8 @@ export class Popup extends Component<Props, State> {
         createObjectClient={grip => createObjectClient(grip)}
         onDOMNodeClick={grip => openElementInInspector(grip)}
         onInspectIconClick={grip => openElementInInspector(grip)}
+        onDOMNodeMouseOver={grip => highlightDomElement(grip)}
+        onDOMNodeMouseOut={grip => unHighlightDomElement(grip)}
       />
     );
   }
@@ -321,6 +336,7 @@ export class Popup extends Component<Props, State> {
 }
 
 const mapStateToProps = state => ({
+  cx: getThreadContext(state),
   popupObjectProperties: getAllPopupObjectProperties(
     state,
     getCurrentThread(state)
@@ -332,7 +348,9 @@ const {
   selectSourceURL,
   setPopupObjectProperties,
   openLink,
-  openElementInInspectorCommand
+  openElementInInspectorCommand,
+  highlightDomElement,
+  unHighlightDomElement
 } = actions;
 
 const mapDispatchToProps = {
@@ -340,7 +358,9 @@ const mapDispatchToProps = {
   selectSourceURL,
   setPopupObjectProperties,
   openLink,
-  openElementInInspector: openElementInInspectorCommand
+  openElementInInspector: openElementInInspectorCommand,
+  highlightDomElement,
+  unHighlightDomElement
 };
 
 export default connect(

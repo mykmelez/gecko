@@ -626,6 +626,9 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
       case __NR_exit_group:
         return Allow();
 
+      case __NR_getrandom:
+        return Allow();
+
 #ifdef MOZ_ASAN
         // ASAN's error reporter wants to know if stderr is a tty.
       case __NR_ioctl: {
@@ -1233,11 +1236,6 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
 
 #endif  // DESKTOP
 
-#ifdef __NR_getrandom
-      case __NR_getrandom:
-        return Allow();
-#endif
-
         // nsSystemInfo uses uname (and we cache an instance, so
         // the info remains present even if we block the syscall)
       case __NR_uname:
@@ -1403,7 +1401,34 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
   explicit RDDSandboxPolicy(SandboxBrokerClient* aBroker)
       : SandboxPolicyCommon(aBroker) {}
 
-  // Pass through EvaluateSyscall.
+  static intptr_t FcntlTrap(const sandbox::arch_seccomp_data& aArgs,
+                            void* aux) {
+    const auto cmd = static_cast<int>(aArgs.args[1]);
+    switch (cmd) {
+        // This process can't exec, so the actual close-on-exec flag
+        // doesn't matter; have it always read as true and ignore writes.
+      case F_GETFD:
+        return O_CLOEXEC;
+      case F_SETFD:
+        return 0;
+      default:
+        return -ENOSYS;
+    }
+  }
+
+  ResultExpr EvaluateSyscall(int sysno) const override {
+    switch (sysno) {
+      case __NR_getrusage:
+        return Allow();
+
+      CASES_FOR_fcntl:
+        return Trap(FcntlTrap, nullptr);
+
+      // Pass through the common policy.
+      default:
+        return SandboxPolicyCommon::EvaluateSyscall(sysno);
+    }
+  }
 };
 
 UniquePtr<sandbox::bpf_dsl::Policy> GetDecoderSandboxPolicy(

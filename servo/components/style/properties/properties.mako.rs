@@ -1270,48 +1270,11 @@ impl LonghandId {
             LonghandId::FontStyle |
             LonghandId::FontFamily |
 
-            // Needed to resolve currentcolor at computed value time properly.
-            //
-            // FIXME(emilio): All the properties should be moved to currentcolor
-            // as a computed-value (and thus resolving it at used-value time).
-            //
-            // This would allow this property to go away from this list.
-            LonghandId::Color |
-
-            // FIXME(emilio): There's no reason for this afaict, nuke it.
-            LonghandId::TextDecorationLine |
-
             // Needed to properly compute the writing mode, to resolve logical
             // properties, and similar stuff.
             LonghandId::WritingMode |
             LonghandId::Direction
         )
-    }
-
-    /// Whether computed values of this property lossily convert any complex
-    /// colors into RGBA colors.
-    ///
-    /// In Gecko, there are some properties still that compute currentcolor
-    /// down to an RGBA color at computed value time, instead of as
-    /// `StyleComplexColor`s. For these properties, we must return `false`,
-    /// so that we correctly avoid caching style data in the rule tree.
-    pub fn stores_complex_colors_lossily(&self) -> bool {
-        % if product == "gecko":
-        matches!(*self,
-            % for property in data.longhands:
-            % if property.predefined_type == "RGBAColor":
-            LonghandId::${property.camel_case} |
-            % endif
-            % endfor
-            LonghandId::BackgroundImage |
-            LonghandId::BorderImageSource |
-            LonghandId::BoxShadow |
-            LonghandId::MaskImage |
-            LonghandId::TextShadow
-        )
-        % else:
-        false
-        % endif
     }
 }
 

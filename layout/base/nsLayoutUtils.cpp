@@ -26,6 +26,7 @@
 #include "mozilla/Unused.h"
 #include "nsCharTraits.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "nsFontMetrics.h"
 #include "nsPresContext.h"
 #include "nsPresContextInlines.h"
@@ -595,7 +596,7 @@ nsIContent* nsLayoutUtils::FindContentFor(ViewID aId) {
 static nsIFrame* GetScrollFrameFromContent(nsIContent* aContent) {
   nsIFrame* frame = aContent->GetPrimaryFrame();
   if (aContent->OwnerDoc()->GetRootElement() == aContent) {
-    nsIPresShell* presShell = frame ? frame->PresShell() : nullptr;
+    PresShell* presShell = frame ? frame->PresShell() : nullptr;
     if (!presShell) {
       presShell = aContent->OwnerDoc()->GetPresShell();
     }
@@ -823,7 +824,7 @@ static nsRect GetDisplayPortFromMarginsData(
   //   the choosing of the resolution to display-list building time.
   ScreenSize alignment;
 
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
   MOZ_ASSERT(presShell);
 
   if (presShell->IsDisplayportSuppressed()) {
@@ -1046,7 +1047,7 @@ static bool GetDisplayPortImpl(
   if (frame) {
     nsPresContext* presContext = frame->PresContext();
     MOZ_ASSERT(presContext);
-    nsIPresShell* presShell = presContext->PresShell();
+    PresShell* presShell = presContext->PresShell();
     MOZ_ASSERT(presShell);
     isDisplayportSuppressed = presShell->IsDisplayportSuppressed();
   }
@@ -1966,9 +1967,9 @@ nsIScrollableFrame* nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame,
         }
       }
       if (aFlags & SCROLLABLE_ALWAYS_MATCH_ROOT) {
-        nsIPresShell* ps = f->PresShell();
-        if (ps->GetRootScrollFrame() == f && ps->GetDocument() &&
-            ps->GetDocument()->IsRootDisplayDocument()) {
+        PresShell* presShell = f->PresShell();
+        if (presShell->GetRootScrollFrame() == f && presShell->GetDocument() &&
+            presShell->GetDocument()->IsRootDisplayDocument()) {
           return scrollableFrame;
         }
       }
@@ -2151,12 +2152,12 @@ nsPoint nsLayoutUtils::GetEventCoordinatesRelativeTo(
   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
   int32_t localAPD = aFrame->PresContext()->AppUnitsPerDevPixel();
   widgetToView = widgetToView.ScaleToOtherAppUnits(rootAPD, localAPD);
-  nsIPresShell* shell = aFrame->PresShell();
+  PresShell* presShell = aFrame->PresShell();
 
   // XXX Bug 1224748 - Update nsLayoutUtils functions to correctly handle
   // nsPresShell resolution
   widgetToView =
-      widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(shell));
+      widgetToView.RemoveResolution(GetCurrentAPZResolutionScale(presShell));
 
   /* If we encountered a transform, we can't do simple arithmetic to figure
    * out how to convert back to aFrame's coordinates and must use the CTM.
@@ -2819,6 +2820,7 @@ bool nsLayoutUtils::GetLayerTransformForFrame(nsIFrame* aFrame,
   nsDisplayList list;
   nsDisplayTransform* item =
       MakeDisplayItem<nsDisplayTransform>(&builder, aFrame, &list, nsRect(), 0);
+  MOZ_ASSERT(item);
 
   *aTransform = item->GetTransform();
   item->Destroy(&builder);
@@ -3136,7 +3138,7 @@ FrameMetrics nsLayoutUtils::CalculateBasicFrameMetrics(
   // we may want to refactor this at some point.
   FrameMetrics metrics;
   nsPresContext* presContext = frame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
   CSSToLayoutDeviceScale deviceScale = presContext->CSSToDevPixelScale();
   float resolution = 1.0f;
   if (frame == presShell->GetRootScrollFrame()) {
@@ -3204,7 +3206,7 @@ bool nsLayoutUtils::CalculateAndSetDisplayPortMargins(
   FrameMetrics metrics = CalculateBasicFrameMetrics(aScrollFrame);
   ScreenMargin displayportMargins =
       apz::CalculatePendingDisplayPort(metrics, ParentLayerPoint(0.0f, 0.0f));
-  nsIPresShell* presShell = frame->PresContext()->GetPresShell();
+  PresShell* presShell = frame->PresContext()->GetPresShell();
   return nsLayoutUtils::SetDisplayPortMargins(
       content, presShell, displayportMargins, 0, aRepaintMode);
 }
@@ -3361,7 +3363,7 @@ void nsLayoutUtils::AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
                                             nscolor aBackstop) {
   LayoutFrameType frameType = aFrame->Type();
   nsPresContext* presContext = aFrame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
 
   // For the viewport frame in print preview/page layout we want to paint
   // the grey background behind the page, not the canvas color.
@@ -3495,7 +3497,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   }
 
   nsPresContext* presContext = aFrame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
   nsRootPresContext* rootPresContext = presContext->GetRootPresContext();
   if (!rootPresContext) {
     return NS_OK;
@@ -4564,8 +4566,8 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
   params.language = styleFont->mLanguage;
   params.explicitLanguage = styleFont->mExplicitLanguage;
   params.orientation = wm.IsVertical() && !wm.IsSideways()
-                           ? gfxFont::eVertical
-                           : gfxFont::eHorizontal;
+                           ? nsFontMetrics::eVertical
+                           : nsFontMetrics::eHorizontal;
   // pass the user font set object into the device context to
   // pass along to CreateFontGroup
   params.userFontSet = aPresContext->GetUserFontSet();
@@ -8018,7 +8020,7 @@ nsUnsetAttrRunnable::Run() {
 static nscoord MinimumFontSizeFor(nsPresContext* aPresContext,
                                   WritingMode aWritingMode,
                                   nscoord aContainerISize) {
-  nsIPresShell* presShell = aPresContext->PresShell();
+  PresShell* presShell = aPresContext->PresShell();
 
   uint32_t emPerLine = presShell->FontSizeInflationEmPerLine();
   uint32_t minTwips = presShell->FontSizeInflationMinTwips();
@@ -8205,12 +8207,10 @@ float nsLayoutUtils::FontSizeInflationFor(const nsIFrame* aFrame) {
 
 /* static */
 bool nsLayoutUtils::FontSizeInflationEnabled(nsPresContext* aPresContext) {
-  nsIPresShell* presShell = aPresContext->GetPresShell();
-
+  PresShell* presShell = aPresContext->GetPresShell();
   if (!presShell) {
     return false;
   }
-
   return presShell->FontSizeInflationEnabled();
 }
 
@@ -8326,7 +8326,7 @@ nsMargin nsLayoutUtils::ScrollbarAreaToExcludeFromCompositionBoundsFor(
     return nsMargin();
   }
   nsPresContext* presContext = aScrollFrame->PresContext();
-  nsIPresShell* presShell = presContext->GetPresShell();
+  PresShell* presShell = presContext->GetPresShell();
   if (!presShell) {
     return nsMargin();
   }
@@ -8358,7 +8358,7 @@ nsSize nsLayoutUtils::CalculateCompositionSizeForFrame(
   nsSize size = rect.Size();
 
   nsPresContext* presContext = aFrame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
 
   bool isRootContentDocRootScrollFrame =
       presContext->IsRootContentDocument() &&
@@ -8398,7 +8398,7 @@ CSSSize nsLayoutUtils::CalculateRootCompositionSize(
   if (!rootPresContext) {
     rootPresContext = presContext->GetRootPresContext();
   }
-  nsIPresShell* rootPresShell = nullptr;
+  PresShell* rootPresShell = nullptr;
   if (rootPresContext) {
     rootPresShell = rootPresContext->PresShell();
     if (nsIFrame* rootFrame = rootPresShell->GetRootFrame()) {
@@ -8702,7 +8702,7 @@ bool nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(
 static void MaybeReflowForInflationScreenSizeChange(
     nsPresContext* aPresContext) {
   if (aPresContext) {
-    nsIPresShell* presShell = aPresContext->GetPresShell();
+    PresShell* presShell = aPresContext->GetPresShell();
     const bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
     presShell->RecomputeFontSizeInflationEnabled();
     bool changed = false;
@@ -8772,7 +8772,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
   nsPresContext* presContext = aForFrame->PresContext();
   int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
 
-  nsIPresShell* presShell = presContext->GetPresShell();
+  PresShell* presShell = presContext->GetPresShell();
   ScrollMetadata metadata;
   FrameMetrics& metrics = metadata.GetMetrics();
   metrics.SetLayoutViewport(CSSRect::FromAppUnits(aViewport));
@@ -9111,7 +9111,7 @@ Maybe<ScrollMetadata> nsLayoutUtils::GetRootMetadata(
     const std::function<bool(ViewID& aScrollId)>& aCallback) {
   nsIFrame* frame = aBuilder->RootReferenceFrame();
   nsPresContext* presContext = frame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
+  PresShell* presShell = presContext->PresShell();
   Document* document = presShell->GetDocument();
 
   // If we're using containerless scrolling, there is still one case where we
@@ -9728,7 +9728,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   nsFont font = aStyleFont->mFont;
   font.size = aFontSize;
   gfxFont::Orientation orientation =
-      aIsVertical ? gfxFont::eVertical : gfxFont::eHorizontal;
+      aIsVertical ? nsFontMetrics::eVertical : nsFontMetrics::eHorizontal;
   nsFontMetrics::Params params;
   params.language = aStyleFont->mLanguage;
   params.explicitLanguage = aStyleFont->mExplicitLanguage;
@@ -9749,8 +9749,9 @@ void nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont,
   if (LookAndFeel::GetFont(aFontID, systemFontName, fontStyle)) {
     systemFontName.Trim("\"'");
     aSystemFont->fontlist =
-        FontFamilyList(NS_ConvertUTF16toUTF8(systemFontName), eUnquotedName);
-    aSystemFont->fontlist.SetDefaultFontType(eFamily_none);
+        FontFamilyList(NS_ConvertUTF16toUTF8(systemFontName),
+                       StyleFontFamilyNameSyntax::Identifiers);
+    aSystemFont->fontlist.SetDefaultFontType(StyleGenericFontFamily::None);
     aSystemFont->style = fontStyle.style;
     aSystemFont->systemFont = fontStyle.systemFont;
     aSystemFont->weight = fontStyle.weight;

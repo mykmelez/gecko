@@ -27,7 +27,7 @@ import type { Source, SourceId, SourceLocation, ThreadId } from "../types";
 import type { PendingSelectedLocation, Selector } from "./types";
 import type { Action, DonePromiseAction, FocusItem } from "../actions/types";
 import type { LoadSourceAction } from "../actions/types/SourceAction";
-import { mapValues, uniqBy, uniq } from "lodash";
+import { mapValues, uniqBy } from "lodash";
 
 export type SourcesMap = { [SourceId]: Source };
 export type SourcesMapByThread = { [ThreadId]: SourcesMap };
@@ -389,15 +389,6 @@ function getSourceActors(state, source) {
   return generatedSource ? generatedSource.actors : [];
 }
 
-export function getSourceThreads(
-  state: OuterState,
-  source: Source
-): ThreadId[] {
-  return uniq(
-    getSourceActors(state.sources, source).map(actor => actor.thread)
-  );
-}
-
 export function getSourceInSources(sources: SourcesMap, id: string): ?Source {
   return sources[id];
 }
@@ -501,6 +492,14 @@ export function getGeneratedSource(
   }
 
   return getSourceFromId(state, originalToGeneratedId(source.id));
+}
+
+export function getGeneratedSourceById(
+  state: OuterState,
+  sourceId: string
+): Source {
+  const generatedSourceId = originalToGeneratedId(sourceId);
+  return getSourceFromId(state, generatedSourceId);
 }
 
 export function getPendingSelectedLocation(state: OuterState) {

@@ -1368,8 +1368,8 @@ void ReportInternalError(const char* aFile, uint32_t aLine, const char* aStr) {
   nsContentUtils::LogSimpleConsoleError(
       NS_ConvertUTF8toUTF16(
           nsPrintfCString("Quota %s: %s:%" PRIu32, aStr, aFile, aLine)),
-      "quota",
-      false /* Quota Manager is not active in private browsing mode */);
+      "quota", false /* Quota Manager is not active in private browsing mode */,
+      true /* Quota Manager runs always in a chrome context */);
 }
 
 namespace {
@@ -5602,7 +5602,9 @@ bool QuotaManager::IsPrincipalInfoValid(const PrincipalInfo& aPrincipalInfo) {
       return true;
     }
 
-    default: { break; }
+    default: {
+      break;
+    }
   }
 
   // Null and expanded principals are not acceptable.
@@ -5643,7 +5645,9 @@ void QuotaManager::GetInfoFromValidatedPrincipalInfo(
       return;
     }
 
-    default: { break; }
+    default: {
+      break;
+    }
   }
 
   MOZ_CRASH("Should never get here!");
@@ -8237,7 +8241,9 @@ bool PrincipalVerifier::IsPrincipalInfoValid(
       return true;
     }
 
-    default: { break; }
+    default: {
+      break;
+    }
   }
 
   // Null and expanded principals are not acceptable.

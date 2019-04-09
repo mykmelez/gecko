@@ -659,15 +659,16 @@ bool HttpChannelParent::DoAsyncOpen(
   ++mAsyncOpenBarrier;
   RefPtr<HttpChannelParent> self = this;
   WaitForBgParent()
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [self]() {
-               self->mRequest.Complete();
-               self->TryInvokeAsyncOpen(NS_OK);
-             },
-             [self](nsresult aStatus) {
-               self->mRequest.Complete();
-               self->TryInvokeAsyncOpen(aStatus);
-             })
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self]() {
+            self->mRequest.Complete();
+            self->TryInvokeAsyncOpen(NS_OK);
+          },
+          [self](nsresult aStatus) {
+            self->mRequest.Complete();
+            self->TryInvokeAsyncOpen(aStatus);
+          })
       ->Track(mRequest);
 
   // The stream, received from the child process, must be cloneable and seekable
@@ -751,12 +752,13 @@ bool HttpChannelParent::ConnectChannel(const uint32_t& registrarId,
   // Waiting for background channel
   RefPtr<HttpChannelParent> self = this;
   WaitForBgParent()
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [self]() { self->mRequest.Complete(); },
-             [self](const nsresult& aResult) {
-               NS_ERROR("failed to establish the background channel");
-               self->mRequest.Complete();
-             })
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self]() { self->mRequest.Complete(); },
+          [self](const nsresult& aResult) {
+            NS_ERROR("failed to establish the background channel");
+            self->mRequest.Complete();
+          })
       ->Track(mRequest);
   return true;
 }
@@ -810,7 +812,20 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvCancel(const nsresult& status) {
   // May receive cancel before channel has been constructed!
   if (mChannel) {
     mChannel->Cancel(status);
+
+    // Once we receive |Cancel|, child will stop sending RecvBytesRead. Force
+    // the channel resumed if needed.
+    if (mSuspendedForFlowControl) {
+      LOG(("  resume the channel due to e10s backpressure relief by cancel"));
+      Unused << mChannel->Resume();
+      mSuspendedForFlowControl = false;
+    }
   }
+
+  // We won't need flow control anymore. Toggle the flag to avoid |Suspend|
+  // since OnDataAvailable could be off-main-thread.
+  mCacheNeedFlowControlInitialized = true;
+  mNeedFlowControl = false;
   return IPC_OK();
 }
 
@@ -2129,6 +2144,7 @@ nsresult HttpChannelParent::SuspendForDiversion() {
   // channel is suspended until all the data is consumed and no more e10s later.
   // No point to have another redundant suspension.
   if (mSuspendedForFlowControl) {
+    LOG(("  resume the channel due to e10s backpressure relief by diversion"));
     Unused << mChannel->Resume();
     mSuspendedForFlowControl = false;
   }

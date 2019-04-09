@@ -920,7 +920,7 @@ JS_PUBLIC_API bool JS_EnumerateStandardClasses(JSContext* cx,
 
 static bool EnumerateStandardClassesInTable(JSContext* cx,
                                             Handle<GlobalObject*> global,
-                                            AutoIdVector& properties,
+                                            MutableHandleIdVector properties,
                                             const JSStdName* table,
                                             bool includeResolved) {
   for (unsigned i = 0; !table[i].isSentinel(); i++) {
@@ -956,7 +956,7 @@ static bool EnumerateStandardClassesInTable(JSContext* cx,
 }
 
 static bool EnumerateStandardClasses(JSContext* cx, JS::HandleObject obj,
-                                     JS::AutoIdVector& properties,
+                                     JS::MutableHandleIdVector properties,
                                      bool enumerableOnly,
                                      bool includeResolved) {
   if (enumerableOnly) {
@@ -987,13 +987,13 @@ static bool EnumerateStandardClasses(JSContext* cx, JS::HandleObject obj,
 
 JS_PUBLIC_API bool JS_NewEnumerateStandardClasses(JSContext* cx,
                                                   JS::HandleObject obj,
-                                                  JS::AutoIdVector& properties,
+                                                  JS::MutableHandleIdVector properties,
                                                   bool enumerableOnly) {
   return EnumerateStandardClasses(cx, obj, properties, enumerableOnly, false);
 }
 
 JS_PUBLIC_API bool JS_NewEnumerateStandardClassesIncludingResolved(
-    JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties,
+    JSContext* cx, JS::HandleObject obj, JS::MutableHandleIdVector properties,
     bool enumerableOnly) {
   return EnumerateStandardClasses(cx, obj, properties, enumerableOnly, true);
 }
@@ -2526,7 +2526,7 @@ JS_PUBLIC_API bool JS_Enumerate(JSContext* cx, HandleObject obj,
   cx->check(obj, props);
   MOZ_ASSERT(props.empty());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY, &ids)) {
     return false;
   }
@@ -2972,13 +2972,7 @@ JS_PUBLIC_API bool JS::ObjectToCompletePropertyDescriptor(
   return true;
 }
 
-JS_PUBLIC_API void JS_SetAllNonReservedSlotsToUndefined(JSContext* cx,
-                                                        JSObject* objArg) {
-  RootedObject obj(cx, objArg);
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(obj);
-
+JS_PUBLIC_API void JS_SetAllNonReservedSlotsToUndefined(JS::HandleObject obj) {
   if (!obj->isNative()) {
     return;
   }
@@ -4866,42 +4860,6 @@ JS_PUBLIC_API void JS_ReportErrorNumberUCArray(JSContext* cx,
                            errorNumber, args);
 }
 
-JS_PUBLIC_API bool JS_ReportWarningASCII(JSContext* cx, const char* format,
-                                         ...) {
-  va_list ap;
-  bool ok;
-
-  AssertHeapIsIdle();
-  va_start(ap, format);
-  ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreASCII, ap);
-  va_end(ap);
-  return ok;
-}
-
-JS_PUBLIC_API bool JS_ReportWarningLatin1(JSContext* cx, const char* format,
-                                          ...) {
-  va_list ap;
-  bool ok;
-
-  AssertHeapIsIdle();
-  va_start(ap, format);
-  ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreLatin1, ap);
-  va_end(ap);
-  return ok;
-}
-
-JS_PUBLIC_API bool JS_ReportWarningUTF8(JSContext* cx, const char* format,
-                                        ...) {
-  va_list ap;
-  bool ok;
-
-  AssertHeapIsIdle();
-  va_start(ap, format);
-  ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreUTF8, ap);
-  va_end(ap);
-  return ok;
-}
-
 JS_PUBLIC_API bool JS_ReportErrorFlagsAndNumberASCII(
     JSContext* cx, unsigned flags, JSErrorCallback errorCallback, void* userRef,
     const unsigned errorNumber, ...) {
@@ -4966,17 +4924,6 @@ JS_PUBLIC_API void JS_ReportOutOfMemory(JSContext* cx) {
 
 JS_PUBLIC_API void JS_ReportAllocationOverflow(JSContext* cx) {
   ReportAllocationOverflow(cx);
-}
-
-JS_PUBLIC_API JS::WarningReporter JS::GetWarningReporter(JSContext* cx) {
-  return cx->runtime()->warningReporter;
-}
-
-JS_PUBLIC_API JS::WarningReporter JS::SetWarningReporter(
-    JSContext* cx, JS::WarningReporter reporter) {
-  WarningReporter older = cx->runtime()->warningReporter;
-  cx->runtime()->warningReporter = reporter;
-  return older;
 }
 
 /************************************************************************/

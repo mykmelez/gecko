@@ -4,7 +4,7 @@
 
 // @flow
 
-import { isStepping, getPauseReason } from "../../selectors";
+import { isStepping, getPauseReason, getThreadContext } from "../../selectors";
 import { evaluateExpressions } from "../expressions";
 import { inDebuggerEval } from "../../utils/pause";
 
@@ -24,10 +24,13 @@ export function resumed(packet: ResumedPacket) {
     const wasPausedInEval = inDebuggerEval(why);
     const wasStepping = isStepping(getState(), thread);
 
+    client.onPauseChange(thread, false);
+
     dispatch({ type: "RESUME", thread, wasStepping });
 
-    if (!wasStepping && !wasPausedInEval) {
-      await dispatch(evaluateExpressions());
+    const cx = getThreadContext(getState());
+    if (!wasStepping && !wasPausedInEval && cx.thread == thread) {
+      await dispatch(evaluateExpressions(cx));
     }
   };
 }

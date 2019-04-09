@@ -104,6 +104,7 @@
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
 #include "js/Wrapper.h"
 #include "perf/jsperf.h"
 #include "shell/jsoptparse.h"
@@ -3719,7 +3720,7 @@ typedef struct ComplexObject {
 } ComplexObject;
 
 static bool sandbox_enumerate(JSContext* cx, JS::HandleObject obj,
-                              JS::AutoIdVector& properties,
+                              JS::MutableHandleIdVector properties,
                               bool enumerableOnly) {
   RootedValue v(cx);
 
@@ -6784,7 +6785,9 @@ static bool GetSharedObject(JSContext* cx, unsigned argc, Value* vp) {
         }
         break;
       }
-      default: { MOZ_CRASH(); }
+      default: {
+        MOZ_CRASH();
+      }
     }
   }
 
@@ -9154,7 +9157,7 @@ static bool PrintHelp(JSContext* cx, HandleObject obj) {
 
 static bool PrintEnumeratedHelp(JSContext* cx, HandleObject obj,
                                 HandleObject pattern, bool brief) {
-  AutoIdVector idv(cx);
+  RootedIdVector idv(cx);
   if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN, &idv)) {
     return false;
   }
@@ -9460,7 +9463,7 @@ void js::shell::WarningReporter(JSContext* cx, JSErrorReport* report) {
 }
 
 static bool global_enumerate(JSContext* cx, JS::HandleObject obj,
-                             JS::AutoIdVector& properties,
+                             JS::MutableHandleIdVector properties,
                              bool enumerableOnly) {
 #ifdef LAZY_STANDARD_CLASSES
   return JS_NewEnumerateStandardClasses(cx, obj, properties, enumerableOnly);
@@ -10306,6 +10309,16 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     }
   }
 
+  if (const char* str = op.getStringOption("ion-optimization-levels")) {
+    if (strcmp(str, "on") == 0) {
+      jit::JitOptions.disableOptimizationLevels = false;
+    } else if (strcmp(str, "off") == 0) {
+      jit::JitOptions.disableOptimizationLevels = true;
+    } else {
+      return OptionFailure("ion-optimization-levels", str);
+    }
+  }
+
   if (const char* str = op.getStringOption("ion-instruction-reordering")) {
     if (strcmp(str, "on") == 0) {
       jit::JitOptions.disableInstructionReordering = false;
@@ -10933,6 +10946,9 @@ int main(int argc, char** argv, char** envp) {
 #endif
       || !op.addStringOption('\0', "ion-sink", "on/off",
                              "Sink code motion (default: off, on to enable)") ||
+      !op.addStringOption('\0', "ion-optimization-levels", "on/off",
+                          "Use multiple Ion optimization levels (default: on, "
+                          "off to disable)") ||
       !op.addStringOption('\0', "ion-loop-unrolling", "on/off",
                           "(NOP for fuzzers)") ||
       !op.addStringOption(

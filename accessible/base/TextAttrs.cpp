@@ -10,7 +10,7 @@
 #include "nsCoreUtils.h"
 #include "StyleInfo.h"
 
-#include "gfxFont.h"
+#include "gfxTextRun.h"
 #include "nsFontMetrics.h"
 #include "nsLayoutUtils.h"
 #include "nsContainerFrame.h"
@@ -348,11 +348,11 @@ bool TextAttrsMgr::BGColorTextAttr::GetColor(nsIFrame* aFrame,
 TextAttrsMgr::ColorTextAttr::ColorTextAttr(nsIFrame* aRootFrame,
                                            nsIFrame* aFrame)
     : TTextAttr<nscolor>(!aFrame) {
-  mRootNativeValue = aRootFrame->StyleColor()->mColor;
+  mRootNativeValue = aRootFrame->StyleColor()->mColor.ToColor();
   mIsRootDefined = true;
 
   if (aFrame) {
-    mNativeValue = aFrame->StyleColor()->mColor;
+    mNativeValue = aFrame->StyleColor()->mColor.ToColor();
     mIsDefined = true;
   }
 }
@@ -361,9 +361,8 @@ bool TextAttrsMgr::ColorTextAttr::GetValueFor(Accessible* aAccessible,
                                               nscolor* aValue) {
   nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   if (elm) {
-    nsIFrame* frame = elm->GetPrimaryFrame();
-    if (frame) {
-      *aValue = frame->StyleColor()->mColor;
+    if (nsIFrame* frame = elm->GetPrimaryFrame()) {
+      *aValue = frame->StyleColor()->mColor.ToColor();
       return true;
     }
   }

@@ -15,11 +15,12 @@
 
 #include "nsContentUtils.h"
 
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "SVGObserverUtils.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIFrame.h"
@@ -51,6 +52,7 @@
 #include "gfxFont.h"
 #include "gfxBlur.h"
 #include "gfxPrefs.h"
+#include "gfxTextRun.h"
 #include "gfxUtils.h"
 
 #include "nsFrameLoader.h"
@@ -68,6 +70,7 @@
 #include "jsfriendapi.h"
 #include "js/Conversions.h"
 #include "js/HeapAPI.h"
+#include "js/Warnings.h"  // JS::WarnASCII
 
 #include "mozilla/Alignment.h"
 #include "mozilla/Assertions.h"
@@ -891,6 +894,42 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CanvasRenderingContext2D)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+CanvasRenderingContext2D::ContextState::ContextState() = default;
+
+CanvasRenderingContext2D::ContextState::ContextState(const ContextState& aOther)
+    : fontGroup(aOther.fontGroup),
+      fontLanguage(aOther.fontLanguage),
+      fontFont(aOther.fontFont),
+      gradientStyles(aOther.gradientStyles),
+      patternStyles(aOther.patternStyles),
+      colorStyles(aOther.colorStyles),
+      font(aOther.font),
+      textAlign(aOther.textAlign),
+      textBaseline(aOther.textBaseline),
+      shadowColor(aOther.shadowColor),
+      transform(aOther.transform),
+      shadowOffset(aOther.shadowOffset),
+      lineWidth(aOther.lineWidth),
+      miterLimit(aOther.miterLimit),
+      globalAlpha(aOther.globalAlpha),
+      shadowBlur(aOther.shadowBlur),
+      dash(aOther.dash),
+      dashOffset(aOther.dashOffset),
+      op(aOther.op),
+      fillRule(aOther.fillRule),
+      lineCap(aOther.lineCap),
+      lineJoin(aOther.lineJoin),
+      filterString(aOther.filterString),
+      filterChain(aOther.filterChain),
+      autoSVGFiltersObserver(aOther.autoSVGFiltersObserver),
+      filter(aOther.filter),
+      filterAdditionalImages(aOther.filterAdditionalImages),
+      filterSourceGraphicTainted(aOther.filterSourceGraphicTainted),
+      imageSmoothingEnabled(aOther.imageSmoothingEnabled),
+      fontExplicitLanguage(aOther.fontExplicitLanguage) {}
+
+CanvasRenderingContext2D::ContextState::~ContextState() = default;
+
 /**
  ** CanvasRenderingContext2D impl
  **/
@@ -963,7 +1002,7 @@ bool CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     RefPtr<ComputedStyle> canvasStyle =
         nsComputedDOMStyle::GetComputedStyle(mCanvasElement, nullptr);
     if (canvasStyle) {
-      *aColor = canvasStyle->StyleColor()->mColor;
+      *aColor = canvasStyle->StyleColor()->mColor.ToColor();
     }
     // Beware that the presShell could be gone here.
   }
@@ -1985,9 +2024,9 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
       if (!srcSurf) {
         JSContext* context = nsContentUtils::GetCurrentJSContext();
         if (context) {
-          JS_ReportWarningASCII(context,
-                                "CanvasRenderingContext2D.createPattern()"
-                                " failed to snapshot source canvas.");
+          JS::WarnASCII(context,
+                        "CanvasRenderingContext2D.createPattern() failed to "
+                        "snapshot source canvas.");
         }
         aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
         return nullptr;
@@ -2032,9 +2071,9 @@ already_AddRefed<CanvasPattern> CanvasRenderingContext2D::CreatePattern(
     if (!srcSurf) {
       JSContext* context = nsContentUtils::GetCurrentJSContext();
       if (context) {
-        JS_ReportWarningASCII(context,
-                              "CanvasRenderingContext2D.createPattern()"
-                              " failed to prepare source ImageBitmap.");
+        JS::WarnASCII(context,
+                      "CanvasRenderingContext2D.createPattern() failed to "
+                      "prepare source ImageBitmap.");
       }
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
@@ -3744,7 +3783,8 @@ nsresult CanvasRenderingContext2D::DrawOrMeasureText(
   processor.mFontgrp
       ->UpdateUserFonts();  // ensure user font generation is current
   const gfxFont::Metrics& fontMetrics =
-      processor.mFontgrp->GetFirstValidFont()->GetMetrics(gfxFont::eHorizontal);
+      processor.mFontgrp->GetFirstValidFont()->GetMetrics(
+          nsFontMetrics::eHorizontal);
 
   gfxFloat baselineAnchor;
 
@@ -3857,8 +3897,8 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
       GetAppUnitsValues(&perDevPixel, &perCSSPixel);
       gfxFloat devToCssSize = gfxFloat(perDevPixel) / gfxFloat(perCSSPixel);
       CurrentState().fontGroup = gfxPlatform::GetPlatform()->CreateFontGroup(
-          FontFamilyList(eFamily_sans_serif), &style, tp, nullptr,
-          devToCssSize);
+          FontFamilyList(StyleGenericFontFamily::SansSerif), &style, tp,
+          nullptr, devToCssSize);
       if (CurrentState().fontGroup) {
         CurrentState().font = kDefaultFontStyle;
       } else {
@@ -4698,9 +4738,10 @@ void CanvasRenderingContext2D::DrawWindow(nsGlobalWindowInner& aWindow,
     thebes->SetMatrix(Matrix::Scaling(matrix._11, matrix._22));
   }
 
-  nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
+  RefPtr<PresShell> presShell = presContext->PresShell();
 
-  Unused << shell->RenderDocument(r, renderDocFlags, backgroundColor, thebes);
+  Unused << presShell->RenderDocument(r, renderDocFlags, backgroundColor,
+                                      thebes);
   // If this canvas was contained in the drawn window, the pre-transaction
   // callback may have returned its DT. If so, we must reacquire it here.
   EnsureTarget(discardContent ? &drawRect : nullptr);

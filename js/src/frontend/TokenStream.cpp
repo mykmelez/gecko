@@ -34,6 +34,7 @@
 #include "frontend/Parser.h"
 #include "frontend/ReservedWords.h"
 #include "js/CharacterEncoding.h"
+#include "js/RegExpFlags.h"  // JS::RegExpFlags
 #include "js/UniquePtr.h"
 #include "util/StringBuffer.h"
 #include "util/Unicode.h"
@@ -56,6 +57,8 @@ using mozilla::PointerRangeSize;
 using mozilla::Utf8Unit;
 
 using JS::ReadOnlyCompileOptions;
+using JS::RegExpFlag;
+using JS::RegExpFlags;
 
 struct ReservedWordInfo {
   const char* chars;  // C string with reserved word text
@@ -687,11 +690,26 @@ uint32_t GeneralTokenStreamChars<Unit, AnyCharsAccess>::computeColumn(
 
   const TokenStreamAnyChars& anyChars = anyCharsAccess();
 
-  const Unit* begin =
-      this->sourceUnits.codeUnitPtrAt(anyChars.lineStart(lineToken));
+  uint32_t lineNumber = anyChars.srcCoords.lineNumber(lineToken);
+
+  uint32_t beginOffset;
+  uint32_t partialCols;
+  if (lineNumber == lastLineForColumn_ && lastOffsetForColumn_ <= offset) {
+    beginOffset = lastOffsetForColumn_;
+    partialCols = lastColumn_;
+  } else {
+    beginOffset = anyChars.lineStart(lineToken);
+    partialCols = 0;
+  }
+
+  const Unit* begin = this->sourceUnits.codeUnitPtrAt(beginOffset);
   const Unit* end = this->sourceUnits.codeUnitPtrAt(offset);
 
-  auto partialCols = AssertedCast<uint32_t>(ComputeColumn(begin, end));
+  partialCols += AssertedCast<uint32_t>(ComputeColumn(begin, end));
+
+  lastLineForColumn_ = lineNumber;
+  lastOffsetForColumn_ = offset;
+  lastColumn_ = partialCols;
   return (lineToken.isFirstLine() ? anyChars.options_.column : 0) + partialCols;
 }
 
@@ -2319,34 +2337,34 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::regexpLiteral(
   } while (true);
 
   int32_t unit;
-  RegExpFlag reflags = NoFlags;
+  RegExpFlags reflags = RegExpFlag::NoFlags;
   while (true) {
-    RegExpFlag flag;
+    uint8_t flag;
     unit = getCodeUnit();
     if (unit == 'g') {
-      flag = GlobalFlag;
+      flag = RegExpFlag::Global;
     } else if (unit == 'i') {
-      flag = IgnoreCaseFlag;
+      flag = RegExpFlag::IgnoreCase;
     } else if (unit == 'm') {
-      flag = MultilineFlag;
-    } else if (unit == 'y') {
-      flag = StickyFlag;
+      flag = RegExpFlag::Multiline;
     } else if (unit == 'u') {
-      flag = UnicodeFlag;
+      flag = RegExpFlag::Unicode;
+    } else if (unit == 'y') {
+      flag = RegExpFlag::Sticky;
     } else if (IsAsciiAlpha(unit)) {
-      flag = NoFlags;
+      flag = RegExpFlag::NoFlags;
     } else {
       break;
     }
 
-    if ((reflags & flag) || flag == NoFlags) {
+    if ((reflags & flag) || flag == RegExpFlag::NoFlags) {
       ungetCodeUnit(unit);
       char buf[2] = {char(unit), '\0'};
       error(JSMSG_BAD_REGEXP_FLAG, buf);
       return badToken();
     }
 
-    reflags = RegExpFlag(reflags | flag);
+    reflags |= flag;
   }
   ungetCodeUnit(unit);
 

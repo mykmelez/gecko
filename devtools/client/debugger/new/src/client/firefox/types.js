@@ -201,6 +201,7 @@ export type Actions = {
  */
 export type TabTarget = {
   on: (string, Function) => void,
+  emit: (string, any) => void,
   activeConsole: {
     evaluateJS: (
       script: Script,
@@ -364,5 +365,7 @@ export type Panel = {|
   openLink: (url: string) => void,
   openWorkerToolbox: (worker: Worker) => void,
   openElementInInspector: (grip: Object) => void,
-  openConsoleAndEvaluate: (input: string) => void
+  openConsoleAndEvaluate: (input: string) => void,
+  highlightDomElement: (grip: Object) => void,
+  unHighlightDomElement: (grip: Object) => void
 |};

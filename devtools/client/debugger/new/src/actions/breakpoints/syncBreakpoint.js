@@ -5,6 +5,7 @@
 // @flow
 
 import { setBreakpointPositions } from "./breakpointPositions";
+import { setSymbols } from "../sources/symbols";
 import {
   assertPendingBreakpoint,
   findFunctionByName,
@@ -15,33 +16,45 @@ import {
 import { comparePosition, createLocation } from "../../utils/location";
 
 import { originalToGeneratedId, isOriginalId } from "devtools-source-map";
-import { getSource, getBreakpoint } from "../../selectors";
-import { removeBreakpoint, addBreakpoint } from ".";
+import { getSource } from "../../selectors";
+import { addBreakpoint, removeBreakpointAtGeneratedLocation } from ".";
 
 import type { ThunkArgs } from "../types";
+import type { LoadedSymbols } from "../../reducers/types";
 
 import type {
   SourceLocation,
   ASTLocation,
   PendingBreakpoint,
-  SourceId
+  SourceId,
+  BreakpointPositions,
+  Context
 } from "../../types";
 
 async function findBreakpointPosition(
+  cx: Context,
   { getState, dispatch },
   location: SourceLocation
 ) {
-  const positions = await dispatch(setBreakpointPositions(location.sourceId));
+  const positions: BreakpointPositions = await dispatch(
+    setBreakpointPositions({ cx, sourceId: location.sourceId })
+  );
+
   const position = findPosition(positions, location);
   return position && position.generatedLocation;
 }
 
 async function findNewLocation(
+  cx: Context,
   { name, offset, index }: ASTLocation,
   location: SourceLocation,
-  source
+  source,
+  thunkArgs
 ) {
-  const func = await findFunctionByName(source, name, index);
+  const symbols: LoadedSymbols = await thunkArgs.dispatch(
+    setSymbols({ cx, source })
+  );
+  const func = findFunctionByName(symbols, name, index);
 
   // Fallback onto the location line, if we do not find a function is not found
   let line = location.line;
@@ -75,6 +88,7 @@ async function findNewLocation(
 //   to the reducer for the new location corresponding to the original location
 //   in the pending breakpoint.
 export function syncBreakpoint(
+  cx: Context,
   sourceId: SourceId,
   pendingBreakpoint: PendingBreakpoint
 ) {
@@ -105,25 +119,20 @@ export function syncBreakpoint(
       location.sourceUrl != generatedLocation.sourceUrl
     ) {
       // We are handling the generated source and the pending breakpoint has a
-      // source mapping. Watch out for the case when the original source has
-      // already been processed, in which case either a breakpoint has already
-      // been added at this generated location or the client breakpoint has been
-      // removed.
+      // source mapping. Supply a cancellation callback that will abort the
+      // breakpoint if the original source was synced to a different location,
+      // in which case the client breakpoint has been removed.
       const breakpointLocation = makeBreakpointLocation(
         getState(),
         sourceGeneratedLocation
       );
-      if (
-        getBreakpoint(getState(), sourceGeneratedLocation) ||
-        !client.hasBreakpoint(breakpointLocation)
-      ) {
-        return;
-      }
       return dispatch(
         addBreakpoint(
+          cx,
           sourceGeneratedLocation,
           pendingBreakpoint.options,
-          pendingBreakpoint.disabled
+          pendingBreakpoint.disabled,
+          () => !client.hasBreakpoint(breakpointLocation)
         )
       );
     }
@@ -131,17 +140,29 @@ export function syncBreakpoint(
     const previousLocation = { ...location, sourceId };
 
     const newLocation = await findNewLocation(
+      cx,
       astLocation,
       previousLocation,
-      source
+      source,
+      thunkArgs
     );
 
     const newGeneratedLocation = await findBreakpointPosition(
+      cx,
       thunkArgs,
       newLocation
     );
 
     if (!newGeneratedLocation) {
+      // We couldn't find a new mapping for the breakpoint. If there is a source
+      // mapping, remove any breakpoints for the generated location, as if the
+      // breakpoint moved. If the old generated location still maps to an
+      // original location then we don't want to add a breakpoint for it.
+      if (location.sourceUrl != generatedLocation.sourceUrl) {
+        dispatch(
+          removeBreakpointAtGeneratedLocation(cx, sourceGeneratedLocation)
+        );
+      }
       return;
     }
 
@@ -152,24 +173,16 @@ export function syncBreakpoint(
 
     // If the new generated location has changed from that in the pending
     // breakpoint, remove any breakpoint associated with the old generated
-    // location. This could either be in the reducer or only in the client,
-    // depending on whether the pending breakpoint has been processed for the
-    // generated source yet.
+    // location.
     if (!isSameLocation) {
-      const bp = getBreakpoint(getState(), sourceGeneratedLocation);
-      if (bp) {
-        dispatch(removeBreakpoint(bp));
-      } else {
-        const breakpointLocation = makeBreakpointLocation(
-          getState(),
-          sourceGeneratedLocation
-        );
-        client.removeBreakpoint(breakpointLocation);
-      }
+      dispatch(
+        removeBreakpointAtGeneratedLocation(cx, sourceGeneratedLocation)
+      );
     }
 
     return dispatch(
       addBreakpoint(
+        cx,
         newLocation,
         pendingBreakpoint.options,
         pendingBreakpoint.disabled

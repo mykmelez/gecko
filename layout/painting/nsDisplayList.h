@@ -830,6 +830,8 @@ class nsDisplayListBuilder {
    * directly or indirectly under an nsDisplayTransform.
    */
   bool IsInTransform() const { return mInTransform; }
+
+  bool InEventsAndPluginsOnly() const { return mInEventsAndPluginsOnly; }
   /**
    * Indicate whether or not we're directly or indirectly under and
    * nsDisplayTransform or SVG foreignObject.
@@ -1238,6 +1240,23 @@ class nsDisplayListBuilder {
     }
 
     ~AutoInTransformSetter() { mBuilder->mInTransform = mOldValue; }
+
+   private:
+    nsDisplayListBuilder* mBuilder;
+    bool mOldValue;
+  };
+
+  class AutoInEventsAndPluginsOnly {
+   public:
+    AutoInEventsAndPluginsOnly(nsDisplayListBuilder* aBuilder,
+                               bool aInEventsAndPluginsOnly)
+        : mBuilder(aBuilder), mOldValue(aBuilder->mInEventsAndPluginsOnly) {
+      aBuilder->mInEventsAndPluginsOnly |= aInEventsAndPluginsOnly;
+    }
+
+    ~AutoInEventsAndPluginsOnly() {
+      mBuilder->mInEventsAndPluginsOnly = mOldValue;
+    }
 
    private:
     nsDisplayListBuilder* mBuilder;
@@ -2006,6 +2025,7 @@ class nsDisplayListBuilder {
   // True when we're building a display list that's directly or indirectly
   // under an nsDisplayTransform
   bool mInTransform;
+  bool mInEventsAndPluginsOnly;
   bool mInFilter;
   bool mInPageSequence;
   bool mIsInChromePresContext;
@@ -2066,6 +2086,16 @@ template <typename T, typename... Args>
 MOZ_ALWAYS_INLINE T* MakeDisplayItem(nsDisplayListBuilder* aBuilder,
                                      Args&&... aArgs) {
   T* item = new (aBuilder) T(aBuilder, std::forward<Args>(aArgs)...);
+
+  // TODO: Ideally we'd determine this before constructing the item,
+  // but we'd need a template specialization for every type that has
+  // children, or make all callers pass the type.
+  if (aBuilder->InEventsAndPluginsOnly() &&
+      item->GetType() != DisplayItemType::TYPE_COMPOSITOR_HITTEST_INFO &&
+      item->GetType() != DisplayItemType::TYPE_PLUGIN && !item->GetChildren()) {
+    item->Destroy(aBuilder);
+    return nullptr;
+  }
 
   const mozilla::SmallPointerArray<mozilla::DisplayItemData>& array =
       item->Frame()->DisplayItemData();
@@ -2130,35 +2160,7 @@ class nsDisplayItem : public nsDisplayItemLink {
   // need to count constructors and destructors.
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame);
   nsDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                const ActiveScrolledRoot* aActiveScrolledRoot,
-                bool aAnonymous = false);
-
-  /**
-   * This constructor is only used in rare cases when we need to construct
-   * temporary items.
-   */
-  explicit nsDisplayItem(nsIFrame* aFrame)
-      : mFrame(aFrame),
-        mClipChain(nullptr),
-        mClip(nullptr),
-        mActiveScrolledRoot(nullptr),
-        mReferenceFrame(nullptr),
-        mAnimatedGeometryRoot(nullptr),
-        mForceNotVisible(false),
-        mDisableSubpixelAA(false),
-        mReusedItem(false),
-        mBackfaceIsHidden(mFrame->BackfaceIsHidden()),
-        mCombines3DTransformWithAncestors(
-            mFrame->Combines3DTransformWithAncestors()),
-        mPaintRectValid(false),
-        mCanBeReused(true)
-#ifdef MOZ_DUMP_PAINTING
-        ,
-        mPainted(false)
-#endif
-  {
-    MOZ_COUNT_CTOR(nsDisplayItem);
-  }
+                const ActiveScrolledRoot* aActiveScrolledRoot);
 
   nsDisplayItem() = delete;
 
@@ -2514,15 +2516,6 @@ class nsDisplayItem : public nsDisplayItemLink {
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
       const ContainerLayerParameters& aParameters) {
     return mozilla::LAYER_NONE;
-  }
-
-  /**
-   * Return true to indicate the layer should be constructed even if it's
-   * completely invisible.
-   */
-  virtual bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const {
-    return false;
   }
 
   /**
@@ -3110,11 +3103,22 @@ class nsDisplayList {
    * be in a list and cannot be null.
    */
   void AppendToTop(nsDisplayItem* aItem) {
-    MOZ_ASSERT(aItem, "No item to append!");
+    if (!aItem) {
+      return;
+    }
     MOZ_ASSERT(!aItem->mAbove, "Already in a list!");
     mTop->mAbove = aItem;
     mTop = aItem;
     mLength++;
+  }
+
+  template <typename T, typename... Args>
+  void AppendNewToTop(nsDisplayListBuilder* aBuilder, Args&&... aArgs) {
+    nsDisplayItem* item =
+        MakeDisplayItem<T>(aBuilder, std::forward<Args>(aArgs)...);
+    if (item) {
+      AppendToTop(item);
+    }
   }
 
   /**
@@ -3122,7 +3126,9 @@ class nsDisplayList {
    * and not already in a list.
    */
   void AppendToBottom(nsDisplayItem* aItem) {
-    MOZ_ASSERT(aItem, "No item to append!");
+    if (!aItem) {
+      return;
+    }
     MOZ_ASSERT(!aItem->mAbove, "Already in a list!");
     aItem->mAbove = mSentinel.mAbove;
     mSentinel.mAbove = aItem;
@@ -3130,6 +3136,15 @@ class nsDisplayList {
       mTop = aItem;
     }
     mLength++;
+  }
+
+  template <typename T, typename... Args>
+  void AppendNewToBottom(nsDisplayListBuilder* aBuilder, Args&&... aArgs) {
+    nsDisplayItem* item =
+        MakeDisplayItem<T>(aBuilder, std::forward<Args>(aArgs)...);
+    if (item) {
+      AppendToBottom(item);
+    }
   }
 
   /**
@@ -3710,9 +3725,8 @@ class nsDisplayHitTestInfoItem : public nsDisplayItem {
       : nsDisplayItem(aBuilder, aFrame) {}
 
   nsDisplayHitTestInfoItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                           const ActiveScrolledRoot* aActiveScrolledRoot,
-                           bool aAnonymous = false)
-      : nsDisplayItem(aBuilder, aFrame, aActiveScrolledRoot, aAnonymous) {}
+                           const ActiveScrolledRoot* aActiveScrolledRoot)
+      : nsDisplayItem(aBuilder, aFrame, aActiveScrolledRoot) {}
 
   nsDisplayHitTestInfoItem(nsDisplayListBuilder* aBuilder,
                            const nsDisplayHitTestInfoItem& aOther)
@@ -3921,22 +3935,22 @@ class nsDisplayReflowCount : public nsDisplayItem {
   nscolor mColor;
 };
 
-#  define DO_GLOBAL_REFLOW_COUNT_DSP(_name)                                 \
-    PR_BEGIN_MACRO                                                          \
-    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() && \
-        PresShell()->IsPaintingFrameCounts()) {                             \
-      aLists.Outlines()->AppendToTop(                                       \
-          MakeDisplayItem<nsDisplayReflowCount>(aBuilder, this, _name));    \
-    }                                                                       \
+#  define DO_GLOBAL_REFLOW_COUNT_DSP(_name)                                   \
+    PR_BEGIN_MACRO                                                            \
+    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() &&   \
+        PresShell()->IsPaintingFrameCounts()) {                               \
+      aLists.Outlines()->AppendNewToTop<nsDisplayReflowCount>(aBuilder, this, \
+                                                              _name);         \
+    }                                                                         \
     PR_END_MACRO
 
-#  define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)                   \
-    PR_BEGIN_MACRO                                                          \
-    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() && \
-        PresShell()->IsPaintingFrameCounts()) {                             \
-      aLists.Outlines()->AppendToTop(MakeDisplayItem<nsDisplayReflowCount>( \
-          aBuilder, this, _name, _color));                                  \
-    }                                                                       \
+#  define DO_GLOBAL_REFLOW_COUNT_DSP_COLOR(_name, _color)                     \
+    PR_BEGIN_MACRO                                                            \
+    if (!aBuilder->IsBackgroundOnly() && !aBuilder->IsForEventDelivery() &&   \
+        PresShell()->IsPaintingFrameCounts()) {                               \
+      aLists.Outlines()->AppendNewToTop<nsDisplayReflowCount>(aBuilder, this, \
+                                                              _name, _color); \
+    }                                                                         \
     PR_END_MACRO
 
 /*
@@ -5121,14 +5135,16 @@ class nsDisplayWrapList : public nsDisplayHitTestInfoItem {
    * Takes all the items from aList and puts them in our list.
    */
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                    nsDisplayList* aList, bool aAnonymous = false);
+                    nsDisplayList* aList);
+
+  nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                    nsDisplayItem* aItem);
+
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                     nsDisplayList* aList,
                     const ActiveScrolledRoot* aActiveScrolledRoot,
-                    bool aClearClipChain = false, uint32_t aIndex = 0,
-                    bool aAnonymous = false);
-  nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                    nsDisplayItem* aItem, bool aAnonymous = false);
+                    bool aClearClipChain = false, uint32_t aIndex = 0);
+
   nsDisplayWrapList(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
       : nsDisplayHitTestInfoItem(aBuilder, aFrame),
         mFrameActiveScrolledRoot(aBuilder->CurrentActiveScrolledRoot()),
@@ -5482,8 +5498,6 @@ class nsDisplayOpacity : public nsDisplayWrapList {
 
   float GetOpacity() const { return mOpacity; }
 
-  bool ForEventsAndPluginsOnly() const { return mForEventsAndPluginsOnly; }
-
  private:
   bool ApplyOpacityToChildren(nsDisplayListBuilder* aBuilder);
   bool IsEffectsWrapper() const;
@@ -5826,8 +5840,6 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
 
   NS_DISPLAY_DECL_NAME("OwnLayer", TYPE_OWN_LAYER)
 
-  bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const override;
   already_AddRefed<Layer> BuildLayer(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
       const ContainerLayerParameters& aContainerParameters) override;
@@ -5931,9 +5943,6 @@ class nsDisplaySubDocument : public nsDisplayOwnLayer {
 
   bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                          nsRegion* aVisibleRegion) override;
-  bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const override;
-
   bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override {
     return mShouldFlatten;
   }
@@ -6205,11 +6214,6 @@ class nsDisplayScrollInfoLayer : public nsDisplayWrapList {
   already_AddRefed<Layer> BuildLayer(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
       const ContainerLayerParameters& aContainerParameters) override;
-
-  bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const override {
-    return true;
-  }
 
   nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
@@ -6676,8 +6680,6 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
   bool UpdateScrollData(
       mozilla::layers::WebRenderScrollData* aData,
       mozilla::layers::WebRenderLayerScrollData* aLayerData) override;
-  bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const override;
   bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                          nsRegion* aVisibleRegion) override;
 
@@ -6966,17 +6968,20 @@ class nsDisplayPerspective : public nsDisplayHitTestInfoItem {
 
   NS_DISPLAY_DECL_NAME("nsDisplayPerspective", TYPE_PERSPECTIVE)
 
+  void Destroy(nsDisplayListBuilder* aBuilder) override {
+    mList.DeleteAll(aBuilder);
+    nsDisplayHitTestInfoItem::Destroy(aBuilder);
+  }
+
   void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                HitTestState* aState, nsTArray<nsIFrame*>* aOutFrames) override {
-    return mList.HitTest(aBuilder, aRect, aState, aOutFrames);
+    return GetChildren()->HitTest(aBuilder, aRect, aState, aOutFrames);
   }
 
   nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) const override {
-    return mList.GetBounds(aBuilder, aSnap);
-  }
-
-  void UpdateBounds(nsDisplayListBuilder* aBuilder) override {
-    mList.UpdateBounds(aBuilder);
+    *aSnap = false;
+    return GetChildren()->GetClippedBoundsWithRespectToASR(aBuilder,
+                                                           mActiveScrolledRoot);
   }
 
   void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
@@ -6984,14 +6989,7 @@ class nsDisplayPerspective : public nsDisplayHitTestInfoItem {
                                  nsRegion* aInvalidRegion) const override {}
 
   nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) const override {
-    return mList.GetOpaqueRegion(aBuilder, aSnap);
-  }
-
-  mozilla::Maybe<nscolor> IsUniform(
-      nsDisplayListBuilder* aBuilder) const override {
-    return mList.IsUniform(aBuilder);
-  }
+                           bool* aSnap) const override;
 
   LayerState GetLayerState(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
@@ -7003,63 +7001,30 @@ class nsDisplayPerspective : public nsDisplayHitTestInfoItem {
       mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
-  bool ShouldBuildLayerEvenIfInvisible(
-      nsDisplayListBuilder* aBuilder) const override {
-    if (!mList.GetChildren()->GetTop()) {
-      return false;
-    }
-    return mList.GetChildren()->GetTop()->ShouldBuildLayerEvenIfInvisible(
-        aBuilder);
-  }
-
   already_AddRefed<Layer> BuildLayer(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
       const ContainerLayerParameters& aContainerParameters) override;
 
-  bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                         nsRegion* aVisibleRegion) override {
-    mList.RecomputeVisibility(aBuilder, aVisibleRegion);
-    return true;
-  }
-
   RetainedDisplayList* GetSameCoordinateSystemChildren() const override {
-    return mList.GetChildren();
+    return &mList;
   }
 
-  RetainedDisplayList* GetChildren() const override {
-    return mList.GetChildren();
-  }
-
-  void SetActiveScrolledRoot(
-      const ActiveScrolledRoot* aActiveScrolledRoot) override {
-    nsDisplayHitTestInfoItem::SetActiveScrolledRoot(aActiveScrolledRoot);
-    mList.SetActiveScrolledRoot(aActiveScrolledRoot);
-  }
+  RetainedDisplayList* GetChildren() const override { return &mList; }
 
   nsRect GetComponentAlphaBounds(
       nsDisplayListBuilder* aBuilder) const override {
-    return mList.GetComponentAlphaBounds(aBuilder);
+    return GetChildren()->GetComponentAlphaBounds(aBuilder);
   }
 
   void DoUpdateBoundsPreserves3D(nsDisplayListBuilder* aBuilder) override {
-    if (mList.GetChildren()->GetTop()) {
-      static_cast<nsDisplayTransform*>(mList.GetChildren()->GetTop())
+    if (GetChildren()->GetTop()) {
+      static_cast<nsDisplayTransform*>(GetChildren()->GetTop())
           ->DoUpdateBoundsPreserves3D(aBuilder);
     }
   }
 
-  void Destroy(nsDisplayListBuilder* aBuilder) override {
-    mList.GetChildren()->DeleteAll(aBuilder);
-    nsDisplayItem::Destroy(aBuilder);
-  }
-
-  void RemoveFrame(nsIFrame* aFrame) override {
-    nsDisplayItem::RemoveFrame(aFrame);
-    mList.RemoveFrame(aFrame);
-  }
-
  private:
-  nsDisplayWrapList mList;
+  mutable RetainedDisplayList mList;
 };
 
 /**
@@ -7079,9 +7044,6 @@ class nsCharClipDisplayItem : public nsDisplayItem {
   nsCharClipDisplayItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
       : nsDisplayItem(aBuilder, aFrame), mVisIStartEdge(0), mVisIEndEdge(0) {}
 
-  explicit nsCharClipDisplayItem(nsIFrame* aFrame)
-      : nsDisplayItem(aFrame), mVisIStartEdge(0), mVisIEndEdge(0) {}
-
   void RestoreState() override { nsDisplayItem::RestoreState(); }
 
   nsDisplayItemGeometry* AllocateGeometry(
@@ -7092,11 +7054,10 @@ class nsCharClipDisplayItem : public nsDisplayItem {
                                  nsRegion* aInvalidRegion) const override;
 
   struct ClipEdges {
-    ClipEdges(const nsDisplayItem& aItem, nscoord aVisIStartEdge,
-              nscoord aVisIEndEdge) {
-      nsRect r =
-          aItem.Frame()->GetScrollableOverflowRect() + aItem.ToReferenceFrame();
-      if (aItem.Frame()->GetWritingMode().IsVertical()) {
+    ClipEdges(const nsIFrame* aFrame, const nsPoint& aToReferenceFrame,
+              nscoord aVisIStartEdge, nscoord aVisIEndEdge) {
+      nsRect r = aFrame->GetScrollableOverflowRect() + aToReferenceFrame;
+      if (aFrame->GetWritingMode().IsVertical()) {
         mVisIStart = aVisIStartEdge > 0 ? r.y + aVisIStartEdge : nscoord_MIN;
         mVisIEnd = aVisIEndEdge > 0
                        ? std::max(r.YMost() - aVisIEndEdge, mVisIStart)
@@ -7119,14 +7080,8 @@ class nsCharClipDisplayItem : public nsDisplayItem {
     nscoord mVisIEnd;
   };
 
-  ClipEdges Edges() const {
-    return ClipEdges(*this, mVisIStartEdge, mVisIEndEdge);
-  }
-
   static nsCharClipDisplayItem* CheckCast(nsDisplayItem* aItem) {
-    DisplayItemType t = aItem->GetType();
-    return (t == DisplayItemType::TYPE_TEXT ||
-            t == DisplayItemType::TYPE_SVG_CHAR_CLIP)
+    return (aItem->GetType() == DisplayItemType::TYPE_TEXT)
                ? static_cast<nsCharClipDisplayItem*>(aItem)
                : nullptr;
   }

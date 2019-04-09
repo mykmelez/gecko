@@ -443,7 +443,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage) {
     nsAutoString msg, sourceName, sourceLine;
     nsCString category;
     uint32_t lineNum, colNum, flags;
-    bool fromPrivateWindow;
+    bool fromPrivateWindow, fromChromeContext;
 
     nsresult rv = scriptError->GetErrorMessage(msg);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -464,6 +464,8 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage) {
     rv = scriptError->GetFlags(&flags);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = scriptError->GetIsFromPrivateWindow(&fromPrivateWindow);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = scriptError->GetIsFromChromeContext(&fromChromeContext);
     NS_ENSURE_SUCCESS(rv, rv);
 
     {
@@ -496,15 +498,15 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage) {
           return NS_ERROR_FAILURE;
         }
 
-        mChild->SendScriptErrorWithStack(msg, sourceName, sourceLine, lineNum,
-                                         colNum, flags, category,
-                                         fromPrivateWindow, cloned);
+        mChild->SendScriptErrorWithStack(
+            msg, sourceName, sourceLine, lineNum, colNum, flags, category,
+            fromPrivateWindow, fromChromeContext, cloned);
         return NS_OK;
       }
     }
 
     mChild->SendScriptError(msg, sourceName, sourceLine, lineNum, colNum, flags,
-                            category, fromPrivateWindow);
+                            category, fromPrivateWindow, fromChromeContext);
     return NS_OK;
   }
 
@@ -1171,9 +1173,7 @@ void ContentChild::LaunchRDDProcess() {
         nsresult rv;
         Endpoint<PRemoteDecoderManagerChild> endpoint;
         Unused << SendLaunchRDDProcess(&rv, &endpoint);
-        // Only call InitForContent if we got a valid enpoint back which
-        // indicates we needed to launch an RDD process.
-        if (rv == NS_OK && endpoint.IsValid()) {
+        if (rv == NS_OK) {
           RemoteDecoderManagerChild::InitForContent(std::move(endpoint));
         }
       }));
@@ -1819,6 +1819,14 @@ mozilla::ipc::IPCResult ContentChild::RecvPBrowserConstructor(
   }
 
   auto tabChild = static_cast<TabChild*>(aActor);
+  if (!tabChild->mTabGroup) {
+    tabChild->mTabGroup = TabGroup::GetFromActor(tabChild);
+
+    if (!tabChild->mTabGroup) {
+      tabChild->mTabGroup = new TabGroup();
+      MOZ_DIAGNOSTIC_ASSERT(aSameTabGroupAs != 0);
+    }
+  }
 
   if (NS_WARN_IF(NS_FAILED(tabChild->Init(/* aOpener */ nullptr)))) {
     return IPC_FAIL(tabChild, "TabChild::Init failed");

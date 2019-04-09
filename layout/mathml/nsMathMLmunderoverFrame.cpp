@@ -11,6 +11,8 @@
 #include <algorithm>
 #include "gfxContext.h"
 #include "gfxMathTable.h"
+#include "gfxTextRun.h"
+#include "mozilla/PresShell.h"
 
 using namespace mozilla;
 

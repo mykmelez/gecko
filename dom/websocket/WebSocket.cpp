@@ -102,6 +102,7 @@ class WebSocketImpl final : public nsIInterfaceRequestor,
         mScriptColumn(0),
         mInnerWindowID(0),
         mPrivateBrowsing(false),
+        mIsChromeContext(false),
         mIsMainThread(true),
         mMutex("WebSocketImpl::mMutex"),
         mWorkerShuttingDown(false) {
@@ -201,6 +202,7 @@ class WebSocketImpl final : public nsIInterfaceRequestor,
   uint32_t mScriptColumn;
   uint64_t mInnerWindowID;
   bool mPrivateBrowsing;
+  bool mIsChromeContext;
 
   RefPtr<ThreadSafeWorkerRef> mWorkerRef;
 
@@ -344,7 +346,7 @@ void WebSocketImpl::PrintErrorOnConsole(const char* aBundleURI,
     rv = errorObject->Init(message, NS_ConvertUTF8toUTF16(mScriptFile),
                            EmptyString(), mScriptLine, mScriptColumn,
                            nsIScriptError::errorFlag, "Web Socket",
-                           mPrivateBrowsing);
+                           mPrivateBrowsing, mIsChromeContext);
   }
 
   NS_ENSURE_SUCCESS_VOID(rv);
@@ -693,7 +695,7 @@ WebSocketImpl::OnStart(nsISupports* aContext) {
   }
 
   // Attempt to kill "ghost" websocket: but usually too early for check to fail
-  nsresult rv = mWebSocket->CheckInnerWindowCorrectness();
+  nsresult rv = mWebSocket->CheckCurrentGlobalCorrectness();
   if (NS_FAILED(rv)) {
     CloseConnection(nsIWebSocketChannel::CLOSE_GOING_AWAY);
     return rv;
@@ -1461,7 +1463,7 @@ nsresult WebSocketImpl::Init(JSContext* aCx, nsIPrincipal* aLoadingPrincipal,
   RefPtr<WebSocketImpl> kungfuDeathGrip = this;
 
   // Attempt to kill "ghost" websocket: but usually too early for check to fail
-  nsresult rv = mWebSocket->CheckInnerWindowCorrectness();
+  nsresult rv = mWebSocket->CheckCurrentGlobalCorrectness();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Shut down websocket if window is frozen or destroyed (only needed for
@@ -1505,6 +1507,7 @@ nsresult WebSocketImpl::Init(JSContext* aCx, nsIPrincipal* aLoadingPrincipal,
   }
 
   mPrivateBrowsing = !!aPrincipal->OriginAttributesRef().mPrivateBrowsingId;
+  mIsChromeContext = nsContentUtils::IsSystemPrincipal(aPrincipal);
 
   // parses the url
   rv = ParseURL(aURL);
@@ -1512,7 +1515,7 @@ nsresult WebSocketImpl::Init(JSContext* aCx, nsIPrincipal* aLoadingPrincipal,
 
   nsCOMPtr<Document> originDoc = mWebSocket->GetDocumentIfCurrent();
   if (!originDoc) {
-    rv = mWebSocket->CheckInnerWindowCorrectness();
+    rv = mWebSocket->CheckCurrentGlobalCorrectness();
     NS_ENSURE_SUCCESS(rv, rv);
   }
   mOriginDocument = do_GetWeakReference(originDoc);
@@ -1779,7 +1782,7 @@ nsresult WebSocket::CreateAndDispatchSimpleEvent(const nsAString& aName) {
   MOZ_ASSERT(mImpl);
   AssertIsOnTargetThread();
 
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   if (NS_FAILED(rv)) {
     return NS_OK;
   }
@@ -1807,7 +1810,7 @@ nsresult WebSocket::CreateAndDispatchMessageEvent(const nsACString& aData,
 
   JSContext* cx = jsapi.cx();
 
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   if (NS_FAILED(rv)) {
     return NS_OK;
   }
@@ -1884,7 +1887,7 @@ nsresult WebSocket::CreateAndDispatchCloseEvent(bool aWasClean, uint16_t aCode,
                                      aReason);
   }
 
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   if (NS_FAILED(rv)) {
     return NS_OK;
   }

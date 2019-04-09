@@ -38,8 +38,18 @@ static mozilla::LazyLogModule gWebAuthnManagerLog("webauthnmanager");
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(WebAuthnManager,
                                                WebAuthnManagerBase)
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(WebAuthnManager, WebAuthnManagerBase,
-                                   mFollowingSignal, mTransaction)
+NS_IMPL_CYCLE_COLLECTION_CLASS(WebAuthnManager)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WebAuthnManager,
+                                                WebAuthnManagerBase)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFollowingSignal)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransaction)
+  tmp->mTransaction.reset();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WebAuthnManager,
+                                                  WebAuthnManagerBase)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFollowingSignal)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransaction)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 /***********************************************************************
  * Utility Functions
@@ -156,7 +166,7 @@ nsresult RelaxSameOrigin(nsPIDOMWindowInner* aParent,
  **********************************************************************/
 
 void WebAuthnManager::ClearTransaction() {
-  if (!NS_WARN_IF(mTransaction.isNothing())) {
+  if (!mTransaction.isNothing()) {
     StopListeningForVisibilityEvents();
   }
 
@@ -724,6 +734,11 @@ void WebAuthnManager::FinishGetAssertion(
     return;
   }
 
+  CryptoBuffer userHandleBuf;
+  // U2FTokenManager don't return user handle.
+  // Best effort.
+  userHandleBuf.Assign(aResult.UserHandle());
+
   // If any authenticator returns success:
 
   // Create a new PublicKeyCredential object named value and populate its fields
@@ -734,6 +749,9 @@ void WebAuthnManager::FinishGetAssertion(
   assertion->SetClientDataJSON(clientDataBuf);
   assertion->SetAuthenticatorData(authenticatorDataBuf);
   assertion->SetSignature(signatureBuf);
+  if (!userHandleBuf.IsEmpty()) {
+    assertion->SetUserHandle(userHandleBuf);
+  }
 
   RefPtr<PublicKeyCredential> credential = new PublicKeyCredential(mParent);
   credential->SetId(credentialBase64Url);

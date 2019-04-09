@@ -20,13 +20,14 @@
 #include "mozilla/layers/WebRenderMessages.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Move.h"
+#include "mozilla/PresShell.h"
 #include "nsCOMPtr.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsFontMetrics.h"
 #include "nsGkAtoms.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsPresContext.h"
-#include "nsIPresShell.h"
 #include "mozilla/dom/Document.h"
 #include "nsDisplayList.h"
 #include "nsCounterManager.h"
@@ -656,8 +657,7 @@ void nsBulletFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsBulletFrame");
 
-  aLists.Content()->AppendToTop(
-      MakeDisplayItem<nsDisplayBullet>(aBuilder, this));
+  aLists.Content()->AppendNewToTop<nsDisplayBullet>(aBuilder, this);
 }
 
 Maybe<BulletRenderer> nsBulletFrame::CreateBulletRenderer(
@@ -1155,10 +1155,10 @@ nsresult nsBulletFrame::OnSizeAvailable(imgIRequest* aRequest,
 
     // Now that the size is available (or an error occurred), trigger
     // a reflow of the bullet frame.
-    nsIPresShell* shell = presContext->GetPresShell();
-    if (shell) {
-      shell->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
-                              NS_FRAME_IS_DIRTY);
+    mozilla::PresShell* presShell = presContext->GetPresShell();
+    if (presShell) {
+      presShell->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+                                  NS_FRAME_IS_DIRTY);
     }
   }
 
@@ -1178,11 +1178,12 @@ void nsBulletFrame::GetLoadGroup(nsPresContext* aPresContext,
 
   MOZ_ASSERT(nullptr != aLoadGroup, "null OUT parameter pointer");
 
-  nsIPresShell* shell = aPresContext->GetPresShell();
+  mozilla::PresShell* presShell = aPresContext->GetPresShell();
+  if (!presShell) {
+    return;
+  }
 
-  if (!shell) return;
-
-  Document* doc = shell->GetDocument();
+  Document* doc = presShell->GetDocument();
   if (!doc) return;
 
   *aLoadGroup = doc->GetDocumentLoadGroup().take();

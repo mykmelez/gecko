@@ -866,14 +866,14 @@ bool Debugger::hasAnyLiveHooks(JSRuntime* rt) const {
 ResumeMode Debugger::slowPathOnEnterFrame(JSContext* cx,
                                           AbstractFramePtr frame) {
   RootedValue rval(cx);
-  ResumeMode resumeMode = dispatchHook(cx,
-                                       [frame](Debugger* dbg) -> bool {
-                                         return dbg->observesFrame(frame) &&
-                                                dbg->observesEnterFrame();
-                                       },
-                                       [&](Debugger* dbg) -> ResumeMode {
-                                         return dbg->fireEnterFrame(cx, &rval);
-                                       });
+  ResumeMode resumeMode = dispatchHook(
+      cx,
+      [frame](Debugger* dbg) -> bool {
+        return dbg->observesFrame(frame) && dbg->observesEnterFrame();
+      },
+      [&](Debugger* dbg) -> ResumeMode {
+        return dbg->fireEnterFrame(cx, &rval);
+      });
 
   switch (resumeMode) {
     case ResumeMode::Continue:
@@ -953,17 +953,28 @@ static void DebuggerFrame_maybeDecrementFrameScriptStepModeCount(
  */
 class MOZ_RAII AutoSetGeneratorRunning {
   int32_t resumeIndex_;
+  AsyncGeneratorObject::State asyncGenState_;
   Rooted<AbstractGeneratorObject*> genObj_;
 
  public:
   AutoSetGeneratorRunning(JSContext* cx,
                           Handle<AbstractGeneratorObject*> genObj)
-      : resumeIndex_(0), genObj_(cx, genObj) {
+      : resumeIndex_(0),
+        asyncGenState_(static_cast<AsyncGeneratorObject::State>(0)),
+        genObj_(cx, genObj) {
     if (genObj) {
       if (!genObj->isClosed() && genObj->isSuspended()) {
         // Yielding or awaiting.
         resumeIndex_ = genObj->resumeIndex();
         genObj->setRunning();
+
+        // Async generators have additionally bookkeeping which must be
+        // adjusted when switching over to the running state.
+        if (genObj->is<AsyncGeneratorObject>()) {
+          auto* asyncGenObj = &genObj->as<AsyncGeneratorObject>();
+          asyncGenState_ = asyncGenObj->state();
+          asyncGenObj->setExecuting();
+        }
       } else {
         // Returning or throwing. The generator is already closed, if
         // it was ever exposed at all.
@@ -976,6 +987,9 @@ class MOZ_RAII AutoSetGeneratorRunning {
     if (genObj_) {
       MOZ_ASSERT(genObj_->isRunning());
       genObj_->setResumeIndex(resumeIndex_);
+      if (genObj_->is<AsyncGeneratorObject>()) {
+        genObj_->as<AsyncGeneratorObject>().setState(asyncGenState_);
+      }
     }
   }
 };
@@ -1645,11 +1659,13 @@ static void AdjustGeneratorResumptionValue(JSContext* cx,
           cx, &genObj->as<AsyncFunctionGeneratorObject>());
 
       // 1.  `return <value>` fulfills and returns the async function's promise.
-      JSObject* promise = AsyncFunctionResolve(
-          cx, asyncGenObj, vp, AsyncFunctionResolveKind::Fulfill);
-      if (!promise) {
-        getAndClearExceptionThenThrow();
-        return;
+      Rooted<PromiseObject*> promise(cx, asyncGenObj->promise());
+      if (promise->state() == JS::PromiseState::Pending) {
+        if (!AsyncFunctionResolve(cx, asyncGenObj, vp,
+                                  AsyncFunctionResolveKind::Fulfill)) {
+          getAndClearExceptionThenThrow();
+          return;
+        }
       }
       vp.setObject(*promise);
 
@@ -9300,7 +9316,7 @@ static bool DebuggerGenericEval(JSContext* cx,
 
   // Gather keys and values of bindings, if any. This must be done in the
   // debugger compartment, since that is where any exceptions must be thrown.
-  AutoIdVector keys(cx);
+  RootedIdVector keys(cx);
   RootedValueVector values(cx);
   if (bindings) {
     if (!GetPropertyKeys(cx, bindings, JSITER_OWNONLY, &keys) ||
@@ -10931,7 +10947,7 @@ bool DebuggerObject::definePropertiesMethod(JSContext* cx, unsigned argc,
   if (!props) {
     return false;
   }
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   Rooted<PropertyDescriptorVector> descs(cx, PropertyDescriptorVector(cx));
   if (!ReadPropertyDescriptors(cx, props, false, &ids, &descs)) {
     return false;
@@ -11777,7 +11793,7 @@ bool DebuggerObject::getOwnPropertyNames(JSContext* cx,
                                          MutableHandle<IdVector> result) {
   RootedObject referent(cx, object->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     EnterDebuggeeObjectRealm(cx, ar, referent);
@@ -11801,7 +11817,7 @@ bool DebuggerObject::getOwnPropertySymbols(JSContext* cx,
                                            MutableHandle<IdVector> result) {
   RootedObject referent(cx, object->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     EnterDebuggeeObjectRealm(cx, ar, referent);
@@ -12767,7 +12783,7 @@ bool DebuggerEnvironment::getNames(JSContext* cx,
 
   Rooted<Env*> referent(cx, environment->referent());
 
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   {
     Maybe<AutoRealm> ar;
     ar.emplace(cx, referent);

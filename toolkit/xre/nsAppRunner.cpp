@@ -2904,6 +2904,7 @@ static bool CheckForUserMismatch() { return false; }
 static void IncreaseDescriptorLimits() {
 #ifdef XP_UNIX
   // Increase the fd limit to accomodate IPC resources like shared memory.
+  // See also the Darwin case in config/external/nspr/pr/moz.build
   static const rlim_t kFDs = 4096;
   struct rlimit rlim;
 
@@ -3183,12 +3184,10 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
       // see if we have a crashreporter-override.ini in the application
       // directory
       nsCOMPtr<nsIFile> overrideini;
-      bool exists;
       if (NS_SUCCEEDED(
               mDirProvider.GetAppDir()->Clone(getter_AddRefs(overrideini))) &&
           NS_SUCCEEDED(overrideini->AppendNative(
-              NS_LITERAL_CSTRING("crashreporter-override.ini"))) &&
-          NS_SUCCEEDED(overrideini->Exists(&exists)) && exists) {
+              NS_LITERAL_CSTRING("crashreporter-override.ini")))) {
 #ifdef XP_WIN
         nsAutoString overridePathW;
         overrideini->GetPath(overridePathW);
@@ -4733,8 +4732,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
 
   // Check for an application initiated restart.  This is one that
   // corresponds to nsIAppStartup.quit(eRestart)
-  if (rv == NS_SUCCESS_RESTART_APP ||
-      rv == NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE) {
+  if (rv == NS_SUCCESS_RESTART_APP) {
     appInitiatedRestart = true;
 
     // We have an application restart don't do any shutdown checks here
@@ -4766,11 +4764,9 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   if (appInitiatedRestart) {
     RestoreStateForAppInitiatedRestart();
 
-    if (rv != NS_SUCCESS_RESTART_APP_NOT_SAME_PROFILE) {
-      // Ensure that these environment variables are set:
-      SaveFileToEnvIfUnset("XRE_PROFILE_PATH", mProfD);
-      SaveFileToEnvIfUnset("XRE_PROFILE_LOCAL_PATH", mProfLD);
-    }
+    // Ensure that these environment variables are set:
+    SaveFileToEnvIfUnset("XRE_PROFILE_PATH", mProfD);
+    SaveFileToEnvIfUnset("XRE_PROFILE_LOCAL_PATH", mProfLD);
 
 #ifdef MOZ_WIDGET_GTK
     if (!gfxPlatform::IsHeadless()) {

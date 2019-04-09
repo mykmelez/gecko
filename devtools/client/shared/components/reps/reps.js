@@ -2877,7 +2877,9 @@ function parseStackString(stack) {
     // Given the input: "scriptLocation:2:100"
     // Result:
     // ["scriptLocation:2:100", "scriptLocation", "2", "100"]
-    const locationParts = location.match(/^(.*):(\d+):(\d+)$/);
+    const locationParts = location
+      ? location.match(/^(.*):(\d+):(\d+)$/)
+      : null;
 
     if (location && locationParts) {
       const [, filename, line, column] = locationParts;
@@ -6282,14 +6284,23 @@ function getElements(grip, mode) {
     attributes,
     nodeName,
     isAfterPseudoElement,
-    isBeforePseudoElement
+    isBeforePseudoElement,
+    isMarkerPseudoElement
   } = grip.preview;
   const nodeNameElement = span({
     className: "tag-name"
   }, nodeName);
 
-  if (isAfterPseudoElement || isBeforePseudoElement) {
-    return [span({ className: "attrName" }, `::${isAfterPseudoElement ? "after" : "before"}`)];
+  let pseudoNodeName;
+  if (isAfterPseudoElement) {
+    pseudoNodeName = "after";
+  } else if (isBeforePseudoElement) {
+    pseudoNodeName = "before";
+  } else if (isMarkerPseudoElement) {
+    pseudoNodeName = "marker";
+  }
+  if (pseudoNodeName) {
+    return [span({ className: "attrName" }, `::${pseudoNodeName}`)];
   }
 
   if (mode === MODE.TINY) {

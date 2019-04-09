@@ -1654,6 +1654,17 @@ nsDOMWindowUtils::GetFocusedInputType(nsAString& aType) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetFocusedActionHint(nsAString& aType) {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  aType = widget->GetInputContext().mActionHint;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetViewId(Element* aElement, nsViewID* aResult) {
   if (aElement && nsLayoutUtils::FindIDFor(aElement, aResult)) {
     return NS_OK;
@@ -2500,6 +2511,18 @@ nsDOMWindowUtils::ZoomToFocusedInput() {
     } else {
       flags |= layers::ONLY_ZOOM_TO_DEFAULT_SCALE;
     }
+
+    // The content may be inside a scrollable subframe inside a non-scrollable
+    // root content document. In this scenario, we want to ensure that the
+    // main-thread side knows to scroll the content into view before we get
+    // the bounding content rect and ask APZ to adjust the visual viewport.
+    shell->ScrollContentIntoView(
+        content,
+        nsIPresShell::ScrollAxis(nsIPresShell::SCROLL_MINIMUM,
+                                 nsIPresShell::SCROLL_IF_NOT_VISIBLE),
+        nsIPresShell::ScrollAxis(nsIPresShell::SCROLL_MINIMUM,
+                                 nsIPresShell::SCROLL_IF_NOT_VISIBLE),
+        nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
 
     CSSRect bounds =
         nsLayoutUtils::GetBoundingContentRect(content, rootScrollFrame);

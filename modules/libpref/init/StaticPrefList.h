@@ -209,6 +209,15 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// If this is true, it's allowed to fire "cut", "copy" and "paste" events.
+// Additionally, "input" events may expose clipboard content when inputType
+// is "insertFromPaste" or something.
+VARCACHE_PREF(
+  "dom.event.clipboardevents.enabled",
+   dom_event_clipboardevents_enabled,
+  bool, true
+)
+
 // If this is true, "keypress" event's keyCode value and charCode value always
 // become same if the event is not created/initialized by JS.
 VARCACHE_PREF(
@@ -330,11 +339,17 @@ VARCACHE_PREF(
   RelaxedAtomicBool, false
 )
 
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
 VARCACHE_PREF(
   "dom.webnotifications.requireuserinteraction",
    dom_webnotifications_requireuserinteraction,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+#undef PREF_VALUE
 
 VARCACHE_PREF(
   "dom.webnotifications.serviceworker.enabled",
@@ -1885,6 +1900,7 @@ VARCACHE_PREF(
 // 0-Accept, 1-dontAcceptForeign, 2-dontAcceptAny, 3-limitForeign,
 // 4-rejectTracker
 // Keep the old default of accepting all cookies
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "network.cookie.cookieBehavior",
   network_cookie_cookieBehavior,
@@ -2021,6 +2037,19 @@ VARCACHE_PREF(
   bool, false
 )
 
+// Telemetry of traffic categories
+VARCACHE_PREF(
+  "network.traffic_analyzer.enabled",
+  network_traffic_analyzer_enabled,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "network.delay.tracking.load",
+   network_delay_tracking_load,
+   uint32_t, 0
+)
+
 //---------------------------------------------------------------------------
 // ContentSessionStore prefs
 //---------------------------------------------------------------------------
@@ -2084,6 +2113,7 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party fingerprinting resources.
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "privacy.trackingprotection.fingerprinting.enabled",
    privacy_trackingprotection_fingerprinting_enabled,
@@ -2098,6 +2128,7 @@ VARCACHE_PREF(
 )
 
 // Block 3rd party cryptomining resources.
+// In Firefox Desktop this pref is set by browser.contentblocking.features.[standard, strict] see firefox.js for details.
 VARCACHE_PREF(
   "privacy.trackingprotection.cryptomining.enabled",
    privacy_trackingprotection_cryptomining_enabled,
@@ -2156,11 +2187,17 @@ VARCACHE_PREF(
 )
 
 // Maximum client-side cookie life-time cap
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE 604800 // 7 days
+#else
+# define PREF_VALUE 0
+#endif
 VARCACHE_PREF(
   "privacy.documentCookies.maxage",
    privacy_documentCookies_maxage,
-  uint32_t, 0 // Disabled (in seconds, set to 0 to disable)
+  uint32_t, PREF_VALUE // (in seconds, set to 0 to disable)
 )
+#undef PREF_VALUE
 
 // Anti-fingerprinting, disabled by default
 VARCACHE_PREF(

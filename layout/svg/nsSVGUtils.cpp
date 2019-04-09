@@ -19,6 +19,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PatternHelpers.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/SVGContextPaint.h"
 #include "nsCSSClipPathInstance.h"
 #include "nsCSSFrameConstructor.h"
@@ -29,7 +30,6 @@
 #include "nsIContent.h"
 #include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
-#include "nsIPresShell.h"
 #include "nsSVGDisplayableFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
@@ -321,12 +321,34 @@ nsIFrame* nsSVGUtils::GetOuterSVGFrameAndCoveredRegion(nsIFrame* aFrame,
     uint32_t flags =
         nsSVGUtils::eForGetClientRects | nsSVGUtils::eBBoxIncludeFill |
         nsSVGUtils::eBBoxIncludeStroke | nsSVGUtils::eBBoxIncludeMarkers;
-    gfxMatrix m = nsSVGUtils::GetUserToCanvasTM(aFrame);
+
+    auto ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, outer);
+
+    float initPositionX = NSAppUnitsToFloatPixels(aFrame->GetPosition().x,
+                                                  AppUnitsPerCSSPixel()),
+          initPositionY = NSAppUnitsToFloatPixels(aFrame->GetPosition().y,
+                                                  AppUnitsPerCSSPixel());
+
+    Matrix mm;
+    ctm.ProjectTo2D();
+    ctm.CanDraw2D(&mm);
+    gfxMatrix m = ThebesMatrix(mm);
+
+    float appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
+    float devPixelPerCSSPixel =
+        1.0 * AppUnitsPerCSSPixel() / appUnitsPerDevPixel;
+
+    // The matrix that GetBBox accepts should operate on "user space",
+    // i.e. with CSS pixel unit.
+    m = m.PreScale(devPixelPerCSSPixel, devPixelPerCSSPixel);
+
+    // Both nsSVGUtils::GetBBox and nsLayoutUtils::GetTransformToAncestor
+    // will count this displacement, we should remove it here to avoid
+    // double-counting.
+    m = m.PreTranslate(-initPositionX, -initPositionY);
+
     SVGBBox bbox = nsSVGUtils::GetBBox(aFrame, flags, &m);
-    nsRect bounds = nsLayoutUtils::RoundGfxRectToAppRect(
-        bbox, aFrame->PresContext()->AppUnitsPerDevPixel());
-    nsMargin bp = outer->GetUsedBorderAndPadding();
-    *aRect = bounds + nsPoint(bp.left, bp.top);
+    *aRect = nsLayoutUtils::RoundGfxRectToAppRect(bbox, appUnitsPerDevPixel);
   }
 
   return outer;
@@ -1206,8 +1228,8 @@ bool nsSVGUtils::CanOptimizeOpacity(nsIFrame* aFrame) {
 }
 
 gfxMatrix nsSVGUtils::AdjustMatrixForUnits(const gfxMatrix& aMatrix,
-                                           SVGEnum* aUnits, nsIFrame* aFrame,
-                                           uint32_t aFlags) {
+                                           SVGAnimatedEnumeration* aUnits,
+                                           nsIFrame* aFrame, uint32_t aFlags) {
   if (aFrame && aUnits->GetAnimValue() == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
     gfxRect bbox = GetBBox(aFrame, aFlags);
     gfxMatrix tm = aMatrix;
