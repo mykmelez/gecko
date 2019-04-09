@@ -22,7 +22,5 @@ const mozilla::Module::CIDEntry kXULStoreCIDs[] = {
 const mozilla::Module::ContractIDEntry kXULStoreContracts[] = {
     {NS_XUL_STORE_SERVICE_CONTRACTID, &kNS_XUL_STORE_SERVICE_CID}, {nullptr}};
 
-const mozilla::Module kXULStoreModule = {
+extern const mozilla::Module kXULStoreModule = {
     mozilla::Module::kVersion, kXULStoreCIDs, kXULStoreContracts, nullptr};
-
-NSMODULE_DEFN(nsXULStoreModule) = &kXULStoreModule;
