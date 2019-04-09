@@ -108,7 +108,7 @@ impl Task for PersistTask {
             // Prevent another PersistTask from running until this one finishes.
             // We do this before getting the database to ensure that there is
             // only ever one open database handle at a given time.
-            let _ = PERSIST.lock()?;
+            let _lock = PERSIST.lock()?;
 
             let db = get_database()?;
             let mut writer = db.env.write()?;
