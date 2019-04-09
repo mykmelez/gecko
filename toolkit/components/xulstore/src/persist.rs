@@ -137,7 +137,6 @@ impl Task for PersistTask {
                             // should exist, since it was in the cache!).
                             Err(RkvStoreError::LmdbError(LmdbError::NotFound)) => {
                                 warn!("tried to remove key that isn't in the store");
-                                ()
                             }
 
                             Err(err) => return Err(err.into()),
