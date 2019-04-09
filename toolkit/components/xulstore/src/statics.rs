@@ -7,6 +7,7 @@ use crate::{
     ffi::ProfileChangeObserver,
     make_key, SEPARATOR,
 };
+use moz_task::is_main_thread;
 use nsstring::nsString;
 use rkv::{Rkv, SingleStore, StoreOptions, Value};
 use std::{
@@ -101,6 +102,8 @@ fn get_xulstore_dir() -> XULStoreResult<PathBuf> {
 }
 
 fn observe_profile_change() {
+    assert!(is_main_thread());
+
     // Failure to observe the change isn't fatal (although it means we won't
     // persist XULStore data for this session), so we don't return a result.
     // But we use a closure returning a result to enable use of the ? operator.
