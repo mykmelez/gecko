@@ -28,8 +28,8 @@ mod statics;
 use crate::{
     error::{XULStoreError, XULStoreResult},
     iter::XULStoreIterator,
-    statics::DATA_CACHE,
     persist::persist,
+    statics::DATA_CACHE,
 };
 use nsstring::nsAString;
 use std::fmt::Display;

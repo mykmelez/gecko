@@ -8,14 +8,11 @@ use crate::{
 };
 use crossbeam_utils::atomic::AtomicCell;
 use lmdb::Error as LmdbError;
-use moz_task::{Task, TaskRunnable, create_thread};
+use moz_task::{create_thread, Task, TaskRunnable};
 use nserror::nsresult;
 use rkv::{StoreError as RkvStoreError, Value};
 use std::{collections::HashMap, sync::Mutex, thread::sleep, time::Duration};
-use xpcom::{
-    interfaces::nsIThread,
-    RefPtr, ThreadBoundRefPtr,
-};
+use xpcom::{interfaces::nsIThread, RefPtr, ThreadBoundRefPtr};
 
 /// The XULStore API is synchronous for both C++ and JS consumers and accessed
 /// on the main thread, so we persist its data to disk on a background thread

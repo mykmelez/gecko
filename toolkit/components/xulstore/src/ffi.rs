@@ -26,9 +26,7 @@ use xpcom::{
 // and all of the methods in XULStore.h that access data in the new store
 // similarly trigger instantiation of that static (and thus data migration).
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_constructor(
-    result: *mut *const nsIXULStore,
-) {
+pub unsafe extern "C" fn xulstore_constructor(result: *mut *const nsIXULStore) {
     let xul_store = XULStoreService::new();
     RefPtr::new(xul_store.coerce::<nsIXULStore>()).forget(&mut *result);
 }

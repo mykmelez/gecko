@@ -18,10 +18,7 @@ use std::{
     str,
     sync::Mutex,
 };
-use xpcom::{
-    interfaces::nsIFile,
-    XpCom,
-};
+use xpcom::{interfaces::nsIFile, XpCom};
 
 type XULStoreCache = BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>;
 
@@ -41,7 +38,8 @@ lazy_static! {
         observe_profile_change();
         Mutex::new(get_profile_dir().ok())
     };
-    pub(crate) static ref DATA_CACHE: Mutex<Option<XULStoreCache>> = { Mutex::new(cache_data().ok()) };
+    pub(crate) static ref DATA_CACHE: Mutex<Option<XULStoreCache>> =
+        { Mutex::new(cache_data().ok()) };
 }
 
 pub(crate) fn get_database() -> XULStoreResult<Database> {
@@ -81,7 +79,9 @@ fn get_profile_dir() -> XULStoreResult<PathBuf> {
     let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
     let property = c_str!("ProfD");
     unsafe {
-        dir_svc.Get(property.as_ptr(), &nsIFile::IID, profile_dir.void_ptr()).to_result()?;
+        dir_svc
+            .Get(property.as_ptr(), &nsIFile::IID, profile_dir.void_ptr())
+            .to_result()?;
     }
     let profile_dir = profile_dir.refptr().ok_or(XULStoreError::Unavailable)?;
 
