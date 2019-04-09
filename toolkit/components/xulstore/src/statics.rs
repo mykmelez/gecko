@@ -72,6 +72,12 @@ pub(crate) fn update_profile_dir() {
 }
 
 fn get_profile_dir() -> XULStoreResult<PathBuf> {
+    // We can't use getter_addrefs() here because get_DirectoryService()
+    // returns its nsIProperties interface, and its Get() method returns
+    // a directory via its nsQIResult out param, which gets translated to
+    // a `*mut *mut libc::c_void` in Rust, whereas getter_addrefs() expects
+    // a closure with a `*mut *const T` parameter.
+
     let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
     let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
     let property = CString::new("ProfD")?;
