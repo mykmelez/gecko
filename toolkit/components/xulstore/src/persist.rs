@@ -11,7 +11,7 @@ use lmdb::Error as LmdbError;
 use moz_task::{Task, TaskRunnable, create_thread};
 use nserror::nsresult;
 use rkv::{StoreError as RkvStoreError, Value};
-use std::{collections::HashMap, mem::replace, sync::Mutex, thread::sleep, time::Duration};
+use std::{collections::HashMap, sync::Mutex, thread::sleep, time::Duration};
 use xpcom::{
     interfaces::nsIThread,
     RefPtr, ThreadBoundRefPtr,
@@ -117,7 +117,7 @@ impl Task for PersistTask {
             // with None.  To avoid janking the main thread (if it decides
             // to makes more changes while we're persisting to disk), we only
             // lock the map long enough to move it out of the Mutex.
-            let writes = replace(&mut *CHANGES.lock()?, None);
+            let writes = CHANGES.lock()?.take();
 
             // The Option should be a Some(HashMap) (otherwise the task
             // shouldn't have been scheduled in the first place).  If it's None,
