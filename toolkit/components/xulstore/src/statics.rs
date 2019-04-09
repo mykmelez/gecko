@@ -14,7 +14,6 @@ use std::{
     collections::BTreeMap,
     ffi::CString,
     fs::{create_dir_all, remove_file, File},
-    ops::DerefMut,
     path::PathBuf,
     str,
     sync::Mutex,
@@ -88,7 +87,7 @@ fn get_profile_dir() -> XULStoreResult<PathBuf> {
 
     let mut profile_path = nsString::new();
     unsafe {
-        profile_dir.GetPath(profile_path.deref_mut());
+        profile_dir.GetPath(&mut *profile_path);
     }
 
     let path = String::from_utf16(&profile_path[..])?;
