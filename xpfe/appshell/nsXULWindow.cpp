@@ -50,12 +50,12 @@
 #include "nsGlobalWindow.h"
 #include "XULDocument.h"
 #include "nsXULTooltipListener.h"
-#include "XULStore.h"
 
 #include "prenv.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/XULStore.h"
 #include "mozilla/dom/BarProps.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"

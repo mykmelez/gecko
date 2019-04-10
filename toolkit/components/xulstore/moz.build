@@ -18,7 +18,7 @@ TEST_DIRS += [
     'tests/gtest',
 ]
 
-EXPORTS += [
+EXPORTS.mozilla += [
     'XULStore.h',
 ]
 
@@ -30,6 +30,10 @@ XPIDL_MODULE = 'xulstore'
 
 XPCOM_MANIFESTS += [
     'components.conf',
+]
+
+UNIFIED_SOURCES += [
+    'XULStore.cpp',
 ]
 
 FINAL_LIBRARY = 'xul'

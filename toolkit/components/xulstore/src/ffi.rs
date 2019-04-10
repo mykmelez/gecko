@@ -14,21 +14,10 @@ use xpcom::{
     RefPtr,
 };
 
-// XULStore no longer expresses an XPCOM API.  Instead, JS consumers import
-// xultore.jsm, while C++ consumers include XULStore.h.  But we still construct
-// an nsIXULStore instance in order to support migration from the old store
-// (xulstore.json) to the new one.
-//
-// To ensure migration occurs before the new store is accessed for the first
-// time, regardless of whether the first caller is JS or C++, xulstore.jsm
-// retrieves this service, which triggers lazy instantiation of the "STORE"
-// static (which then migrates data if an old store is present in the profile);
-// and all of the methods in XULStore.h that access data in the new store
-// similarly trigger instantiation of that static (and thus data migration).
 #[no_mangle]
-pub unsafe extern "C" fn xulstore_constructor(result: *mut *const nsIXULStore) {
-    let xul_store = XULStoreService::new();
-    RefPtr::new(xul_store.coerce::<nsIXULStore>()).forget(&mut *result);
+pub unsafe extern "C" fn xulstore_new_service(result: *mut *const nsIXULStore) {
+    let xul_store_service = XULStoreService::new();
+    RefPtr::new(xul_store_service.coerce::<nsIXULStore>()).forget(&mut *result);
 }
 
 #[derive(xpcom)]

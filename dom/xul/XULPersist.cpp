@@ -5,7 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "XULPersist.h"
-#include "XULStore.h"
+#include "mozilla/XULStore.h"
 
 namespace mozilla {
 namespace dom {
