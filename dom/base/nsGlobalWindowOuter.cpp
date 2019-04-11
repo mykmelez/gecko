@@ -2468,7 +2468,6 @@ void nsGlobalWindowOuter::DetachFromDocShell() {
   }
 
   mDocShell = nullptr;
-  mBrowsingContext->ClearDocShell();
 
   if (mFrames) {
     mFrames->SetDocShell(nullptr);
@@ -5613,7 +5612,7 @@ PopupBlocker::PopupControlState nsGlobalWindowOuter::RevisePopupAbuseLevel(
   if ((abuse == PopupBlocker::openAllowed ||
        abuse == PopupBlocker::openControlled) &&
       StaticPrefs::dom_block_multiple_popups() && !PopupWhitelisted() &&
-      !PopupBlocker::TryUsePopupOpeningToken()) {
+      !PopupBlocker::TryUsePopupOpeningToken(mDoc->NodePrincipal())) {
     abuse = PopupBlocker::openBlocked;
   }
 

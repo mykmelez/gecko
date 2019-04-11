@@ -42,12 +42,13 @@ exclude: true
 
 [68.9]: ../GeckoRuntimeSettings.html#setPreferredColorScheme-int-
 
-- Added [`GeckoRuntimeSettings.Builder#configFilePath`][68.10] to set
-  a path to a configuration file from which GeckoView will read
-  configuration options such as Gecko process arguments, environment
-  variables, and preferences.
+- Added [`@NonNull`][66.1] or [`@Nullable`][66.2] to all fields.
 
-[68.10]: ../GeckoRuntimeSettings.Builder.html#configFilePath-java.lang.String-
+- [`RuntimeTelemetry#getSnapshots`][68.10] returns a [`JSONObject`][67.22] now.
+
+[68.10]: ../RuntimeTelemetry.html#getSnapshots-boolean-
+
+- Removed all `org.mozilla.gecko` references in the API.
 
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
@@ -255,4 +256,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: affe9cc5dc22f0700867a1ac7f9b55a033a4b88c
+[api-version]: a5ffe8ea42f0210fc7c64b742ae6d81d03a93e06

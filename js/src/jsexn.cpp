@@ -505,7 +505,7 @@ static bool exn_toSource(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (!sb.append("(new ") || !sb.append(name) || !sb.append("(")) {
     return false;
   }
@@ -679,7 +679,11 @@ void js::ErrorToException(JSContext* cx, JSErrorReport* reportp,
 
   // Throw it.
   RootedValue errValue(cx, ObjectValue(*errObject));
-  cx->setPendingException(errValue);
+  RootedSavedFrame nstack(cx);
+  if (stack) {
+    nstack = &stack->as<SavedFrame>();
+  }
+  cx->setPendingException(errValue, nstack);
 
   // Flag the error report passed in to indicate an exception was raised.
   reportp->flags |= JSREPORT_EXCEPTION;
@@ -1053,7 +1057,7 @@ const char* js::ValueToSourceForError(JSContext* cx, HandleValue val,
     return "<<error converting value to string>>";
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (val.isObject()) {
     RootedObject valObj(cx, val.toObjectOrNull());
     ESClass cls;

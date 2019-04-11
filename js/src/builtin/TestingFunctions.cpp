@@ -488,7 +488,8 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("allocationThreshold", JSGC_ALLOCATION_THRESHOLD, true)                  \
   _("minEmptyChunkCount", JSGC_MIN_EMPTY_CHUNK_COUNT, true)                  \
   _("maxEmptyChunkCount", JSGC_MAX_EMPTY_CHUNK_COUNT, true)                  \
-  _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)
+  _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)                      \
+  _("minLastDitchGCPeriod", JSGC_MIN_LAST_DITCH_GC_PERIOD, true)
 
 static const struct ParamInfo {
   const char* name;
@@ -3908,13 +3909,13 @@ static bool EvalReturningScope(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedScript script(cx);
-  if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script)) {
+  RootedScript script(cx, JS::CompileForNonSyntacticScope(cx, options, srcBuf));
+  if (!script) {
     return false;
   }
 
   if (global) {
-    global = CheckedUnwrapDynamic(global, cx);
+    global = CheckedUnwrapDynamic(global, cx, /* stopAtWindowProxy = */ false);
     if (!global) {
       JS_ReportErrorASCII(cx, "Permission denied to access global");
       return false;
@@ -4012,12 +4013,12 @@ static bool ShellCloneAndExecuteScript(JSContext* cx, unsigned argc,
     return false;
   }
 
-  RootedScript script(cx);
-  if (!JS::Compile(cx, options, srcBuf, &script)) {
+  RootedScript script(cx, JS::Compile(cx, options, srcBuf));
+  if (!script) {
     return false;
   }
 
-  global = CheckedUnwrapDynamic(global, cx);
+  global = CheckedUnwrapDynamic(global, cx, /* stopAtWindowProxy = */ false);
   if (!global) {
     JS_ReportErrorASCII(cx, "Permission denied to access global");
     return false;
@@ -4384,7 +4385,7 @@ static bool GetLcovInfo(JSContext* cx, unsigned argc, Value* vp) {
       JS_ReportErrorASCII(cx, "Permission denied to access global");
       return false;
     }
-    global = CheckedUnwrapDynamic(global, cx);
+    global = CheckedUnwrapDynamic(global, cx, /* stopAtWindowProxy = */ false);
     if (!global) {
       ReportAccessDenied(cx);
       return false;
@@ -5323,7 +5324,7 @@ static bool ObjectGlobal(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject obj(cx, &args[0].toObject());
-  if (IsWrapper(obj)) {
+  if (IsCrossCompartmentWrapper(obj)) {
     args.rval().setNull();
     return true;
   }
@@ -5431,12 +5432,8 @@ JSScript* js::TestingFunctionArgumentToScript(
       return nullptr;
     }
 
-    RootedScript script(cx);
     CompileOptions options(cx);
-    if (!JS::Compile(cx, options, source, &script)) {
-      return nullptr;
-    }
-    return script;
+    return JS::Compile(cx, options, source);
   }
 
   RootedFunction fun(cx, JS_ValueToFunction(cx, v));

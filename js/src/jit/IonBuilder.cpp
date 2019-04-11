@@ -1967,6 +1967,9 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
       return jsop_compare(op);
 
     case JSOP_DOUBLE:
+      pushConstant(GET_INLINE_VALUE(pc));
+      return Ok();
+
     case JSOP_BIGINT:
       pushConstant(info().getConst(pc));
       return Ok();
@@ -9246,6 +9249,9 @@ TemporaryTypeSet* IonBuilder::computeHeapType(const TemporaryTypeSet* objTypes,
 
   for (unsigned i = 0; i < objTypes->getObjectCount(); i++) {
     TypeSet::ObjectKey* key = objTypes->getObject(i);
+    if (!key) {
+      continue;
+    }
 
     if (key->unknownProperties()) {
       return nullptr;
