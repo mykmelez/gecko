@@ -429,7 +429,7 @@ nsDocShell::~nsDocShell() {
   Destroy();
 
   if (mSessionHistory) {
-    mSessionHistory->LegacySHistory()->SetRootDocShell(nullptr);
+    mSessionHistory->LegacySHistory()->ClearRootDocShell();
   }
 
   if (--gDocShellCount == 0) {
@@ -4545,8 +4545,7 @@ nsDocShell::Reload(uint32_t aReloadFlags) {
   RefPtr<ChildSHistory> rootSH = GetRootSessionHistory();
   bool canReload = true;
   if (rootSH) {
-    rootSH->LegacySHistory()->NotifyOnHistoryReload(mCurrentURI, aReloadFlags,
-                                                    &canReload);
+    rootSH->LegacySHistory()->NotifyOnHistoryReload(&canReload);
   }
 
   if (!canReload) {
@@ -10922,9 +10921,9 @@ nsDocShell::AddState(JS::Handle<JS::Value> aData, const nsAString& aTitle,
   }
 
   // Check that the state object isn't too long.
-  // Default max length: 640k bytes.
+  // Default max length: 2097152 (0x200000) bytes.
   int32_t maxStateObjSize =
-      Preferences::GetInt("browser.history.maxStateObjectSize", 0xA0000);
+      Preferences::GetInt("browser.history.maxStateObjectSize", 2097152);
   if (maxStateObjSize < 0) {
     maxStateObjSize = 0;
   }

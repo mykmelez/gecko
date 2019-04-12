@@ -2367,7 +2367,7 @@ bool BytecodeEmitter::emitSetThis(BinaryNode* setThisNode) {
     return false;
   }
 
-  if (!emitInitializeInstanceFields()) {
+  if (!emitInitializeInstanceFields(IsSuperCall::Yes)) {
     return false;
   }
 
@@ -4680,6 +4680,17 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitTry(TryNode* tryNode) {
 }
 
 MOZ_MUST_USE bool BytecodeEmitter::emitGoSub(JumpList* jump) {
+  // Emit the following:
+  //
+  //   JSOP_FALSE
+  //   JSOP_RESUMEINDEX <resumeIndex>
+  //   JSOP_GOSUB <target>
+  //  resumeOffset:
+  //   JSOP_JUMPTARGET
+  //
+  // The order is important: the Baseline Interpreter relies on JSOP_JUMPTARGET
+  // setting the frame's ICEntry when resuming at resumeOffset.
+
   if (!emit1(JSOP_FALSE)) {
     return false;
   }
@@ -4689,7 +4700,7 @@ MOZ_MUST_USE bool BytecodeEmitter::emitGoSub(JumpList* jump) {
     return false;
   }
 
-  if (!emitJump(JSOP_GOSUB, jump)) {
+  if (!emitJumpNoFallthrough(JSOP_GOSUB, jump)) {
     return false;
   }
 
@@ -4699,7 +4710,9 @@ MOZ_MUST_USE bool BytecodeEmitter::emitGoSub(JumpList* jump) {
   }
 
   SET_RESUMEINDEX(bytecodeSection().code(off), resumeIndex);
-  return true;
+
+  JumpTarget target;
+  return emitJumpTarget(&target);
 }
 
 bool BytecodeEmitter::emitIf(TernaryNode* ifNode) {
@@ -7962,7 +7975,7 @@ bool BytecodeEmitter::emitCreateFieldKeys(ListNode* obj) {
   }
 
   if (!emitUint32Operand(JSOP_NEWARRAY, numFieldKeys)) {
-    //            [stack] ARRAY
+    //              [stack] ARRAY
     return false;
   }
 
@@ -7990,12 +8003,12 @@ bool BytecodeEmitter::emitCreateFieldKeys(ListNode* obj) {
   MOZ_ASSERT(curFieldKeyIndex == numFieldKeys);
 
   if (!noe.emitAssignment()) {
-    //            [stack] ARRAY
+    //              [stack] ARRAY
     return false;
   }
 
   if (!emit1(JSOP_POP)) {
-    //            [stack]
+    //              [stack]
     return false;
   }
 
@@ -8022,7 +8035,7 @@ bool BytecodeEmitter::emitCreateFieldInitializers(ListNode* obj) {
   }
 
   if (!emitUint32Operand(JSOP_NEWARRAY, numFields)) {
-    //            [stack] CTOR? OBJ ARRAY
+    //              [stack] CTOR? OBJ ARRAY
     return false;
   }
 
@@ -8035,12 +8048,12 @@ bool BytecodeEmitter::emitCreateFieldInitializers(ListNode* obj) {
       }
 
       if (!emitTree(initializer)) {
-        //        [stack] CTOR? OBJ ARRAY LAMBDA
+        //          [stack] CTOR? OBJ ARRAY LAMBDA
         return false;
       }
 
       if (!emitUint32Operand(JSOP_INITELEM_ARRAY, curFieldIndex)) {
-        //        [stack] CTOR? OBJ ARRAY
+        //          [stack] CTOR? OBJ ARRAY
         return false;
       }
 
@@ -8049,12 +8062,12 @@ bool BytecodeEmitter::emitCreateFieldInitializers(ListNode* obj) {
   }
 
   if (!noe.emitAssignment()) {
-    //            [stack] CTOR? OBJ ARRAY
+    //              [stack] CTOR? OBJ ARRAY
     return false;
   }
 
   if (!emit1(JSOP_POP)) {
-    //            [stack] CTOR? OBJ
+    //              [stack] CTOR? OBJ
     return false;
   }
 
@@ -8092,7 +8105,38 @@ const FieldInitializers& BytecodeEmitter::findFieldInitializersForCall() {
   MOZ_CRASH("Constructor for field initializers not found.");
 }
 
-bool BytecodeEmitter::emitInitializeInstanceFields() {
+bool BytecodeEmitter::emitCopyInitializersToLocalInitializers() {
+  MOZ_ASSERT(sc->asFunctionBox()->isDerivedClassConstructor());
+  if (getFieldInitializers().numFieldInitializers == 0) {
+    return true;
+  }
+
+  NameOpEmitter noe(this, cx->names().dotLocalInitializers,
+                    NameOpEmitter::Kind::Initialize);
+  if (!noe.prepareForRhs()) {
+    //              [stack]
+    return false;
+  }
+
+  if (!emitGetName(cx->names().dotInitializers)) {
+    //              [stack] .initializers
+    return false;
+  }
+
+  if (!noe.emitAssignment()) {
+    //              [stack] .initializers
+    return false;
+  }
+
+  if (!emit1(JSOP_POP)) {
+    //              [stack]
+    return false;
+  }
+
+  return true;
+}
+
+bool BytecodeEmitter::emitInitializeInstanceFields(IsSuperCall isSuperCall) {
   const FieldInitializers& fieldInitializers = findFieldInitializersForCall();
   size_t numFields = fieldInitializers.numFieldInitializers;
 
@@ -8100,9 +8144,16 @@ bool BytecodeEmitter::emitInitializeInstanceFields() {
     return true;
   }
 
-  if (!emitGetName(cx->names().dotInitializers)) {
-    //              [stack] ARRAY
-    return false;
+  if (isSuperCall == IsSuperCall::Yes) {
+    if (!emitGetName(cx->names().dotLocalInitializers)) {
+      //            [stack] ARRAY
+      return false;
+    }
+  } else {
+    if (!emitGetName(cx->names().dotInitializers)) {
+      //            [stack] ARRAY
+      return false;
+    }
   }
 
   for (size_t fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
@@ -8670,8 +8721,12 @@ bool BytecodeEmitter::emitClass(
       MOZ_ASSERT(names->outerBinding()->name() == innerName);
       kind = ClassEmitter::Kind::Declaration;
     }
+  }
 
-    if (!ce.emitScopeForNamedClass(classNode->scopeBindings())) {
+  if (!classNode->isEmptyScope()) {
+    if (!ce.emitScope(classNode->scopeBindings(),
+                      classNode->names() ? ClassEmitter::HasName::Yes
+                                         : ClassEmitter::HasName::No)) {
       //            [stack]
       return false;
     }

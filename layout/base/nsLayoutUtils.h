@@ -1779,10 +1779,6 @@ class nsLayoutUtils {
    *   The nsIFrame that we're drawing this image for.
    * @param aImage
    *   The image.
-   * @param aImageSize
-   *  The unscaled size of the image being drawn. (This might be the image's
-   *  size if no scaling occurs, or it might be the image's size if the image is
-   *  a vector image being rendered at that size.)
    * @param aDest
    *  The position and scaled area where one copy of the image should be drawn.
    *  This area represents the image itself in its correct position as defined
@@ -1803,10 +1799,10 @@ class nsLayoutUtils {
    */
   static ImgDrawResult DrawBackgroundImage(
       gfxContext& aContext, nsIFrame* aForFrame, nsPresContext* aPresContext,
-      imgIContainer* aImage, const CSSIntSize& aImageSize,
-      SamplingFilter aSamplingFilter, const nsRect& aDest, const nsRect& aFill,
-      const nsSize& aRepeatSize, const nsPoint& aAnchor, const nsRect& aDirty,
-      uint32_t aImageFlags, ExtendMode aExtendMode, float aOpacity);
+      imgIContainer* aImage, SamplingFilter aSamplingFilter,
+      const nsRect& aDest, const nsRect& aFill, const nsSize& aRepeatSize,
+      const nsPoint& aAnchor, const nsRect& aDirty, uint32_t aImageFlags,
+      ExtendMode aExtendMode, float aOpacity);
 
   /**
    * Draw an image.
@@ -3022,57 +3018,17 @@ class nsLayoutUtils {
   }
 
   /**
-   * Resolve a CSS <length-percentage> value to a definite size.
-   */
-  template <bool clampNegativeResultToZero>
-  static nscoord ResolveToLength(const nsStyleCoord& aCoord,
-                                 nscoord aPercentageBasis) {
-    NS_WARNING_ASSERTION(aPercentageBasis >= nscoord(0), "nscoord overflow?");
-
-    switch (aCoord.GetUnit()) {
-      case eStyleUnit_Coord:
-        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetCoordValue() >= 0,
-                   "This value should have been rejected by the style system");
-        return aCoord.GetCoordValue();
-      case eStyleUnit_Percent:
-        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
-          return nscoord(0);
-        }
-        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetPercentValue() >= 0,
-                   "This value should have been rejected by the style system");
-        return NSToCoordFloorClamped(aPercentageBasis *
-                                     aCoord.GetPercentValue());
-      case eStyleUnit_Calc: {
-        nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
-        nscoord result;
-        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
-          result = calc->mLength;
-        } else {
-          result = calc->mLength +
-                   NSToCoordFloorClamped(aPercentageBasis * calc->mPercent);
-        }
-        if (clampNegativeResultToZero && result < 0) {
-          return nscoord(0);
-        }
-        return result;
-      }
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unexpected unit!");
-        return nscoord(0);
-    }
-  }
-
-  /**
    * Resolve a column-gap/row-gap to a definite size.
    * @note This method resolves 'normal' to zero.
    *   Callers who want different behavior should handle 'normal' on their own.
    */
-  static nscoord ResolveGapToLength(const nsStyleCoord& aGap,
-                                    nscoord aPercentageBasis) {
-    if (aGap.GetUnit() == eStyleUnit_Normal) {
+  static nscoord ResolveGapToLength(
+      const mozilla::NonNegativeLengthPercentageOrNormal& aGap,
+      nscoord aPercentageBasis) {
+    if (aGap.IsNormal()) {
       return nscoord(0);
     }
-    return ResolveToLength<true>(aGap, aPercentageBasis);
+    return ResolveToLength<true>(aGap.AsLengthPercentage(), aPercentageBasis);
   }
 
   /**
