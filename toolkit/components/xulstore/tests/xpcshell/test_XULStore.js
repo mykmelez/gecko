@@ -1,12 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
- * https://creativecommons.org/publicdomain/zero/1.0/ */
+   http://creativecommons.org/publicdomain/zero/1.0/◦
+*/
 
 "use strict";
 
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var XULStore = null;
-
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";
 
@@ -25,11 +25,11 @@ function checkValueExists(uri, id, attr, exists) {
 }
 
 function getIDs(uri) {
-  return Array.from(XULStore.getIDs(uri)).sort();
+  return Array.from(XULStore.getIDsEnumerator(uri)).sort();
 }
 
 function getAttributes(uri, id) {
-  return Array.from(XULStore.getAttributes(uri, id)).sort();
+  return Array.from(XULStore.getAttributeEnumerator(uri, id)).sort();
 }
 
 function checkArrays(a, b) {
