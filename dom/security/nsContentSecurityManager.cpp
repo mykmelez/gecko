@@ -101,7 +101,8 @@ bool nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
   nsCOMPtr<nsITabChild> tabChild = do_QueryInterface(context);
   nsCOMPtr<Document> doc;
   if (tabChild) {
-    doc = static_cast<mozilla::dom::TabChild*>(tabChild.get())->GetDocument();
+    doc = static_cast<mozilla::dom::TabChild*>(tabChild.get())
+              ->GetTopLevelDocument();
   }
   NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(dataSpec));
   const char16_t* params[] = {specUTF16.get()};
@@ -776,6 +777,30 @@ static void AssertSystemPrincipalMustNotLoadRemoteDocuments(
       !nsContentUtils::SchemeIs(finalURI, "ftp")) {
     return;
   }
+
+  // FIXME The discovery feature in about:addons uses the SystemPrincpal.
+  // We should remove this exception with bug 1544011.
+  static nsAutoCString sDiscoveryPrePath;
+  static bool recvdPrefValue = false;
+  if (!recvdPrefValue) {
+    nsAutoCString discoveryURLString;
+    Preferences::GetCString("extensions.webservice.discoverURL",
+                            discoveryURLString);
+    // discoverURL is by default suffixed with parameters in path like
+    // /%LOCALE%/ so, we use the prePath for comparison
+    nsCOMPtr<nsIURI> discoveryURL;
+    NS_NewURI(getter_AddRefs(discoveryURL), discoveryURLString);
+    if (discoveryURL) {
+      discoveryURL->GetPrePath(sDiscoveryPrePath);
+    }
+    recvdPrefValue = true;
+  }
+  nsAutoCString requestedPrePath;
+  finalURI->GetPrePath(requestedPrePath);
+  if (requestedPrePath.Equals(sDiscoveryPrePath)) {
+    return;
+  }
+
   if (xpc::AreNonLocalConnectionsDisabled()) {
     bool disallowSystemPrincipalRemoteDocuments = Preferences::GetBool(
         "security.disallow_non_local_systemprincipal_in_tests");

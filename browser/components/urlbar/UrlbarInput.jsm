@@ -97,6 +97,9 @@ class UrlbarInput {
     this._suppressStartQuery = false;
     this._untrimmedValue = "";
 
+    // This exists only for tests.
+    this._enableAutofillPlaceholder = true;
+
     // Forward textbox methods and properties.
     const METHODS = ["addEventListener", "removeEventListener",
       "setAttribute", "hasAttribute", "removeAttribute", "getAttribute",
@@ -135,6 +138,13 @@ class UrlbarInput {
     XPCOMUtils.defineLazyGetter(this, "valueFormatter", () => {
       return new UrlbarValueFormatter(this);
     });
+
+    // If the toolbar is not visible in this window or the urlbar is readonly,
+    // we'll stop here, so that most properties of the input object are valid,
+    // but we won't handle events.
+    if (!this.window.toolbar.visible || this.hasAttribute("readonly")) {
+      return;
+    }
 
     // The event bufferer can be used to defer events that may affect users
     // muscle memory; for example quickly pressing DOWN+ENTER should end up
@@ -208,7 +218,10 @@ class UrlbarInput {
    * Applies styling to the text in the urlbar input, depending on the text.
    */
   formatValue() {
-    this.valueFormatter.update();
+    // The editor may not exist if the toolbar is not visible.
+    if (this.editor) {
+      this.valueFormatter.update();
+    }
   }
 
   /**
@@ -495,7 +508,8 @@ class UrlbarInput {
     // Also update userTypedValue. See bug 287996.
     this.window.gBrowser.userTypedValue = this.value;
 
-    // The value setter clobbers the actiontype attribute, so update this after that.
+    // The value setter clobbers the actiontype attribute, so update this after
+    // that.
     if (result) {
       switch (result.type) {
         case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
@@ -508,6 +522,38 @@ class UrlbarInput {
     }
 
     return !!canonizedUrl;
+  }
+
+  /**
+   * Called by the controller when the first result of a new search is received.
+   * If it's an autofill result, then it may need to be autofilled, subject to a
+   * few restrictions.
+   *
+   * @param {UrlbarResult} result
+   *   The first result.
+   */
+  autofillFirstResult(result) {
+    if (!result.autofill) {
+      return;
+    }
+
+    let isPlaceholderSelected =
+      this.selectionEnd == this._autofillPlaceholder.length &&
+      this.selectionStart == this._lastSearchString.length &&
+      this._autofillPlaceholder.toLocaleLowerCase()
+        .startsWith(this._lastSearchString.toLocaleLowerCase());
+
+    // Don't autofill if there's already a selection (with one caveat described
+    // next) or the cursor isn't at the end of the input.  But if there is a
+    // selection and it's the autofill placeholder value, then do autofill.
+    if (!isPlaceholderSelected &&
+        (this.selectionStart != this.selectionEnd ||
+         this.selectionEnd != this._lastSearchString.length)) {
+      return;
+    }
+
+    let { value, selectionStart, selectionEnd } = result.autofill;
+    this._autofillValue(value, selectionStart, selectionEnd);
   }
 
   /**
@@ -737,7 +783,8 @@ class UrlbarInput {
           .startsWith(value.toLocaleLowerCase())) {
       this._autofillPlaceholder = "";
     } else if (this._autofillPlaceholder &&
-               this.selectionEnd == this.value.length) {
+               this.selectionEnd == this.value.length &&
+               this._enableAutofillPlaceholder) {
       let autofillValue =
         value + this._autofillPlaceholder.substring(value.length);
       this._autofillValue(autofillValue, value.length, autofillValue.length);
@@ -1159,7 +1206,7 @@ class UrlbarInput {
    * We use the observer service, so that we don't need to load extra facilities
    * if they aren't being used, e.g. WebNavigation.
    *
-   * @param {UrlbarResult} [result]
+   * @param {UrlbarResult} result
    *   The result that was selected, if any.
    */
   _notifyStartNavigation(result) {

@@ -415,6 +415,17 @@ void PrototypeDocumentContentSink::CloseElement(Element* aElement) {
 }
 
 nsresult PrototypeDocumentContentSink::ResumeWalk() {
+  nsresult rv = ResumeWalkInternal();
+  if (NS_FAILED(rv)) {
+    nsContentUtils::ReportToConsoleNonLocalized(
+        NS_LITERAL_STRING("Failed to load document from prototype document."),
+        nsIScriptError::errorFlag, NS_LITERAL_CSTRING("Prototype Document"),
+        mDocument, mDocumentURI);
+  }
+  return rv;
+}
+
+nsresult PrototypeDocumentContentSink::ResumeWalkInternal() {
   MOZ_ASSERT(mStillWalking);
   // Walk the prototype and build the delegate content model. The
   // walk is performed in a top-down, left-to-right fashion. That
@@ -1034,6 +1045,15 @@ nsresult PrototypeDocumentContentSink::CreateElementFromPrototype(
 
     rv = AddAttributes(aPrototype, result);
     if (NS_FAILED(rv)) return rv;
+
+    if (xtfNi->Equals(nsGkAtoms::script, kNameSpaceID_XHTML) ||
+        xtfNi->Equals(nsGkAtoms::script, kNameSpaceID_SVG)) {
+      nsCOMPtr<nsIScriptElement> sele = do_QueryInterface(result);
+      MOZ_ASSERT(sele, "Node didn't QI to script.");
+      // Script loading is handled by the this content sink, so prevent the
+      // script from loading when it is bound to the document.
+      sele->PreventExecution();
+    }
   }
 
   result.forget(aResult);

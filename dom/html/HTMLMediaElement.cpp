@@ -164,7 +164,7 @@ static const double MAX_PLAYBACKRATE = 16.0;
 // muted
 static const double THRESHOLD_HIGH_PLAYBACKRATE_AUDIO = 4.0;
 // Threshold under which audio is muted
-static const double THRESHOLD_LOW_PLAYBACKRATE_AUDIO = 0.5;
+static const double THRESHOLD_LOW_PLAYBACKRATE_AUDIO = 0.25;
 
 static double ClampPlaybackRate(double aPlaybackRate) {
   MOZ_ASSERT(aPlaybackRate >= 0.0);
@@ -4097,19 +4097,7 @@ nsresult HTMLMediaElement::BindToTree(Document* aDocument, nsIContent* aParent,
   if (IsInComposedDoc()) {
     // Construct Shadow Root so web content can be hidden in the DOM.
     AttachAndSetUAShadowRoot();
-#ifdef ANDROID
     NotifyUAWidgetSetupOrChange();
-#else
-    // We don't want to call into JS if the website never asks for native
-    // video controls.
-    // If controls attribute is set later, controls is constructed lazily
-    // with the UAWidgetAttributeChanged event.
-    // This only applies to Desktop because on Fennec we would need to show
-    // an UI if the video is blocked.
-    if (Controls()) {
-      NotifyUAWidgetSetupOrChange();
-    }
-#endif
   }
 
   mUnboundFromTree = false;

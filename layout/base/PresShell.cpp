@@ -468,6 +468,7 @@ class MOZ_STACK_CLASS nsPresShellEventCB : public EventDispatchingCallback {
  public:
   explicit nsPresShellEventCB(PresShell* aPresShell) : mPresShell(aPresShell) {}
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void HandleEvent(EventChainPostVisitor& aVisitor) override {
     if (aVisitor.mPresContext && aVisitor.mEvent->mClass != eBasicEventClass) {
       if (aVisitor.mEvent->mMessage == eMouseDown ||
@@ -477,7 +478,7 @@ class MOZ_STACK_CLASS nsPresShellEventCB : public EventDispatchingCallback {
         // layout. Bring layout up-to-date now so that GetCurrentEventFrame()
         // below will return a real frame and we don't have to worry about
         // destroying it by flushing later.
-        mPresShell->FlushPendingNotifications(FlushType::Layout);
+        MOZ_KnownLive(mPresShell)->FlushPendingNotifications(FlushType::Layout);
       } else if (aVisitor.mEvent->mMessage == eWheel &&
                  aVisitor.mEventStatus != nsEventStatus_eConsumeNoDefault) {
         nsIFrame* frame = mPresShell->GetCurrentEventFrame();
@@ -944,6 +945,11 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
   mPresContext->AttachPresShell(this);
 
   mPresContext->DeviceContext()->InitFontCache();
+
+  // FIXME(emilio, bug 1544185): Some Android code somehow depends on the shell
+  // being eagerly registered as a style flush observer. This shouldn't be
+  // needed otherwise.
+  EnsureStyleFlush();
 
   // Add the preference style sheet.
   UpdatePreferenceStyles();
@@ -3902,7 +3908,7 @@ void nsIPresShell::CancelPostedReflowCallbacks() {
   }
 }
 
-void nsIPresShell::HandlePostedReflowCallbacks(bool aInterruptible) {
+void PresShell::HandlePostedReflowCallbacks(bool aInterruptible) {
   bool shouldFlush = false;
 
   while (mFirstCallbackEventRequest) {
@@ -5072,9 +5078,7 @@ static bool IsTransparentContainerElement(nsPresContext* aPresContext) {
   if (tab) {
     // Check if presShell is the top PresShell. Only the top can
     // influence the canvas background color.
-    PresShell* presShell = aPresContext->GetPresShell();
-    nsCOMPtr<nsIPresShell> topPresShell = tab->GetPresShell();
-    if (presShell != topPresShell) {
+    if (aPresContext->GetPresShell() != tab->GetTopLevelPresShell()) {
       tab = nullptr;
     }
   }
@@ -5443,8 +5447,7 @@ void PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll) {
   // XXX set event.mModifiers ?
   // XXX mnakano I think that we should get the latest information from widget.
 
-  nsCOMPtr<nsIPresShell> shell = pointVM->GetPresShell();
-  if (shell) {
+  if (RefPtr<PresShell> presShell = pointVM->GetPresShell()) {
     // Since this gets run in a refresh tick there isn't an InputAPZContext on
     // the stack from the nsBaseWidget. We need to simulate one with at least
     // the correct target guid, so that the correct callback transform gets
@@ -5452,7 +5455,7 @@ void PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll) {
     // to 0 because this is a synthetic event which doesn't really belong to any
     // input block. Same for the APZ response field.
     InputAPZContext apzContext(mMouseEventTargetGuid, 0, nsEventStatus_eIgnore);
-    shell->DispatchSynthMouseMove(&event);
+    presShell->DispatchSynthMouseMove(&event);
   }
 
   if (!aFromScroll) {
@@ -5523,7 +5526,7 @@ void PresShell::ClearApproximateFrameVisibilityVisited(nsView* aView,
                                                        bool aClear) {
   nsViewManager* vm = aView->GetViewManager();
   if (aClear) {
-    PresShell* presShell = static_cast<PresShell*>(vm->GetPresShell());
+    PresShell* presShell = vm->GetPresShell();
     if (!presShell->mApproximateFrameVisibilityVisited) {
       presShell->ClearApproximatelyVisibleFramesList();
     }
@@ -6227,9 +6230,9 @@ already_AddRefed<nsPIDOMWindowOuter> PresShell::GetRootWindow() {
 
   // If we don't have DOM window, we're zombie, we should find the root window
   // with our parent shell.
-  nsCOMPtr<nsIPresShell> parent = GetParentPresShellForEventHandling();
-  NS_ENSURE_TRUE(parent, nullptr);
-  return parent->GetRootWindow();
+  RefPtr<PresShell> parentPresShell = GetParentPresShellForEventHandling();
+  NS_ENSURE_TRUE(parentPresShell, nullptr);
+  return parentPresShell->GetRootWindow();
 }
 
 already_AddRefed<nsPIDOMWindowOuter>
@@ -6255,7 +6258,7 @@ already_AddRefed<nsIContent> nsIPresShell::GetFocusedContentInOurWindow()
   return nullptr;
 }
 
-already_AddRefed<nsIPresShell> PresShell::GetParentPresShellForEventHandling() {
+already_AddRefed<PresShell> PresShell::GetParentPresShellForEventHandling() {
   NS_ENSURE_TRUE(mPresContext, nullptr);
 
   // Now, find the parent pres shell and send the event there
@@ -6272,7 +6275,7 @@ already_AddRefed<nsIPresShell> PresShell::GetParentPresShellForEventHandling() {
   nsCOMPtr<nsIDocShell> parentDocShell = do_QueryInterface(parentTreeItem);
   NS_ENSURE_TRUE(parentDocShell && treeItem != parentTreeItem, nullptr);
 
-  nsCOMPtr<nsIPresShell> parentPresShell = parentDocShell->GetPresShell();
+  RefPtr<PresShell> parentPresShell = parentDocShell->GetPresShell();
   return parentPresShell.forget();
 }
 
@@ -6283,7 +6286,7 @@ nsresult PresShell::EventHandler::RetargetEventToParent(
   // or a root content is not present.
   // That way at least the UI key bindings can work.
 
-  nsCOMPtr<nsIPresShell> parentPresShell = GetParentPresShellForEventHandling();
+  RefPtr<PresShell> parentPresShell = GetParentPresShellForEventHandling();
   NS_ENSURE_TRUE(parentPresShell, NS_ERROR_FAILURE);
 
   // Fake the event as though it's from the parent pres shell's root frame.
@@ -6739,7 +6742,7 @@ bool PresShell::EventHandler::MaybeFlushPendingNotifications(
       uint64_t framesConstructedCount = presContext->FramesConstructedCount();
       uint64_t framesReflowedCount = presContext->FramesReflowedCount();
 
-      mPresShell->FlushPendingNotifications(FlushType::Layout);
+      MOZ_KnownLive(mPresShell)->FlushPendingNotifications(FlushType::Layout);
       return framesConstructedCount != presContext->FramesConstructedCount() ||
              framesReflowedCount != presContext->FramesReflowedCount();
     }
@@ -8964,7 +8967,7 @@ void nsIPresShell::WillDoReflow() {
   mLastReflowStart = GetPerformanceNowUnclamped();
 }
 
-void nsIPresShell::DidDoReflow(bool aInterruptible) {
+void PresShell::DidDoReflow(bool aInterruptible) {
   HandlePostedReflowCallbacks(aInterruptible);
 
   nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
@@ -9278,7 +9281,7 @@ void nsIPresShell::DoVerifyReflow() {
 // used with Telemetry metrics
 #define NS_LONG_REFLOW_TIME_MS 5000
 
-bool nsIPresShell::ProcessReflowCommands(bool aInterruptible) {
+bool PresShell::ProcessReflowCommands(bool aInterruptible) {
   if (mDirtyRoots.IsEmpty() && !mShouldUnsuppressPainting) {
     // Nothing to do; bail out
     return true;
@@ -10756,7 +10759,7 @@ bool nsIPresShell::DetermineFontSizeInflationState() {
 
   // Force-enabling font inflation always trumps the heuristics here.
   if (!FontSizeInflationForceEnabled()) {
-    if (TabChild* tab = TabChild::GetFrom(this)) {
+    if (TabChild* tab = TabChild::GetFrom(static_cast<PresShell*>(this))) {
       // We're in a child process.  Cancel inflation if we're not
       // async-pan zoomed.
       if (!tab->AsyncPanZoomEnabled()) {

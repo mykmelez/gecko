@@ -354,6 +354,7 @@ class nsDocumentViewer final : public nsIContentViewer,
   already_AddRefed<nsINode> GetPopupLinkNode();
   already_AddRefed<nsIImageLoadingContent> GetPopupImageNode();
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   nsresult GetContentSizeInternal(int32_t* aWidth, int32_t* aHeight,
                                   nscoord aMaxWidth, nscoord aMaxHeight);
 
@@ -2515,8 +2516,9 @@ NS_IMETHODIMP nsDocumentViewer::SelectAll() {
 }
 
 NS_IMETHODIMP nsDocumentViewer::CopySelection() {
+  RefPtr<PresShell> presShell = mPresShell;
   nsCopySupport::FireClipboardEvent(eCopy, nsIClipboard::kGlobalClipboard,
-                                    mPresShell, nullptr);
+                                    presShell, nullptr);
   return NS_OK;
 }
 

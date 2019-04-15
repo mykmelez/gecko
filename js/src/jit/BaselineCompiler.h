@@ -205,7 +205,7 @@ namespace jit {
   _(JSOP_YIELD)                 \
   _(JSOP_AWAIT)                 \
   _(JSOP_TRYSKIPAWAIT)          \
-  _(JSOP_DEBUGAFTERYIELD)       \
+  _(JSOP_AFTERYIELD)            \
   _(JSOP_FINALYIELDRVAL)        \
   _(JSOP_RESUME)                \
   _(JSOP_ASYNCAWAIT)            \
@@ -476,11 +476,17 @@ class BaselineCodeGen {
   MOZ_MUST_USE bool emitStackCheck();
   MOZ_MUST_USE bool emitArgumentTypeChecks();
   MOZ_MUST_USE bool emitDebugPrologue();
+
+  template <typename F1, typename F2>
+  MOZ_MUST_USE bool initEnvironmentChainHelper(const F1& initFunctionEnv,
+                                               const F2& initGlobalOrEvalEnv,
+                                               Register scratch);
   MOZ_MUST_USE bool initEnvironmentChain();
 
   MOZ_MUST_USE bool emitTraceLoggerEnter();
   MOZ_MUST_USE bool emitTraceLoggerExit();
 
+  void emitInitFrameFields();
   void emitIsDebuggeeCheck();
   void emitInitializeLocals();
   void emitPreInitEnvironmentChain(Register nonFunctionEnv);

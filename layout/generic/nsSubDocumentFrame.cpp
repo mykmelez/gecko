@@ -56,8 +56,8 @@ static Document* GetDocumentFromView(nsView* aView) {
   MOZ_ASSERT(aView, "null view");
 
   nsViewManager* vm = aView->GetViewManager();
-  nsIPresShell* ps = vm ? vm->GetPresShell() : nullptr;
-  return ps ? ps->GetDocument() : nullptr;
+  PresShell* presShell = vm ? vm->GetPresShell() : nullptr;
+  return presShell ? presShell->GetDocument() : nullptr;
 }
 
 nsSubDocumentFrame::nsSubDocumentFrame(ComputedStyle* aStyle,
@@ -236,7 +236,7 @@ nsIPresShell* nsSubDocumentFrame::GetSubdocumentPresShellForPainting(
       if (!mFrameLoader) return nullptr;
       nsIDocShell* docShell = mFrameLoader->GetDocShell(IgnoreErrors());
       if (!docShell) return nullptr;
-      presShell = static_cast<mozilla::PresShell*>(docShell->GetPresShell());
+      presShell = docShell->GetPresShell();
     }
   }
 
@@ -904,7 +904,7 @@ class nsHideViewer : public Runnable {
     NS_ASSERTION(mPresShell, "Must have a presshell");
   }
 
-  NS_IMETHOD Run() override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override {
     // Flush frames, to ensure any pending display:none changes are made.
     // Note it can be unsafe to flush if we've destroyed the presentation
     // for some other reason, like if we're shutting down.
@@ -918,7 +918,7 @@ class nsHideViewer : public Runnable {
     //
     // We should find some way to avoid that!
     if (!mPresShell->IsDestroying() && mFrameElement->IsInComposedDoc()) {
-      mPresShell->FlushPendingNotifications(FlushType::Frames);
+      MOZ_KnownLive(mPresShell)->FlushPendingNotifications(FlushType::Frames);
     }
 
     // Either the frame has been constructed by now, or it never will be,
@@ -1246,10 +1246,8 @@ nsIFrame* nsSubDocumentFrame::ObtainIntrinsicSizeFrame() {
     // Try to get an nsIFrame for our sub-document's document element
     nsIFrame* subDocRoot = nullptr;
 
-    nsIDocShell* docShell = GetDocShell();
-    if (docShell) {
-      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-      if (presShell) {
+    if (nsIDocShell* docShell = GetDocShell()) {
+      if (mozilla::PresShell* presShell = docShell->GetPresShell()) {
         nsIScrollableFrame* scrollable =
             presShell->GetRootScrollFrameAsScrollable();
         if (scrollable) {

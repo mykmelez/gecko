@@ -2071,6 +2071,13 @@ VARCACHE_PREF(
    uint32_t, 0
 )
 
+// Max time to shutdown the resolver threads
+VARCACHE_PREF(
+  "network.dns.resolver_shutdown_timeout_ms",
+   network_dns_resolver_shutdown_timeout_ms,
+   uint32_t, 2000
+)
+
 //---------------------------------------------------------------------------
 // ContentSessionStore prefs
 //---------------------------------------------------------------------------
@@ -2230,6 +2237,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts",
    privacy_resistFingerprinting_autoDeclineNoUserInputCanvasPrompts,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "privacy.storagePrincipal.enabledForTrackers",
+   privacy_storagePrincipal_enabledForTrackers,
   RelaxedAtomicBool, false
 )
 
@@ -2488,6 +2501,24 @@ VARCACHE_PREF(
   "security.fileuri.strict_origin_policy",
    security_fileuri_strict_origin_policy,
   RelaxedAtomicBool, true
+)
+
+// Whether origin telemetry should be enabled
+// NOTE: if telemetry.origin_telemetry_test_mode.enabled is enabled, this pref
+//       won't have any effect.
+VARCACHE_PREF(
+  "privacy.trackingprotection.origin_telemetry.enabled",
+   privacy_trackingprotection_origin_telemetry_enabled,
+  RelaxedAtomicBool, false
+)
+
+// Enable origin telemetry test mode or not
+// NOTE: turning this on will override the
+//       privacy.trackingprotection.origin_telemetry.enabled pref.
+VARCACHE_PREF(
+  "telemetry.origin_telemetry_test_mode.enabled",
+   telemetry_origin_telemetry_test_mode_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

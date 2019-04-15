@@ -4339,8 +4339,7 @@ Document* nsContentUtils::GetSubdocumentWithOuterWindowId(
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> outerWindow = window->AsOuter();
-  RefPtr<Document> foundDoc = outerWindow->GetDoc();
+  RefPtr<Document> foundDoc = window->GetDoc();
   if (nsContentUtils::ContentIsCrossDocDescendantOf(foundDoc, aDocument)) {
     // Note that ContentIsCrossDocDescendantOf will return true if
     // foundDoc == aDocument.
@@ -6393,8 +6392,7 @@ nsIPresShell* nsContentUtils::FindPresShellForDocument(const Document* aDoc) {
     // Walk the docshell tree to find the nearest container that has a
     // presshell, and return that.
     nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(docShellTreeItem);
-    nsIPresShell* presShell = docShell->GetPresShell();
-    if (presShell) {
+    if (PresShell* presShell = docShell->GetPresShell()) {
       return presShell;
     }
     nsCOMPtr<nsIDocShellTreeItem> parent;
@@ -7922,9 +7920,9 @@ nsView* nsContentUtils::GetViewToDispatchEvent(nsPresContext* presContext,
 }
 
 nsresult nsContentUtils::SendMouseEvent(
-    const nsCOMPtr<nsIPresShell>& aPresShell, const nsAString& aType, float aX,
-    float aY, int32_t aButton, int32_t aButtons, int32_t aClickCount,
-    int32_t aModifiers, bool aIgnoreRootScrollFrame, float aPressure,
+    mozilla::PresShell* aPresShell, const nsAString& aType, float aX, float aY,
+    int32_t aButton, int32_t aButtons, int32_t aClickCount, int32_t aModifiers,
+    bool aIgnoreRootScrollFrame, float aPressure,
     unsigned short aInputSourceArg, uint32_t aIdentifier, bool aToWindow,
     bool* aPreventDefault, bool aIsDOMEventSynthesized,
     bool aIsWidgetEventSynthesized) {
@@ -8226,7 +8224,7 @@ nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForWindow(
 
 // static, public
 nsContentUtils::StorageAccess nsContentUtils::StorageAllowedForDocument(
-    Document* aDoc) {
+    const Document* aDoc) {
   MOZ_ASSERT(aDoc);
 
   if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
@@ -9454,16 +9452,21 @@ void nsContentUtils::TryToUpgradeElement(Element* aElement) {
 }
 
 MOZ_CAN_RUN_SCRIPT
-static void DoCustomElementCreate(Element** aElement, Document* aDoc,
-                                  NodeInfo* aNodeInfo,
+static void DoCustomElementCreate(Element** aElement, JSContext* aCx,
+                                  Document* aDoc, NodeInfo* aNodeInfo,
                                   CustomElementConstructor* aConstructor,
                                   ErrorResult& aRv) {
-  RefPtr<Element> element =
-      aConstructor->Construct("Custom Element Create", aRv);
+  JS::Rooted<JS::Value> constructResult(aCx);
+  aConstructor->Construct(&constructResult, aRv, "Custom Element Create",
+                          CallbackFunction::eRethrowExceptions);
   if (aRv.Failed()) {
     return;
   }
 
+  RefPtr<Element> element;
+  // constructResult is an ObjectValue because construction with a callback
+  // always forms the return value from a JSObject.
+  UNWRAP_OBJECT(Element, &constructResult, element);
   if (aNodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
     if (!element || !element->IsHTMLElement()) {
       aRv.ThrowTypeError<MSG_THIS_DOES_NOT_IMPLEMENT_INTERFACE>(
@@ -9572,11 +9575,12 @@ nsresult nsContentUtils::NewXULOrHTMLElement(
     if (aFromParser == dom::NOT_FROM_PARSER) {
       global = GetEntryGlobal();
 
-      // XUL documents always use NOT_FROM_PARSER for non-XUL elements. We can
-      // get the global from the document in that case.
+      // Documents created from the PrototypeDocumentSink always use
+      // NOT_FROM_PARSER for non-XUL elements. We can get the global from the
+      // document in that case.
       if (!global) {
         Document* doc = nodeInfo->GetDocument();
-        if (doc && doc->IsXULDocument()) {
+        if (doc && doc->HasPrototypeDocument()) {
           global = doc->GetScopeObject();
         }
       }
@@ -9622,7 +9626,7 @@ nsresult nsContentUtils::NewXULOrHTMLElement(
     if (synchronousCustomElements) {
       definition->mPrefixStack.AppendElement(nodeInfo->GetPrefixAtom());
       RefPtr<Document> doc = nodeInfo->GetDocument();
-      DoCustomElementCreate(aResult, doc, nodeInfo,
+      DoCustomElementCreate(aResult, cx, doc, nodeInfo,
                             MOZ_KnownLive(definition->mConstructor), rv);
       if (rv.MaybeSetPendingException(cx)) {
         if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
@@ -9829,7 +9833,7 @@ bool nsContentUtils::AttemptLargeAllocationLoad(nsIHttpChannel* aChannel) {
     return false;
   }
 
-  TabChild* tabChild = TabChild::GetFrom(outer->AsOuter());
+  TabChild* tabChild = TabChild::GetFrom(outer);
   NS_ENSURE_TRUE(tabChild, false);
 
   if (tabChild->IsAwaitingLargeAlloc()) {

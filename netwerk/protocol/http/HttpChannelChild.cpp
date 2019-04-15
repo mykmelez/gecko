@@ -2645,8 +2645,7 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   TimeStamp navigationStartTimeStamp;
   if (tabChild) {
     MOZ_ASSERT(tabChild->WebNavigation());
-    RefPtr<Document> document = tabChild->GetDocument();
-    if (document) {
+    if (RefPtr<Document> document = tabChild->GetTopLevelDocument()) {
       contentWindowId = document->InnerWindowID();
       nsDOMNavigationTiming* navigationTiming = document->GetNavigationTiming();
       if (navigationTiming) {

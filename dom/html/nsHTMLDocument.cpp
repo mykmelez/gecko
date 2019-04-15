@@ -222,10 +222,11 @@ void nsHTMLDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) {
 }
 
 void nsHTMLDocument::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
-                                nsIPrincipal* aPrincipal) {
+                                nsIPrincipal* aPrincipal,
+                                nsIPrincipal* aStoragePrincipal) {
   mLoadFlags = nsIRequest::LOAD_NORMAL;
 
-  Document::ResetToURI(aURI, aLoadGroup, aPrincipal);
+  Document::ResetToURI(aURI, aLoadGroup, aPrincipal, aStoragePrincipal);
 
   mImages = nullptr;
   mApplets = nullptr;
@@ -443,7 +444,7 @@ void nsHTMLDocument::TryFallback(int32_t& aCharsetSource,
   aEncoding = FallbackEncoding::FromLocale();
 }
 
-// Using a prototype document is currently only allowed with browser.xhtml.
+// Using a prototype document is only allowed with chrome privilege.
 bool ShouldUsePrototypeDocument(nsIChannel* aChannel, nsIDocShell* aDocShell) {
   if (!aChannel || !aDocShell ||
       !StaticPrefs::dom_prototype_document_cache_enabled()) {
@@ -454,9 +455,7 @@ bool ShouldUsePrototypeDocument(nsIChannel* aChannel, nsIDocShell* aDocShell) {
   }
   nsCOMPtr<nsIURI> originalURI;
   aChannel->GetOriginalURI(getter_AddRefs(originalURI));
-  return IsChromeURI(originalURI) &&
-         originalURI->GetSpecOrDefault().EqualsLiteral(
-             BROWSER_CHROME_URL_QUOTED);
+  return IsChromeURI(originalURI);
 }
 
 nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
@@ -560,7 +559,7 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     } else {
       mParser->MarkAsNotScriptCreated(aCommand);
     }
-  } else if (ShouldUsePrototypeDocument(aChannel, docShell)) {
+  } else if (xhtml && ShouldUsePrototypeDocument(aChannel, docShell)) {
     loadWithPrototype = true;
     nsCOMPtr<nsIURI> originalURI;
     aChannel->GetOriginalURI(getter_AddRefs(originalURI));
@@ -1029,7 +1028,14 @@ void nsHTMLDocument::GetCookie(nsAString& aCookie, ErrorResult& rv) {
     return;
   }
 
-  if (nsContentUtils::StorageDisabledByAntiTracking(this, nullptr)) {
+  nsContentUtils::StorageAccess storageAccess =
+      nsContentUtils::StorageAllowedForDocument(this);
+  if (storageAccess == nsContentUtils::StorageAccess::eDeny) {
+    return;
+  }
+
+  if (storageAccess == nsContentUtils::StorageAccess::ePartitionedOrDeny &&
+      !StaticPrefs::privacy_storagePrincipal_enabledForTrackers()) {
     return;
   }
 
@@ -1082,7 +1088,14 @@ void nsHTMLDocument::SetCookie(const nsAString& aCookie, ErrorResult& rv) {
     return;
   }
 
-  if (nsContentUtils::StorageDisabledByAntiTracking(this, nullptr)) {
+  nsContentUtils::StorageAccess storageAccess =
+      nsContentUtils::StorageAllowedForDocument(this);
+  if (storageAccess == nsContentUtils::StorageAccess::eDeny) {
+    return;
+  }
+
+  if (storageAccess == nsContentUtils::StorageAccess::ePartitionedOrDeny &&
+      !StaticPrefs::privacy_storagePrincipal_enabledForTrackers()) {
     return;
   }
 
