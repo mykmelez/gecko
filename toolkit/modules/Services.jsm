@@ -51,6 +51,11 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   });
 }
 
+XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/xulstore.jsm");
+  return XULStore;
+});
+
 XPCOMUtils.defineLazyGetter(Services, "io", () => {
   return Cc["@mozilla.org/network/io-service;1"]
            .getService(Ci.nsIIOService)

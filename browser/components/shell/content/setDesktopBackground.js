@@ -4,8 +4,6 @@
 
 /* import-globals-from ../../../base/content/utilityOverlay.js */
 
-const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-
 var gSetBackground = {
   _position: AppConstants.platform == "macosx" ? "STRETCH" : "",
   _backgroundColor: AppConstants.platform != "macosx" ? 0 : undefined,
@@ -84,7 +82,7 @@ var gSetBackground = {
 
   setDesktopBackground() {
     if (AppConstants.platform != "macosx") {
-      XULStore.persist(document.getElementById("menuPosition"), "value");
+      Services.xulStore.persist(document.getElementById("menuPosition"), "value");
       this._shell.desktopBackgroundColor = this._hexStringToLong(this._backgroundColor);
     } else {
       Services.obs.addObserver(this, "shell:desktop-background-changed");

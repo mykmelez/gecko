@@ -423,18 +423,18 @@ DistributionCustomizer.prototype = {
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (this._newProfile) {
-      const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+      let xulStore = Services.xulStore;
 
       try {
         var showPersonalToolbar = Services.prefs.getBoolPref("browser.showPersonalToolbar");
         if (showPersonalToolbar) {
-          XULStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
+          xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
         }
       } catch (e) {}
       try {
         var showMenubar = Services.prefs.getBoolPref("browser.showMenubar");
         if (showMenubar) {
-          XULStore.setValue(BROWSER_DOCURL, "toolbar-menubar", "autohide", "false");
+          xulStore.setValue(BROWSER_DOCURL, "toolbar-menubar", "autohide", "false");
         }
       } catch (e) {}
     }

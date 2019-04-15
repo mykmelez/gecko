@@ -3,12 +3,17 @@
 
 "use strict";
 
-do_get_profile();
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+var XULStore = null;
 
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";
+
+function run_test() {
+  do_get_profile();
+  run_next_test();
+}
 
 function checkValue(uri, id, attr, reference) {
   let value = XULStore.getValue(uri, id, attr);
@@ -35,6 +40,7 @@ function checkArrays(a, b) {
 
 add_task(async function setup() {
   // Set a value that a future test depends on manually
+  XULStore = Services.xulStore;
   XULStore.setValue(browserURI, "main-window", "width", "994");
 });
 
