@@ -2342,18 +2342,18 @@ void Document::FillStyleSetUserAndUASheets() {
     mStyleSet->AppendStyleSheet(SheetType::Agent, cache->XULSheet());
   }
 
-  MOZ_ASSERT(!mQuirkSheetAdded);
-  if (mCompatMode == eCompatibility_NavQuirks) {
-    mStyleSet->AppendStyleSheet(SheetType::Agent, cache->QuirkSheet());
-    mQuirkSheetAdded = true;
-  }
-
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->FormsSheet());
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->ScrollbarsSheet());
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->PluginProblemSheet());
 
   for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
     mStyleSet->AppendStyleSheet(SheetType::Agent, sheet);
+  }
+
+  MOZ_ASSERT(!mQuirkSheetAdded);
+  if (NeedsQuirksSheet()) {
+    mStyleSet->AppendStyleSheet(SheetType::Agent, cache->QuirkSheet());
+    mQuirkSheetAdded = true;
   }
 }
 
@@ -4435,19 +4435,11 @@ void Document::SetContainer(nsDocShell* aContainer) {
     return;
   }
 
-  // Get the Docshell
-  if (aContainer->ItemType() == nsIDocShellTreeItem::typeContent) {
-    // check if same type root
-    nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
-    aContainer->GetSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
-    NS_ASSERTION(
-        sameTypeRoot,
-        "No document shell root tree item from document shell tree item!");
-
-    if (sameTypeRoot == aContainer) {
+  BrowsingContext* context = aContainer->GetBrowsingContext();
+  if (context && context->IsContent()) {
+    if (!context->GetParent()) {
       SetIsTopLevelContentDocument(true);
     }
-
     SetIsContentDocument(true);
   }
 

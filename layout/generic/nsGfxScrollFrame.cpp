@@ -110,7 +110,7 @@ static uint32_t GetOverflowChange(const nsRect& aCurScrolledRect,
 
 //----------nsHTMLScrollFrame-------------------------------------------
 
-nsHTMLScrollFrame* NS_NewHTMLScrollFrame(nsIPresShell* aPresShell,
+nsHTMLScrollFrame* NS_NewHTMLScrollFrame(PresShell* aPresShell,
                                          ComputedStyle* aStyle, bool aIsRoot) {
   return new (aPresShell)
       nsHTMLScrollFrame(aStyle, aPresShell->GetPresContext(), aIsRoot);
@@ -1214,7 +1214,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 //----------nsXULScrollFrame-------------------------------------------
 
-nsXULScrollFrame* NS_NewXULScrollFrame(nsIPresShell* aPresShell,
+nsXULScrollFrame* NS_NewXULScrollFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle, bool aIsRoot,
                                        bool aClipAllDescendants) {
   return new (aPresShell) nsXULScrollFrame(aStyle, aPresShell->GetPresContext(),
@@ -6776,15 +6776,19 @@ static nsMargin ResolveScrollPaddingStyle(
 }
 
 nsMargin ScrollFrameHelper::GetScrollPadding() const {
-  nsIFrame* styleFrame;
+  nsIFrame* styleFrame = nullptr;
   if (mIsRoot) {
-    const Element* scrollElement =
-        mOuter->PresContext()->GetViewportScrollStylesOverrideElement();
-    styleFrame = scrollElement ? scrollElement->GetPrimaryFrame() : mOuter;
+    if (const Element* rootElement =
+            mOuter->PresContext()->Document()->GetRootElement()) {
+      styleFrame = rootElement->GetPrimaryFrame();
+    }
   } else {
     styleFrame = mOuter;
   }
-  MOZ_ASSERT(styleFrame);
+
+  if (!styleFrame) {
+    return nsMargin();
+  }
 
   // The spec says percentage values are relative to the scroll port size.
   // https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding
