@@ -127,11 +127,15 @@ fn observe_profile_change() {
     .unwrap_or_else(|err| error!("error observing profile change: {}", err));
 }
 
-fn cache_data() -> XULStoreResult<XULStoreCache> {
+fn in_safe_mode() -> XULStoreResult<bool> {
     let app_info_svc = xpcom::services::get_AppInfoService().ok_or(XULStoreError::Unavailable)?;
     let mut in_safe_mode = false;
     unsafe { app_info_svc.GetInSafeMode(&mut in_safe_mode).to_result()?; }
-    if in_safe_mode {
+    Ok(in_safe_mode)
+}
+
+fn cache_data() -> XULStoreResult<XULStoreCache> {
+    if in_safe_mode()? {
         return Ok(BTreeMap::new());
     }
 
