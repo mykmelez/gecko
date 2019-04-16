@@ -8,6 +8,8 @@ def service(name, iface, contractid):
     services.append((name, iface, contractid))
 
 
+service('AppInfoService', 'nsIXULRuntime',
+        "@mozilla.org/xre/app-info;1")
 service('ChromeRegistryService', 'nsIChromeRegistry',
         "@mozilla.org/chrome/chrome-registry;1")
 service('ToolkitChromeRegistryService', 'nsIToolkitChromeRegistry',
@@ -82,6 +84,7 @@ CPP_INCLUDES = """
 #include "nsIUUIDGenerator.h"
 #include "nsIGfxInfo.h"
 #include "nsIURIFixup.h"
+#include "nsIXULRuntime.h"
 """
 
 #####
