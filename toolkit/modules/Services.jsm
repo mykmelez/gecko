@@ -52,7 +52,7 @@ if (AppConstants.MOZ_CRASHREPORTER) {
 }
 
 XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/xulstore.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
   return XULStore;
 });
 
