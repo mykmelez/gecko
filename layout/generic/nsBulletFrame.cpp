@@ -55,7 +55,7 @@ using namespace mozilla::image;
 using namespace mozilla::layout;
 using mozilla::dom::Document;
 
-nsIFrame* NS_NewBulletFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewBulletFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   return new (aPresShell) nsBulletFrame(aStyle, aPresShell->GetPresContext());
 }
 
@@ -827,7 +827,7 @@ ImgDrawResult nsBulletFrame::PaintBullet(gfxContext& aRenderingContext,
 int32_t nsBulletFrame::Ordinal(bool aDebugFromA11y) const {
   auto* fc = PresShell()->FrameConstructor();
   auto* cm = fc->CounterManager();
-  auto* list = cm->CounterListFor(NS_LITERAL_STRING("list-item"));
+  auto* list = cm->CounterListFor(nsGkAtoms::list_item);
   MOZ_ASSERT(aDebugFromA11y || (list && !list->IsDirty()));
   nsIFrame* listItem = GetParent()->GetContent()->GetPrimaryFrame();
   int32_t value = 0;
