@@ -77,11 +77,23 @@ fn get_profile_dir() -> XULStoreResult<PathBuf> {
 
     let dir_svc = xpcom::services::get_DirectoryService().ok_or(XULStoreError::Unavailable)?;
     let mut profile_dir = xpcom::GetterAddrefs::<nsIFile>::new();
-    let property = c_str!("ProfD");
     unsafe {
         dir_svc
-            .Get(property.as_ptr(), &nsIFile::IID, profile_dir.void_ptr())
-            .to_result()?;
+            .Get(
+                c_str!("ProfD").as_ptr(),
+                &nsIFile::IID,
+                profile_dir.void_ptr(),
+            )
+            .to_result()
+            .or_else(|_| {
+                dir_svc
+                    .Get(
+                        c_str!("ProfDS").as_ptr(),
+                        &nsIFile::IID,
+                        profile_dir.void_ptr(),
+                    )
+                    .to_result()
+            })?;
     }
     let profile_dir = profile_dir.refptr().ok_or(XULStoreError::Unavailable)?;
 
