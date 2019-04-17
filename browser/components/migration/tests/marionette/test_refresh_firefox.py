@@ -227,8 +227,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
     def checkBookmarkToolbarVisibility(self):
         toolbarVisible = self.marionette.execute_script("""
           const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
-          const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-          return XULStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed");
+          return Services.xulStore.getValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed");
         """)
         self.assertEqual(toolbarVisible, "false")
 

@@ -1,14 +1,19 @@
 /* Any copyright is dedicated to the Public Domain.
- * https://creativecommons.org/publicdomain/zero/1.0/ */
+   http://creativecommons.org/publicdomain/zero/1.0/◦
+*/
 
 "use strict";
 
-do_get_profile();
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-
+var XULStore = null;
 var browserURI = "chrome://browser/content/browser.xul";
 var aboutURI = "about:config";
+
+function run_test() {
+  do_get_profile();
+  run_next_test();
+}
 
 function checkValue(uri, id, attr, reference) {
   let value = XULStore.getValue(uri, id, attr);
@@ -20,11 +25,11 @@ function checkValueExists(uri, id, attr, exists) {
 }
 
 function getIDs(uri) {
-  return Array.from(XULStore.getIDs(uri)).sort();
+  return Array.from(XULStore.getIDsEnumerator(uri)).sort();
 }
 
 function getAttributes(uri, id) {
-  return Array.from(XULStore.getAttributes(uri, id)).sort();
+  return Array.from(XULStore.getAttributeEnumerator(uri, id)).sort();
 }
 
 function checkArrays(a, b) {
@@ -35,6 +40,7 @@ function checkArrays(a, b) {
 
 add_task(async function setup() {
   // Set a value that a future test depends on manually
+  XULStore = Services.xulStore;
   XULStore.setValue(browserURI, "main-window", "width", "994");
 });
 

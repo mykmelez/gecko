@@ -5,15 +5,13 @@
 // Bug 679604 - Test that a XUL persisted category from an older version of
 // Firefox doesn't break the add-ons manager when that category doesn't exist
 
-const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
-
 async function test() {
   waitForExplicitFinish();
 
   let aWindow = await open_manager(null);
   var categories = aWindow.document.getElementById("categories");
   categories.setAttribute("last-selected", "foo");
-  XULStore.persist(categories, "last-selected");
+  Services.xulStore.persist(categories, "last-selected");
 
   await close_manager(aWindow);
   Services.prefs.clearUserPref(PREF_UI_LASTCATEGORY);

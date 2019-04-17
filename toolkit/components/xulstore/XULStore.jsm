@@ -59,11 +59,11 @@ const XULStore = {
     }
   },
 
-  getIDs(docURI) {
+  getIDsEnumerator(docURI) {
     return new XULStoreEnumerator(xulStore.getIDsEnumerator(docURI));
   },
 
-  getAttributes(docURI, id) {
+  getAttributeEnumerator(docURI, id) {
     return new XULStoreEnumerator(xulStore.getAttributeEnumerator(docURI, id));
   },
 };
