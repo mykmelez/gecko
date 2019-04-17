@@ -4,6 +4,12 @@
 
 "use strict";
 
+// This JS module wraps the nsIXULStore XPCOM service with useful abstractions.
+// In particular, it wraps the enumerators returned by getIDsEnumerator()
+// and getAttributeEnumerator() in JS objects that implement the iterable
+// protocol.  It also implements the persist() method.  JS consumers should use
+// this module rather than accessing nsIXULStore directly.
+
 const EXPORTED_SYMBOLS = ["XULStore"];
 
 const xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
