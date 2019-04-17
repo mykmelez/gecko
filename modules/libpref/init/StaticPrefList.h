@@ -589,6 +589,14 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+// This pref should be set to true only in case of regression related to the
+// changes applied in Bug 152591 (to be removed as part of Bug 1537753).
+VARCACHE_PREF(
+  "extensions.cookiesBehavior.overrideOnTopLevel",
+   extensions_cookiesBehavior_overrideOnTopLevel,
+  bool, false
+)
+
 //---------------------------------------------------------------------------
 // Full-screen prefs
 //---------------------------------------------------------------------------
@@ -1090,12 +1098,25 @@ VARCACHE_PREF(
   bool, false
 )
 
+#ifdef NIGHTLY_BUILD
+# define PREF_VALUE  true
+#else
+# define PREF_VALUE  false
+#endif
 // Is the CSS Scroll Snap Module Level 1 enabled?
 VARCACHE_PREF(
   "layout.css.scroll-snap-v1.enabled",
    layout_css_scroll_snap_v1_enabled,
-  RelaxedAtomicBool, false
+  RelaxedAtomicBool, PREF_VALUE
 )
+
+// Is support for scroll-snap enabled?
+VARCACHE_PREF(
+  "layout.css.scroll-snap.enabled",
+   layout_css_scroll_snap_enabled,
+  bool, !PREF_VALUE
+)
+#undef PREF_VALUE
 
 // Are shared memory User Agent style sheets enabled?
 VARCACHE_PREF(
@@ -2050,6 +2071,13 @@ VARCACHE_PREF(
    uint32_t, 0
 )
 
+// Max time to shutdown the resolver threads
+VARCACHE_PREF(
+  "network.dns.resolver_shutdown_timeout_ms",
+   network_dns_resolver_shutdown_timeout_ms,
+   uint32_t, 2000
+)
+
 //---------------------------------------------------------------------------
 // ContentSessionStore prefs
 //---------------------------------------------------------------------------
@@ -2209,6 +2237,12 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts",
    privacy_resistFingerprinting_autoDeclineNoUserInputCanvasPrompts,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "privacy.storagePrincipal.enabledForTrackers",
+   privacy_storagePrincipal_enabledForTrackers,
   RelaxedAtomicBool, false
 )
 
@@ -2467,6 +2501,24 @@ VARCACHE_PREF(
   "security.fileuri.strict_origin_policy",
    security_fileuri_strict_origin_policy,
   RelaxedAtomicBool, true
+)
+
+// Whether origin telemetry should be enabled
+// NOTE: if telemetry.origin_telemetry_test_mode.enabled is enabled, this pref
+//       won't have any effect.
+VARCACHE_PREF(
+  "privacy.trackingprotection.origin_telemetry.enabled",
+   privacy_trackingprotection_origin_telemetry_enabled,
+  RelaxedAtomicBool, false
+)
+
+// Enable origin telemetry test mode or not
+// NOTE: turning this on will override the
+//       privacy.trackingprotection.origin_telemetry.enabled pref.
+VARCACHE_PREF(
+  "telemetry.origin_telemetry_test_mode.enabled",
+   telemetry_origin_telemetry_test_mode_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

@@ -304,7 +304,7 @@ let ACTORS = {
 
   // Until bug 1450626 and bug 1488384 are fixed, skip the blank window when
   // using a non-default theme.
-  if (Services.prefs.getCharPref("extensions.activeThemeID", "") !=
+  if (Services.prefs.getCharPref("extensions.activeThemeID", "default-theme@mozilla.org") !=
         "default-theme@mozilla.org")
     return;
 
@@ -718,7 +718,7 @@ BrowserGlue.prototype = {
   observe: async function BG_observe(subject, topic, data) {
     switch (topic) {
       case "notifications-open-settings":
-        this._openPreferences("privacy-permissions", { origin: "notifOpenSettings" });
+        this._openPreferences("privacy-permissions");
         break;
       case "final-ui-startup":
         this._beforeUIStartup();
@@ -2191,7 +2191,7 @@ BrowserGlue.prototype = {
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback")
         return;
-      this._openPreferences("sync", { origin: "doorhanger" });
+      this._openPreferences("sync");
     };
     this.AlertsService.showAlertNotification(null, title, body, true, null, clickCallback);
   },
@@ -2869,7 +2869,7 @@ BrowserGlue.prototype = {
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback")
         return;
-      this._openPreferences("sync", { origin: "devDisconnectedAlert"});
+      this._openPreferences("sync");
     };
     this.AlertsService.showAlertNotification(null, title, body, true, null, clickCallback);
   },

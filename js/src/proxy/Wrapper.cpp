@@ -59,8 +59,8 @@ bool ForwardingProxyHandler::defineProperty(JSContext* cx, HandleObject proxy,
   return DefineProperty(cx, target, id, desc, result);
 }
 
-bool ForwardingProxyHandler::ownPropertyKeys(JSContext* cx, HandleObject proxy,
-                                             MutableHandleIdVector props) const {
+bool ForwardingProxyHandler::ownPropertyKeys(
+    JSContext* cx, HandleObject proxy, MutableHandleIdVector props) const {
   assertEnteredPolicy(cx, proxy, JSID_VOID, ENUMERATE);
   RootedObject target(cx, proxy->as<ProxyObject>().target());
   return GetPropertyKeys(
@@ -446,12 +446,13 @@ ErrorCopier::~ErrorCopier() {
     RootedValue exc(cx);
     if (cx->getPendingException(&exc) && exc.isObject() &&
         exc.toObject().is<ErrorObject>()) {
+      RootedSavedFrame stack(cx, cx->getPendingExceptionStack());
       cx->clearPendingException();
       ar.reset();
       Rooted<ErrorObject*> errObj(cx, &exc.toObject().as<ErrorObject>());
       if (JSObject* copyobj = CopyErrorObject(cx, errObj)) {
         RootedValue rootedCopy(cx, ObjectValue(*copyobj));
-        cx->setPendingException(rootedCopy);
+        cx->setPendingException(rootedCopy, stack);
       }
     }
   }

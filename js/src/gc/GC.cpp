@@ -196,11 +196,11 @@
 #include "mozilla/Move.h"
 #include "mozilla/Range.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
-#include <ctype.h>
 #include <initializer_list>
 #include <string.h>
 #ifndef XP_WIN
@@ -363,6 +363,9 @@ static const float PretenureThreshold = 0.6f;
 
 /* JSGC_PRETENURE_GROUP_THRESHOLD */
 static const float PretenureGroupThreshold = 3000;
+
+/* JSGC_MIN_LAST_DITCH_GC_PERIOD */
+static const TimeDuration MinLastDitchGCPeriod = TimeDuration::FromSeconds(60);
 
 }  // namespace TuningDefaults
 }  // namespace gc
@@ -1155,7 +1158,7 @@ static bool ParseZealModeNumericParam(CharRange text, uint32_t* paramOut) {
   }
 
   for (auto c : text) {
-    if (!isdigit(c)) {
+    if (!mozilla::IsAsciiDigit(c)) {
       return false;
     }
   }
@@ -1521,6 +1524,9 @@ bool GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value,
       }
       pretenureGroupThreshold_ = value;
       break;
+    case JSGC_MIN_LAST_DITCH_GC_PERIOD:
+      minLastDitchGCPeriod_ = TimeDuration::FromSeconds(value);
+      break;
     default:
       MOZ_CRASH("Unknown GC parameter.");
   }
@@ -1613,7 +1619,8 @@ GCSchedulingTunables::GCSchedulingTunables()
       nurseryFreeThresholdForIdleCollectionFraction_(
           TuningDefaults::NurseryFreeThresholdForIdleCollectionFraction),
       pretenureThreshold_(TuningDefaults::PretenureThreshold),
-      pretenureGroupThreshold_(TuningDefaults::PretenureGroupThreshold) {}
+      pretenureGroupThreshold_(TuningDefaults::PretenureGroupThreshold),
+      minLastDitchGCPeriod_(TuningDefaults::MinLastDitchGCPeriod) {}
 
 void GCRuntime::resetParameter(JSGCParamKey key, AutoLockGC& lock) {
   switch (key) {
@@ -1708,6 +1715,9 @@ void GCSchedulingTunables::resetParameter(JSGCParamKey key,
     case JSGC_PRETENURE_GROUP_THRESHOLD:
       pretenureGroupThreshold_ = TuningDefaults::PretenureGroupThreshold;
       break;
+    case JSGC_MIN_LAST_DITCH_GC_PERIOD:
+      minLastDitchGCPeriod_ = TuningDefaults::MinLastDitchGCPeriod;
+      break;
     default:
       MOZ_CRASH("Unknown GC parameter.");
   }
@@ -1783,6 +1793,8 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return uint32_t(tunables.pretenureThreshold() * 100);
     case JSGC_PRETENURE_GROUP_THRESHOLD:
       return tunables.pretenureGroupThreshold();
+    case JSGC_MIN_LAST_DITCH_GC_PERIOD:
+      return tunables.minLastDitchGCPeriod().ToSeconds();
     default:
       MOZ_CRASH("Unknown parameter key");
   }
@@ -3717,9 +3729,10 @@ void GCRuntime::freeFromBackgroundThread(AutoLockHelperThreadState& lock) {
 
     lifoBlocks.freeAll();
 
+    FreeOp* fop = TlsContext.get()->defaultFreeOp();
     for (Nursery::BufferSet::Range r = buffers.all(); !r.empty();
          r.popFront()) {
-      rt->defaultFreeOp()->free_(r.front());
+      fop->free_(r.front());
     }
   } while (!lifoBlocksToFree.ref().isEmpty() ||
            !buffersToFreeAfterMinorGC.ref().empty());
@@ -8417,8 +8430,8 @@ JS::AutoAssertGCCallback::AutoAssertGCCallback() : AutoSuppressGCAnalysis() {
 
 JS_FRIEND_API const char* JS::GCTraceKindToAscii(JS::TraceKind kind) {
   switch (kind) {
-#define MAP_NAME(name, _0, _1) \
-  case JS::TraceKind::name:    \
+#define MAP_NAME(name, _0, _1, _2) \
+  case JS::TraceKind::name:        \
     return #name;
     JS_FOR_EACH_TRACEKIND(MAP_NAME);
 #undef MAP_NAME

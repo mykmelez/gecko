@@ -449,12 +449,9 @@ test_description_schema = Schema({
     ),
 
     # A list of artifacts to install from 'fetch' tasks.
-    Optional('fetches'): optionally_keyed_by(
-        'test-platform',
-        {
-            basestring: [basestring]
-        }
-    ),
+    Optional('fetches'): {
+        basestring: optionally_keyed_by('test-platform', [basestring])
+    },
 }, required=True)
 
 
@@ -786,7 +783,8 @@ def handle_keyed_by(config, tests):
         'workdir',
         'worker-type',
         'virtualization',
-        'fetches',
+        'fetches.fetch',
+        'fetches.toolchain',
     ]
     for test in tests:
         for field in fields:
@@ -979,27 +977,22 @@ def split_e10s(config, tests):
     for test in tests:
         e10s = test['e10s']
 
-        test['e10s'] = False
-        test['attributes']['e10s'] = False
+        test['e10s'] = True
+        test['attributes']['e10s'] = True
 
         if e10s == 'both':
             yield copy.deepcopy(test)
-            e10s = True
-        if e10s:
-            test['test-name'] += '-e10s'
-            test['try-name'] += '-e10s'
-            test['e10s'] = True
-            test['attributes']['e10s'] = True
+            e10s = False
+        if not e10s:
+            test['test-name'] += '-1proc'
+            test['try-name'] += '-1proc'
+            test['e10s'] = False
+            test['attributes']['e10s'] = False
             group, symbol = split_symbol(test['treeherder-symbol'])
             if group != '?':
-                group += '-e10s'
+                group += '-1proc'
             test['treeherder-symbol'] = join_symbol(group, symbol)
-            if test['suite'] == 'talos' or test['suite'] == 'raptor':
-                for i, option in enumerate(test['mozharness']['extra-options']):
-                    if option.startswith('--suite='):
-                        test['mozharness']['extra-options'][i] += '-e10s'
-            else:
-                test['mozharness']['extra-options'].append('--e10s')
+            test['mozharness']['extra-options'].append('--disable-e10s')
         yield test
 
 
@@ -1199,18 +1192,18 @@ def set_worker_type(config, tests):
             test['worker-type'] = win_worker_type_platform[test['virtualization']]
         elif test_platform.startswith('android-hw-g5'):
             if test['suite'] != 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-g5'
+                test['worker-type'] = 't-bitbar-gw-unit-g5'
             elif '--power-test' in test['mozharness']['extra-options']:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-g5'
+                test['worker-type'] = 't-bitbar-gw-batt-g5'
             else:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-g5'
+                test['worker-type'] = 't-bitbar-gw-perf-g5'
         elif test_platform.startswith('android-hw-p2'):
             if test['suite'] != 'raptor':
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-p2'
+                test['worker-type'] = 't-bitbar-gw-unit-p2'
             elif '--power-test' in test['mozharness']['extra-options']:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-batt-p2'
+                test['worker-type'] = 't-bitbar-gw-batt-p2'
             else:
-                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
+                test['worker-type'] = 't-bitbar-gw-perf-p2'
         elif test_platform.startswith('android-em-7.0-x86'):
             test['worker-type'] = 'terraform-packet/gecko-t-linux'
         elif test_platform.startswith('linux') or test_platform.startswith('android'):

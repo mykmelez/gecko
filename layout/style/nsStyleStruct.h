@@ -714,6 +714,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleMargin {
     return true;
   }
 
+  nsMargin GetScrollMargin() const {
+    return nsMargin(mScrollMargin.Get(mozilla::eSideTop).ToAppUnits(),
+                    mScrollMargin.Get(mozilla::eSideRight).ToAppUnits(),
+                    mScrollMargin.Get(mozilla::eSideBottom).ToAppUnits(),
+                    mScrollMargin.Get(mozilla::eSideLeft).ToAppUnits());
+  }
+
   // Return true if either the start or end side in the axis is 'auto'.
   // (defined in WritingModes.h since we need the full WritingMode type)
   inline bool HasBlockAxisAuto(mozilla::WritingMode aWM) const;
@@ -1311,8 +1318,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   nsStyleGridLine mGridColumnEnd;
   nsStyleGridLine mGridRowStart;
   nsStyleGridLine mGridRowEnd;
-  nsStyleCoord mColumnGap;  // normal, coord, percent, calc
-  nsStyleCoord mRowGap;     // normal, coord, percent, calc
+  mozilla::NonNegativeLengthPercentageOrNormal mColumnGap;
+  mozilla::NonNegativeLengthPercentageOrNormal mRowGap;
 
   bool OffsetHasPercent(mozilla::Side aSide) const {
     return mOffset.Get(aSide).HasPercent();
@@ -1454,10 +1461,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
 
   nsChangeHint CalcDifference(const nsStyleText& aNewData) const;
 
+  mozilla::StyleTextTransform mTextTransform;
   uint8_t mTextAlign;      // NS_STYLE_TEXT_ALIGN_*
   uint8_t mTextAlignLast;  // NS_STYLE_TEXT_ALIGN_*
   mozilla::StyleTextJustify mTextJustify;
-  uint8_t mTextTransform;  // NS_STYLE_TEXT_TRANSFORM_*
   mozilla::StyleWhiteSpace mWhiteSpace;
 
  private:
@@ -1588,6 +1595,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVisibility {
 };
 
 namespace mozilla {
+
+inline StyleTextTransform StyleTextTransform::None() {
+  return StyleTextTransform{StyleTextTransformCase::None,
+                            StyleTextTransformOther()};
+}
+
+inline bool StyleTextTransform::IsNone() const { return *this == None(); }
 
 struct StyleTransition {
   StyleTransition() { /* leaves uninitialized; see also SetInitialValues */
@@ -1895,8 +1909,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleOverscrollBehavior mOverscrollBehaviorY;
   mozilla::StyleOverflowAnchor mOverflowAnchor;
   mozilla::StyleScrollSnapAlign mScrollSnapAlign;
-  mozilla::StyleScrollSnapType mScrollSnapTypeX;
-  mozilla::StyleScrollSnapType mScrollSnapTypeY;
+  mozilla::StyleScrollSnapType mScrollSnapType;
   nsStyleCoord mScrollSnapPointsX;
   nsStyleCoord mScrollSnapPointsY;
   mozilla::Position mScrollSnapDestination;
@@ -2365,7 +2378,7 @@ class nsStyleContentData {
   }
 
   struct CounterFunction {
-    nsString mIdent;
+    RefPtr<nsAtom> mIdent;
     // This is only used when it is a counters() function.
     nsString mSeparator;
     mozilla::CounterStylePtr mCounterStyle;
@@ -2427,7 +2440,7 @@ class nsStyleContentData {
 };
 
 struct nsStyleCounterData {
-  nsString mCounter;
+  RefPtr<nsAtom> mCounter;
   int32_t mValue;
 
   bool operator==(const nsStyleCounterData& aOther) const {
@@ -2476,7 +2489,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent {
     mIncrements.SetLength(aCount);
   }
 
-  void SetCounterIncrementAt(uint32_t aIndex, const nsString& aCounter,
+  void SetCounterIncrementAt(uint32_t aIndex, nsAtom* aCounter,
                              int32_t aIncrement) {
     mIncrements[aIndex].mCounter = aCounter;
     mIncrements[aIndex].mValue = aIncrement;
@@ -2492,8 +2505,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent {
     mResets.SetLength(aCount);
   }
 
-  void SetCounterResetAt(uint32_t aIndex, const nsString& aCounter,
-                         int32_t aValue) {
+  void SetCounterResetAt(uint32_t aIndex, nsAtom* aCounter, int32_t aValue) {
     mResets[aIndex].mCounter = aCounter;
     mResets[aIndex].mValue = aValue;
   }
@@ -2508,8 +2520,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent {
     mSets.SetLength(aCount);
   }
 
-  void SetCounterSetAt(uint32_t aIndex, const nsString& aCounter,
-                       int32_t aValue) {
+  void SetCounterSetAt(uint32_t aIndex, nsAtom* aCounter, int32_t aValue) {
     mSets[aIndex].mCounter = aCounter;
     mSets[aIndex].mValue = aValue;
   }

@@ -22,7 +22,6 @@
 #include "nsIDocShell.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsFrameMessageManager.h"
-#include "nsIPresShell.h"
 #include "nsWeakReference.h"
 #include "nsITabChild.h"
 #include "nsITooltipListener.h"
@@ -61,6 +60,7 @@ class nsPtrHashKey;
 
 namespace mozilla {
 class AbstractThread;
+class PresShell;
 
 namespace layers {
 class APZChild;
@@ -170,10 +170,10 @@ class TabChildBase : public nsISupports,
   virtual ScreenIntSize GetInnerSize() = 0;
 
   // Get the Document for the top-level window in this tab.
-  already_AddRefed<Document> GetDocument() const;
+  already_AddRefed<Document> GetTopLevelDocument() const;
 
   // Get the pres-shell of the document for the top-level window in this tab.
-  already_AddRefed<nsIPresShell> GetPresShell() const;
+  PresShell* GetTopLevelPresShell() const;
 
  protected:
   virtual ~TabChildBase();
@@ -311,6 +311,9 @@ class TabChild final : public TabChildBase,
       const mozilla::dom::DimensionInfo& aDimensionInfo) override;
   virtual mozilla::ipc::IPCResult RecvSizeModeChanged(
       const nsSizeMode& aSizeMode) override;
+
+  virtual mozilla::ipc::IPCResult RecvChildToParentMatrix(
+      const mozilla::gfx::Matrix4x4& aMatrix) override;
 
   mozilla::ipc::IPCResult RecvActivate();
 
@@ -491,7 +494,7 @@ class TabChild final : public TabChildBase,
     return GetFrom(docShell);
   }
 
-  static TabChild* GetFrom(nsIPresShell* aPresShell);
+  static TabChild* GetFrom(PresShell* aPresShell);
   static TabChild* GetFrom(layers::LayersId aLayersId);
 
   layers::LayersId GetLayersId() { return mLayersId; }
@@ -637,6 +640,11 @@ class TabChild final : public TabChildBase,
   // The HANDLE object for the widget this TabChild in.
   WindowsHandle WidgetNativeData() { return mWidgetNativeData; }
 
+  // The transform from the coordinate space of this TabChild to the coordinate
+  // space of the native window its TabParent is in.
+  mozilla::LayoutDeviceToLayoutDeviceMatrix4x4
+  GetChildToParentConversionMatrix() const;
+
   // Prepare to dispatch all coalesced mousemove events. We'll move all data
   // in mCoalescedMouseData to a nsDeque; then we start processing them. We
   // can't fetch the coalesced event one by one and dispatch it because we may
@@ -673,7 +681,7 @@ class TabChild final : public TabChildBase,
 
   virtual PBrowserBridgeChild* AllocPBrowserBridgeChild(
       const nsString& aName, const nsString& aRemoteType,
-      BrowsingContext* aBrowsingContext) override;
+      BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags) override;
 
   virtual bool DeallocPBrowserBridgeChild(PBrowserBridgeChild* aActor) override;
 
@@ -904,6 +912,8 @@ class TabChild final : public TabChildBase,
   uint32_t mPendingDocShellBlockers;
 
   WindowsHandle mWidgetNativeData;
+
+  Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> mChildToParentConversionMatrix;
 
   // This state is used to keep track of the current visible tabs (the ones
   // rendering layers). There may be more than one if there are multiple browser

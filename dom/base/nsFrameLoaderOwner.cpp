@@ -7,6 +7,7 @@
 #include "nsFrameLoaderOwner.h"
 #include "nsFrameLoader.h"
 #include "mozilla/dom/FrameLoaderBinding.h"
+#include "mozilla/dom/BrowsingContext.h"
 
 already_AddRefed<nsFrameLoader> nsFrameLoaderOwner::GetFrameLoader() {
   return do_AddRef(mFrameLoader);
@@ -14,6 +15,14 @@ already_AddRefed<nsFrameLoader> nsFrameLoaderOwner::GetFrameLoader() {
 
 void nsFrameLoaderOwner::SetFrameLoader(nsFrameLoader* aNewFrameLoader) {
   mFrameLoader = aNewFrameLoader;
+}
+
+already_AddRefed<mozilla::dom::BrowsingContext>
+nsFrameLoaderOwner::GetBrowsingContext() {
+  if (mFrameLoader) {
+    return mFrameLoader->GetBrowsingContext();
+  }
+  return nullptr;
 }
 
 void nsFrameLoaderOwner::ChangeRemoteness(
@@ -30,6 +39,10 @@ void nsFrameLoaderOwner::ChangeRemoteness(
   RefPtr<Element> owner = do_QueryObject(this);
   MOZ_ASSERT(owner);
   mFrameLoader = nsFrameLoader::Create(owner, aOptions);
+
+  if (NS_WARN_IF(!mFrameLoader)) {
+    return;
+  }
   mFrameLoader->LoadFrame(false);
 
   // Now that we've got a new FrameLoader, we need to reset our

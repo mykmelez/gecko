@@ -47,6 +47,7 @@
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLSlotElement.h"
@@ -301,8 +302,7 @@ Element* nsFocusManager::GetFocusedDescendant(
     if (!docShell) {
       break;
     }
-    nsIPresShell* presShell = docShell->GetPresShell();
-    if (!presShell) {
+    if (!docShell->GetPresShell()) {
       break;
     }
   }
@@ -396,8 +396,6 @@ NS_IMETHODIMP nsFocusManager::SetFocusedWindow(
   nsCOMPtr<nsPIDOMWindowOuter> windowToFocus =
       nsPIDOMWindowOuter::From(aWindowToFocus);
   NS_ENSURE_TRUE(windowToFocus, NS_ERROR_FAILURE);
-
-  windowToFocus = windowToFocus->GetOuterWindow();
 
   nsCOMPtr<Element> frameElement = windowToFocus->GetFrameElementInternal();
   if (frameElement) {
@@ -601,12 +599,14 @@ nsFocusManager::MoveCaretToFocus(mozIDOMWindowProxy* aWindow) {
       docShell->GetEditable(&isEditable);
       if (isEditable) return NS_OK;
 
-      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
+      RefPtr<PresShell> presShell = docShell->GetPresShell();
       NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
 
       nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
       nsCOMPtr<nsIContent> content = window->GetFocusedElement();
-      if (content) MoveCaretToFocus(presShell, content);
+      if (content) {
+        MoveCaretToFocus(presShell, content);
+      }
     }
   }
 
@@ -726,8 +726,7 @@ nsFocusManager::WindowLowered(mozIDOMWindowProxy* aWindow) {
   if (mFocusedWindow) {
     nsCOMPtr<nsIDocShell> docShell = mFocusedWindow->GetDocShell();
     if (docShell) {
-      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-      if (presShell) {
+      if (PresShell* presShell = docShell->GetPresShell()) {
         RefPtr<nsFrameSelection> frameSelection = presShell->FrameSelection();
         frameSelection->SetDragState(false);
       }
@@ -907,7 +906,7 @@ nsFocusManager::WindowHidden(mozIDOMWindowProxy* aWindow) {
   RefPtr<Element> oldFocusedElement = mFocusedElement.forget();
 
   nsCOMPtr<nsIDocShell> focusedDocShell = mFocusedWindow->GetDocShell();
-  nsCOMPtr<nsIPresShell> presShell = focusedDocShell->GetPresShell();
+  RefPtr<PresShell> presShell = focusedDocShell->GetPresShell();
 
   if (oldFocusedElement && oldFocusedElement->IsInComposedDoc()) {
     NotifyFocusStateChange(oldFocusedElement, nullptr,
@@ -1315,7 +1314,7 @@ void nsFocusManager::SetFocusInner(Element* aNewContent, int32_t aFlags,
     if (aFocusChanged) {
       nsCOMPtr<nsIDocShell> docShell = newWindow->GetDocShell();
 
-      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
+      RefPtr<PresShell> presShell = docShell->GetPresShell();
       if (presShell && presShell->DidInitialize())
         ScrollIntoView(presShell, elementToFocus, aFlags);
     }
@@ -1567,7 +1566,7 @@ bool nsFocusManager::Blur(nsPIDOMWindowOuter* aWindowToClear,
 
   // Keep a ref to presShell since dispatching the DOM event may cause
   // the document to be destroyed.
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
+  RefPtr<PresShell> presShell = docShell->GetPresShell();
   if (!presShell) {
     mFocusedElement = nullptr;
     mFocusedWindow = nullptr;
@@ -1734,8 +1733,10 @@ void nsFocusManager::Focus(nsPIDOMWindowOuter* aWindow, Element* aElement,
   nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
   if (!docShell) return;
 
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-  if (!presShell) return;
+  RefPtr<PresShell> presShell = docShell->GetPresShell();
+  if (!presShell) {
+    return;
+  }
 
   // If the focus actually changed, set the focus method (mouse, keyboard, etc).
   // Otherwise, just get the current focus method and use that. This ensures
@@ -1750,7 +1751,9 @@ void nsFocusManager::Focus(nsPIDOMWindowOuter* aWindow, Element* aElement,
     // else
     if (CheckIfFocusable(aElement, aFlags)) {
       aWindow->SetFocusedElement(aElement, focusMethod);
-      if (aFocusChanged) ScrollIntoView(presShell, aElement, aFlags);
+      if (aFocusChanged) {
+        ScrollIntoView(presShell, aElement, aFlags);
+      }
     }
     return;
   }
@@ -2118,14 +2121,19 @@ void nsFocusManager::FireFocusOrBlurEvent(EventMessage aEventMessage,
 void nsFocusManager::ScrollIntoView(nsIPresShell* aPresShell,
                                     nsIContent* aContent, uint32_t aFlags) {
   // if the noscroll flag isn't set, scroll the newly focused element into view
-  if (!(aFlags & FLAG_NOSCROLL))
+  if (!(aFlags & FLAG_NOSCROLL)) {
+    uint32_t scrollFlags = nsIPresShell::SCROLL_OVERFLOW_HIDDEN;
+    if (!(aFlags & FLAG_BYELEMENTFOCUS)) {
+      scrollFlags |= nsIPresShell::SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING;
+    }
     aPresShell->ScrollContentIntoView(
         aContent,
         nsIPresShell::ScrollAxis(nsIPresShell::SCROLL_MINIMUM,
                                  nsIPresShell::SCROLL_IF_NOT_VISIBLE),
         nsIPresShell::ScrollAxis(nsIPresShell::SCROLL_MINIMUM,
                                  nsIPresShell::SCROLL_IF_NOT_VISIBLE),
-        nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+        scrollFlags);
+  }
 }
 
 void nsFocusManager::RaiseWindow(nsPIDOMWindowOuter* aWindow) {
@@ -2165,8 +2173,10 @@ void nsFocusManager::RaiseWindow(nsPIDOMWindowOuter* aWindow) {
   nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
   if (!docShell) return;
 
-  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
-  if (!presShell) return;
+  PresShell* presShell = docShell->GetPresShell();
+  if (!presShell) {
+    return;
+  }
 
   nsViewManager* vm = presShell->GetViewManager();
   if (vm) {
@@ -2208,8 +2218,10 @@ void nsFocusManager::UpdateCaret(bool aMoveCaretToFocus, bool aUpdateVisibility,
 
   bool browseWithCaret = Preferences::GetBool("accessibility.browsewithcaret");
 
-  nsCOMPtr<nsIPresShell> presShell = focusedDocShell->GetPresShell();
-  if (!presShell) return;
+  RefPtr<PresShell> presShell = focusedDocShell->GetPresShell();
+  if (!presShell) {
+    return;
+  }
 
   // If this is an editable document which isn't contentEditable, or a
   // contentEditable document and the node to focus is contentEditable,
@@ -2227,7 +2239,9 @@ void nsFocusManager::UpdateCaret(bool aMoveCaretToFocus, bool aUpdateVisibility,
     if (!isContentEditableDoc || isFocusEditable) return;
   }
 
-  if (!isEditable && aMoveCaretToFocus) MoveCaretToFocus(presShell, aContent);
+  if (!isEditable && aMoveCaretToFocus) {
+    MoveCaretToFocus(presShell, aContent);
+  }
 
   if (!aUpdateVisibility) return;
 
@@ -2856,6 +2870,11 @@ nsresult nsFocusManager::DetermineElementToMoveFocus(
   }
 
   return NS_OK;
+}
+
+uint32_t nsFocusManager::FocusOptionsToFocusManagerFlags(
+    const mozilla::dom::FocusOptions& aOptions) {
+  return aOptions.mPreventScroll ? nsIFocusManager::FLAG_NOSCROLL : 0;
 }
 
 static bool IsHostOrSlot(const nsIContent* aContent) {

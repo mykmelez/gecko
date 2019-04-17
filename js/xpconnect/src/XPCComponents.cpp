@@ -1336,8 +1336,7 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
     return NS_OK;
   }
 
-  nsGlobalWindowInner* globalWin = CurrentWindowOrNull(cx);
-  nsPIDOMWindowInner* win = globalWin ? globalWin->AsInner() : nullptr;
+  nsGlobalWindowInner* win = CurrentWindowOrNull(cx);
   const uint64_t innerWindowID = win ? win->WindowID() : 0;
 
   RootedObject errorObj(cx, error.isObject() ? &error.toObject() : nullptr);
@@ -1348,7 +1347,8 @@ nsXPCComponents_Utils::ReportError(HandleValue error, HandleValue stack,
   if (errorObj) {
     JS::RootedObject stackVal(cx);
     JS::RootedObject stackGlobal(cx);
-    FindExceptionStackForConsoleReport(win, error, &stackVal, &stackGlobal);
+    FindExceptionStackForConsoleReport(win, error, nullptr, &stackVal,
+                                       &stackGlobal);
     if (stackVal) {
       scripterr = new nsScriptErrorWithStack(stackVal, stackGlobal);
     }
@@ -2226,7 +2226,7 @@ class WrappedJSHolder : public nsISupports {
 NS_IMPL_ADDREF(WrappedJSHolder)
 NS_IMPL_RELEASE(WrappedJSHolder)
 
-// nsINamed is always supported by nsXPCWrappedJSClass.
+// nsINamed is always supported by nsXPCWrappedJS::DelegatedQueryInterface().
 // We expose this interface only for the identity in telemetry analysis.
 NS_INTERFACE_TABLE_HEAD(WrappedJSHolder)
   if (aIID.Equals(NS_GET_IID(nsINamed))) {

@@ -15,15 +15,15 @@
 #include "nsIURLParser.h"
 #include "nsJSUtils.h"
 #include "jsfriendapi.h"
-#include "js/CompilationAndEvaluation.h"
+#include "js/CompilationAndEvaluation.h"  // JS::Compile{,DontInflate}
 #include "js/PropertySpec.h"
-#include "js/SourceText.h"
+#include "js/SourceText.h"  // JS::Source{Ownership,Text}
 #include "js/Utility.h"
 #include "js/Warnings.h"  // JS::SetWarningReporter
 #include "prnetdb.h"
 #include "nsITimer.h"
 #include "mozilla/net/DNS.h"
-#include "mozilla/Utf8.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "nsServiceManagerUtils.h"
 #include "nsNetCID.h"
 
@@ -706,8 +706,7 @@ nsresult ProxyAutoConfig::SetupJS() {
 
   JS::Rooted<JSObject *> global(cx, mJSContext->Global());
 
-  auto CompilePACScript = [this](JSContext *cx,
-                                 JS::MutableHandle<JSScript *> script) {
+  auto CompilePACScript = [this](JSContext *cx) -> JSScript * {
     JS::CompileOptions options(cx);
     options.setFileAndLine(this->mPACURI.get(), 1);
 
@@ -716,7 +715,13 @@ nsresult ProxyAutoConfig::SetupJS() {
     const char *scriptData = this->mConcatenatedPACData.get();
     size_t scriptLength = this->mConcatenatedPACData.Length();
     if (mozilla::IsValidUtf8(scriptData, scriptLength)) {
-      return JS::CompileUtf8(cx, options, scriptData, scriptLength, script);
+      JS::SourceText<Utf8Unit> srcBuf;
+      if (!srcBuf.init(cx, scriptData, scriptLength,
+                       JS::SourceOwnership::Borrowed)) {
+        return nullptr;
+      }
+
+      return JS::CompileDontInflate(cx, options, srcBuf);
     }
 
     // nsReadableUtils.h says that "ASCII" is a misnomer "for legacy reasons",
@@ -726,14 +731,14 @@ nsresult ProxyAutoConfig::SetupJS() {
     JS::SourceText<char16_t> source;
     if (!source.init(cx, inflated.get(), inflated.Length(),
                      JS::SourceOwnership::Borrowed)) {
-      return false;
+      return nullptr;
     }
 
-    return JS::Compile(cx, options, source, script);
+    return JS::Compile(cx, options, source);
   };
 
-  JS::Rooted<JSScript *> script(cx);
-  if (!CompilePACScript(cx, &script) || !JS_ExecuteScript(cx, script)) {
+  JS::Rooted<JSScript *> script(cx, CompilePACScript(cx));
+  if (!script || !JS_ExecuteScript(cx, script)) {
     nsString alertMessage(
         NS_LITERAL_STRING("PAC file failed to install from "));
     if (isDataURI) {

@@ -14,14 +14,15 @@
 #include "gfxMatrix.h"
 #include "gfxPattern.h"
 #include "gfxPlatform.h"
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/SVGPatternElement.h"
+#include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "mozilla/gfx/2D.h"
 #include "nsGkAtoms.h"
 #include "nsSVGDisplayableFrame.h"
-#include "mozilla/ComputedStyle.h"
 #include "SVGObserverUtils.h"
 #include "SVGGeometryFrame.h"
-#include "mozilla/dom/SVGPatternElement.h"
-#include "mozilla/dom/SVGUnitTypesBinding.h"
 #include "nsSVGUtils.h"
 #include "SVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
@@ -521,9 +522,9 @@ const SVGAnimatedPreserveAspectRatio &nsSVGPatternFrame::GetPreserveAspectRatio(
              : static_cast<SVGPatternElement *>(aDefault)->mPreserveAspectRatio;
 }
 
-const nsSVGLength2 *nsSVGPatternFrame::GetLengthValue(uint32_t aIndex,
-                                                      nsIContent *aDefault) {
-  const nsSVGLength2 *thisLength =
+const SVGAnimatedLength *nsSVGPatternFrame::GetLengthValue(
+    uint32_t aIndex, nsIContent *aDefault) {
+  const SVGAnimatedLength *thisLength =
       &static_cast<SVGPatternElement *>(GetContent())
            ->mLengthAttributes[aIndex];
 
@@ -590,7 +591,7 @@ gfxRect nsSVGPatternFrame::GetPatternRect(uint16_t aPatternUnits,
   float x, y, width, height;
 
   // Get the pattern x,y,width, and height
-  const nsSVGLength2 *tmpX, *tmpY, *tmpHeight, *tmpWidth;
+  const SVGAnimatedLength *tmpX, *tmpY, *tmpHeight, *tmpWidth;
   tmpX = GetLengthValue(SVGPatternElement::ATTR_X);
   tmpY = GetLengthValue(SVGPatternElement::ATTR_Y);
   tmpHeight = GetLengthValue(SVGPatternElement::ATTR_HEIGHT);
@@ -636,9 +637,9 @@ gfxMatrix nsSVGPatternFrame::ConstructCTM(const SVGAnimatedViewBox &aViewBox,
   if (!aViewBox.IsExplicitlySet()) {
     return gfxMatrix(scaleX, 0.0, 0.0, scaleY, 0.0, 0.0);
   }
-  const SVGViewBoxRect viewBoxRect = aViewBox.GetAnimValue();
+  const SVGViewBox& viewBox = aViewBox.GetAnimValue();
 
-  if (viewBoxRect.height <= 0.0f || viewBoxRect.width <= 0.0f) {
+  if (viewBox.height <= 0.0f || viewBox.width <= 0.0f) {
     return gfxMatrix(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);  // singular
   }
 
@@ -664,9 +665,8 @@ gfxMatrix nsSVGPatternFrame::ConstructCTM(const SVGAnimatedViewBox &aViewBox,
   }
 
   Matrix tm = SVGContentUtils::GetViewBoxTransform(
-      viewportWidth * scaleX, viewportHeight * scaleY, viewBoxRect.x,
-      viewBoxRect.y, viewBoxRect.width, viewBoxRect.height,
-      GetPreserveAspectRatio());
+      viewportWidth * scaleX, viewportHeight * scaleY, viewBox.x, viewBox.y,
+      viewBox.width, viewBox.height, GetPreserveAspectRatio());
 
   return ThebesMatrix(tm);
 }
@@ -706,8 +706,7 @@ already_AddRefed<gfxPattern> nsSVGPatternFrame::GetPaintServerPattern(
 // Public functions
 // -------------------------------------------------------------------------
 
-nsIFrame *NS_NewSVGPatternFrame(nsIPresShell *aPresShell,
-                                ComputedStyle *aStyle) {
+nsIFrame *NS_NewSVGPatternFrame(PresShell *aPresShell, ComputedStyle *aStyle) {
   return new (aPresShell)
       nsSVGPatternFrame(aStyle, aPresShell->GetPresContext());
 }

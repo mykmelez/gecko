@@ -240,8 +240,8 @@ static bool GetProperty(JSContext* cx, HandleObject obj, const char* chars,
   return GetProperty(cx, obj, obj, id, v);
 }
 
-static bool GetImports(JSContext* cx, const Module& module,
-                       HandleObject importObj, ImportValues* imports) {
+bool js::wasm::GetImports(JSContext* cx, const Module& module,
+                          HandleObject importObj, ImportValues* imports) {
   if (!module.imports().empty() && !importObj) {
     return ThrowBadImportArg(cx);
   }
@@ -760,7 +760,7 @@ static JSString* KindToString(JSContext* cx, const KindNames& names,
 }
 
 static JSString* FuncTypeToString(JSContext* cx, const FuncType& funcType) {
-  StringBuffer buf(cx);
+  JSStringBuilder buf(cx);
   if (!buf.append('(')) {
     return nullptr;
   }
@@ -2778,6 +2778,12 @@ static bool Reject(JSContext* cx, const CompileArgs& args,
   return PromiseObject::reject(cx, promise, rejectionValue);
 }
 
+static void LogAsync(JSContext* cx, const char* funcName,
+                     const Module& module) {
+  Log(cx, "async %s succeeded%s", funcName,
+      module.loggingDeserialized() ? " (loaded from cache)" : "");
+}
+
 enum class Ret { Pair, Instance };
 
 class AsyncInstantiateTask : public OffThreadPromiseTask {
@@ -2840,7 +2846,7 @@ class AsyncInstantiateTask : public OffThreadPromiseTask {
       return RejectWithPendingException(cx, promise);
     }
 
-    Log(cx, "async instantiate succeeded");
+    LogAsync(cx, "instantiate", *module_);
     return true;
   }
 };
@@ -2875,7 +2881,7 @@ static bool ResolveCompile(JSContext* cx, const Module& module,
     return RejectWithPendingException(cx, promise);
   }
 
-  Log(cx, "async compile succeeded");
+  LogAsync(cx, "compile", module);
   return true;
 }
 

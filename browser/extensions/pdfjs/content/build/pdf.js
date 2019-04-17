@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.2.117';
-var pdfjsBuild = '57abddc9';
+var pdfjsVersion = '2.2.145';
+var pdfjsBuild = '8bbae798';
 
 var pdfjsSharedUtil = __w_pdfjs_require__(1);
 
@@ -1303,7 +1303,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
 
   return worker.messageHandler.sendWithPromise('GetDocRequest', {
     docId,
-    apiVersion: '2.2.117',
+    apiVersion: '2.2.145',
     source: {
       data: source.data,
       url: source.url,
@@ -1406,10 +1406,10 @@ class PDFDataRangeTransport {
     }
   }
 
-  onDataProgress(loaded) {
+  onDataProgress(loaded, total) {
     this._readyCapability.promise.then(() => {
       for (const listener of this._progressListeners) {
-        listener(loaded);
+        listener(loaded, total);
       }
     });
   }
@@ -1476,6 +1476,10 @@ class PDFDocumentProxy {
 
   getPageLabels() {
     return this._transport.getPageLabels();
+  }
+
+  getPageLayout() {
+    return this._transport.getPageLayout();
   }
 
   getPageMode() {
@@ -2377,6 +2381,11 @@ class WorkerTransport {
 
       const rangeReader = this._networkStream.getRangeReader(data.begin, data.end);
 
+      if (!rangeReader) {
+        sink.close();
+        return;
+      }
+
       sink.onPull = () => {
         rangeReader.read().then(function ({
           value,
@@ -2761,6 +2770,10 @@ class WorkerTransport {
     return this.messageHandler.sendWithPromise('GetPageLabels', null);
   }
 
+  getPageLayout() {
+    return this.messageHandler.sendWithPromise('GetPageLayout', null);
+  }
+
   getPageMode() {
     return this.messageHandler.sendWithPromise('GetPageMode', null);
   }
@@ -3075,9 +3088,9 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
   return InternalRenderTask;
 }();
 
-const version = '2.2.117';
+const version = '2.2.145';
 exports.version = version;
-const build = '57abddc9';
+const build = '8bbae798';
 exports.build = build;
 
 /***/ }),
@@ -4591,8 +4604,11 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
         ctx.lineDashOffset = dashPhase;
       }
     },
-    setRenderingIntent: function CanvasGraphics_setRenderingIntent(intent) {},
-    setFlatness: function CanvasGraphics_setFlatness(flatness) {},
+
+    setRenderingIntent(intent) {},
+
+    setFlatness(flatness) {},
+
     setGState: function CanvasGraphics_setGState(states) {
       for (var i = 0, ii = states.length; i < ii; i++) {
         var state = states[i];
@@ -7337,9 +7353,10 @@ var PDFDataTransportStream = function PDFDataTransportStreamClosure() {
       });
     });
 
-    this._pdfDataRangeTransport.addProgressListener(loaded => {
+    this._pdfDataRangeTransport.addProgressListener((loaded, total) => {
       this._onProgress({
-        loaded
+        loaded,
+        total
       });
     });
 
@@ -7380,15 +7397,30 @@ var PDFDataTransportStream = function PDFDataTransportStreamClosure() {
         (0, _util.assert)(found);
       }
     },
+
+    get _progressiveDataLength() {
+      return this._fullRequestReader ? this._fullRequestReader._loaded : 0;
+    },
+
     _onProgress: function PDFDataTransportStream_onDataProgress(evt) {
-      if (this._rangeReaders.length > 0) {
+      if (evt.total === undefined && this._rangeReaders.length > 0) {
         var firstReader = this._rangeReaders[0];
 
         if (firstReader.onProgress) {
           firstReader.onProgress({
             loaded: evt.loaded
           });
+          return;
         }
+      }
+
+      let fullReader = this._fullRequestReader;
+
+      if (fullReader && fullReader.onProgress) {
+        fullReader.onProgress({
+          loaded: evt.loaded,
+          total: evt.total
+        });
       }
     },
 
@@ -7414,6 +7446,10 @@ var PDFDataTransportStream = function PDFDataTransportStreamClosure() {
       return new PDFDataTransportStreamReader(this, queuedChunks, this._progressiveDone);
     },
     getRangeReader: function PDFDataTransportStream_getRangeReader(begin, end) {
+      if (end <= this._progressiveDataLength) {
+        return null;
+      }
+
       var reader = new PDFDataTransportStreamRangeReader(this, begin, end);
 
       this._pdfDataRangeTransport.requestDataRange(begin, end);
@@ -7442,6 +7478,12 @@ var PDFDataTransportStream = function PDFDataTransportStreamClosure() {
     this._done = progressiveDone || false;
     this._filename = null;
     this._queuedChunks = queuedChunks || [];
+    this._loaded = 0;
+
+    for (const chunk of this._queuedChunks) {
+      this._loaded += chunk.byteLength;
+    }
+
     this._requests = [];
     this._headersReady = Promise.resolve();
     stream._fullRequestReader = this;
@@ -7461,10 +7503,11 @@ var PDFDataTransportStream = function PDFDataTransportStreamClosure() {
           value: chunk,
           done: false
         });
-        return;
+      } else {
+        this._queuedChunks.push(chunk);
       }
 
-      this._queuedChunks.push(chunk);
+      this._loaded += chunk.byteLength;
     },
 
     get headersReady() {
@@ -8803,6 +8846,9 @@ class AnnotationElementFactory {
       case _util.AnnotationType.POPUP:
         return new PopupAnnotationElement(parameters);
 
+      case _util.AnnotationType.FREETEXT:
+        return new FreeTextAnnotationElement(parameters);
+
       case _util.AnnotationType.LINE:
         return new LineAnnotationElement(parameters);
 
@@ -8814,6 +8860,9 @@ class AnnotationElementFactory {
 
       case _util.AnnotationType.POLYLINE:
         return new PolylineAnnotationElement(parameters);
+
+      case _util.AnnotationType.CARET:
+        return new CaretAnnotationElement(parameters);
 
       case _util.AnnotationType.INK:
         return new InkAnnotationElement(parameters);
@@ -9345,6 +9394,24 @@ class PopupElement {
 
 }
 
+class FreeTextAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    const isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+
+  render() {
+    this.container.className = 'freeTextAnnotation';
+
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
+    }
+
+    return this.container;
+  }
+
+}
+
 class LineAnnotationElement extends AnnotationElement {
   constructor(parameters) {
     let isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
@@ -9481,6 +9548,24 @@ class PolygonAnnotationElement extends PolylineAnnotationElement {
     super(parameters);
     this.containerClassName = 'polygonAnnotation';
     this.svgElementName = 'svg:polygon';
+  }
+
+}
+
+class CaretAnnotationElement extends AnnotationElement {
+  constructor(parameters) {
+    const isRenderable = !!(parameters.data.hasPopup || parameters.data.title || parameters.data.contents);
+    super(parameters, isRenderable, true);
+  }
+
+  render() {
+    this.container.className = 'caretAnnotation';
+
+    if (!this.data.hasPopup) {
+      this._createPopup(this.container, null, this.data);
+    }
+
+    return this.container;
   }
 
 }
@@ -9730,7 +9815,7 @@ var _is_node = _interopRequireDefault(__w_pdfjs_require__(21));
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-var SVGGraphics = function () {
+let SVGGraphics = function () {
   throw new Error('Not implemented: SVGGraphics');
 };
 

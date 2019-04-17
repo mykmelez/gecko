@@ -32,7 +32,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
             extends RuntimeSettings.Builder<GeckoRuntimeSettings> {
         @Override
         protected @NonNull GeckoRuntimeSettings newSettings(
-                final GeckoRuntimeSettings settings) {
+                final @Nullable GeckoRuntimeSettings settings) {
             return new GeckoRuntimeSettings(settings);
         }
 
@@ -74,19 +74,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
                 throw new IllegalArgumentException("Extras must not  be null");
             }
             getSettings().mExtras = extras;
-            return this;
-        }
-
-        /**
-         * Path to configuration file from which GeckoView will read configuration options such as
-         * Gecko process arguments, environment variables, and preferences.
-         *
-         * @param configFilePath Configuration file path to read from, or <code>null</code> to use
-         *                       default location <code>/data/local/tmp/$PACKAGE-geckoview-config.yaml</code>.
-         * @return This Builder instance.
-         */
-        public @NonNull Builder configFilePath(final @Nullable String configFilePath) {
-            getSettings().mConfigFilePath = configFilePath;
             return this;
         }
 
@@ -293,7 +280,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
          * @see <a href="https://developer.android.com/about/versions/oreo/background">Android Background Execution Limits</a>
          * @see GeckoRuntime#ACTION_CRASHED
          */
-        public @NonNull Builder crashHandler(final Class<? extends Service> handler) {
+        public @NonNull Builder crashHandler(final @Nullable Class<? extends Service> handler) {
             getSettings().mCrashHandler = handler;
             return this;
         }
@@ -304,7 +291,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
          * @param requestedLocales List of locale codes in Gecko format ("en" or "en-US").
          * @return The builder instance.
          */
-        public @NonNull Builder locales(final String[] requestedLocales) {
+        public @NonNull Builder locales(final @Nullable String[] requestedLocales) {
             getSettings().mRequestedLocales = requestedLocales;
             return this;
         }
@@ -343,7 +330,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     /* package */ boolean mUseContentProcess;
     /* package */ String[] mArgs;
     /* package */ Bundle mExtras;
-    /* package */ String mConfigFilePath;
 
     /* package */ ContentBlocking.Settings mContentBlocking;
 
@@ -426,7 +412,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         mScreenHeightOverride = settings.mScreenHeightOverride;
         mCrashHandler = settings.mCrashHandler;
         mRequestedLocales = settings.mRequestedLocales;
-        mConfigFilePath = settings.mConfigFilePath;
     }
 
     /* package */ void commit() {
@@ -459,18 +444,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
      */
     public @NonNull Bundle getExtras() {
         return mExtras;
-    }
-
-    /**
-     * Path to configuration file from which GeckoView will read configuration options such as
-     * Gecko process arguments, environment variables, and preferences.
-     *
-     * @return Path to configuration file from which GeckoView will read configuration options,
-     * or <code>null</code> for default location
-     * <code>/data/local/tmp/$PACKAGE-geckoview-config.yaml</code>.
-     */
-    public @Nullable String getConfigFilePath() {
-        return mConfigFilePath;
     }
 
     /**
@@ -849,7 +822,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         out.writeInt(mScreenHeightOverride);
         out.writeString(mCrashHandler != null ? mCrashHandler.getName() : null);
         out.writeStringArray(mRequestedLocales);
-        out.writeString(mConfigFilePath);
     }
 
     // AIDL code may call readFromParcel even though it's not part of Parcelable.
@@ -879,7 +851,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         }
 
         mRequestedLocales = source.createStringArray();
-        mConfigFilePath = source.readString();
     }
 
     public static final Parcelable.Creator<GeckoRuntimeSettings> CREATOR

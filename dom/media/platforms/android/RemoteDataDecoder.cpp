@@ -243,7 +243,7 @@ class RemoteVideoDecoder : public RemoteDataDecoder {
 
     AssertOnTaskQueue();
     if (GetState() == State::SHUTDOWN) {
-      mJavaDecoder->DisposeOutput(aSample);
+      aSample->Dispose();
       return;
     }
 
@@ -282,7 +282,7 @@ class RemoteVideoDecoder : public RemoteDataDecoder {
     if (ok && (size > 0 || presentationTimeUs >= 0)) {
       RefPtr<layers::Image> img = new SurfaceTextureImage(
           mSurfaceHandle, inputInfo.mImageSize, false /* NOT continuous */,
-          gl::OriginPos::BottomLeft);
+          gl::OriginPos::BottomLeft, mConfig.HasAlpha());
 
       RefPtr<VideoData> v = VideoData::CreateFromImage(
           inputInfo.mDisplaySize, offset,
@@ -427,7 +427,7 @@ class RemoteAudioDecoder : public RemoteDataDecoder {
     AssertOnTaskQueue();
 
     if (GetState() == State::SHUTDOWN || !aBuffer->IsValid()) {
-      mJavaDecoder->DisposeOutput(aSample);
+      aSample->Dispose();
       return;
     }
 

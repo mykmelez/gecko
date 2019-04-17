@@ -167,7 +167,7 @@ jobs:
     parent: debian9-base
   fetch:
     symbol: I(fetch)
-    parent: debian9-base
+    parent: debian9-raw
   static-analysis-build:
     symbol: I(static-analysis-build)
     parent: android-build
@@ -178,8 +178,8 @@ jobs:
     symbol: I(idx)
   funsize-update-generator:
     symbol: I(pg)
-  google-play-strings:
-    symbol: I(gps)
+  mozapkpublisher:
+    symbol: I(apk)
   update-verify:
     symbol: I(uv)
   diffoscope:

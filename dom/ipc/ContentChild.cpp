@@ -897,6 +897,13 @@ nsresult ContentChild::ProvideWindowCommon(
 
     Maybe<URIParams> uriToLoad;
     SerializeURI(aURI, uriToLoad);
+
+    if (name.LowerCaseEqualsLiteral("_blank")) {
+      name = EmptyString();
+    }
+
+    MOZ_DIAGNOSTIC_ASSERT(!nsContentUtils::IsSpecialName(name));
+
     Unused << SendCreateWindowInDifferentProcess(
         aTabOpener, aChromeFlags, aCalledFromJS, aPositionSpecified,
         aSizeSpecified, uriToLoad, features, fullZoom, name,
@@ -3047,7 +3054,8 @@ mozilla::ipc::IPCResult ContentChild::RecvPWebBrowserPersistDocumentConstructor(
   if (NS_WARN_IF(!aBrowser)) {
     return IPC_FAIL_NO_REASON(this);
   }
-  nsCOMPtr<Document> rootDoc = static_cast<TabChild*>(aBrowser)->GetDocument();
+  nsCOMPtr<Document> rootDoc =
+      static_cast<TabChild*>(aBrowser)->GetTopLevelDocument();
   nsCOMPtr<Document> foundDoc;
   if (aOuterWindowID) {
     foundDoc = nsContentUtils::GetSubdocumentWithOuterWindowId(rootDoc,

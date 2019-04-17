@@ -15,9 +15,10 @@
 #include "nsSVGPaintServerFrame.h"
 
 class nsIFrame;
-class nsSVGLength2;
 
 namespace mozilla {
+class PresShell;
+class SVGAnimatedLength;
 class SVGAnimatedPreserveAspectRatio;
 class SVGAnimatedTransformList;
 class SVGAnimatedViewBox;
@@ -30,7 +31,7 @@ class nsSVGPatternFrame final : public nsSVGPaintServerFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGPatternFrame)
 
-  friend nsIFrame* NS_NewSVGPatternFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewSVGPatternFrame(mozilla::PresShell* aPresShell,
                                          ComputedStyle* aStyle);
 
   explicit nsSVGPatternFrame(ComputedStyle* aStyle,
@@ -87,8 +88,9 @@ class nsSVGPatternFrame final : public nsSVGPaintServerFrame {
   const SVGAnimatedPreserveAspectRatio& GetPreserveAspectRatio() {
     return GetPreserveAspectRatio(mContent);
   }
-  const nsSVGLength2* GetLengthValue(uint32_t aIndex, nsIContent* aDefault);
-  const nsSVGLength2* GetLengthValue(uint32_t aIndex) {
+  const SVGAnimatedLength* GetLengthValue(uint32_t aIndex,
+                                          nsIContent* aDefault);
+  const SVGAnimatedLength* GetLengthValue(uint32_t aIndex) {
     return GetLengthValue(aIndex, mContent);
   }
 

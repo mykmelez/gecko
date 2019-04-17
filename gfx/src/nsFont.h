@@ -14,15 +14,15 @@
 #include "gfxFontFeatures.h"
 #include "gfxFontVariations.h"
 #include "mozilla/FontPropertyTypes.h"
-#include "mozilla/RefPtr.h"  // for RefPtr
-#include "mozilla/StyleColorInlines.h" // for StyleRGBA
-#include "nsCoord.h"         // for nscoord
-#include "nsTArray.h"        // for nsTArray
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/StyleColorInlines.h"  // for StyleRGBA
+#include "nsCoord.h"                    // for nscoord
+#include "nsTArray.h"                   // for nsTArray
 
 struct gfxFontStyle;
 
 // Font structure.
-struct nsFont {
+struct nsFont final {
   typedef mozilla::FontStretch FontStretch;
   typedef mozilla::FontSlantStyle FontSlantStyle;
   typedef mozilla::FontWeight FontWeight;
@@ -108,8 +108,7 @@ struct nsFont {
   nsFont(const nsFont& aFont);
 
   // leave members uninitialized
-  nsFont();
-
+  nsFont() = default;
   ~nsFont();
 
   bool operator==(const nsFont& aOther) const { return Equals(aOther); }

@@ -80,7 +80,7 @@ class nsListEventListener final : public nsIDOMEventListener {
 };
 
 //---------------------------------------------------------
-nsContainerFrame* NS_NewListControlFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewListControlFrame(PresShell* aPresShell,
                                          ComputedStyle* aStyle) {
   nsListControlFrame* it =
       new (aPresShell) nsListControlFrame(aStyle, aPresShell->GetPresContext());
@@ -1816,7 +1816,8 @@ void nsListControlFrame::ScrollToFrame(dom::HTMLOptionElement& aOptElement) {
         childFrame, nsRect(nsPoint(0, 0), childFrame->GetSize()),
         nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(),
         nsIPresShell::SCROLL_OVERFLOW_HIDDEN |
-            nsIPresShell::SCROLL_FIRST_ANCESTOR_ONLY);
+            nsIPresShell::SCROLL_FIRST_ANCESTOR_ONLY |
+            nsIPresShell::SCROLL_IGNORE_SCROLL_MARGIN_AND_PADDING);
   }
 }
 

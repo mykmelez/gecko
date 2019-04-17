@@ -42,12 +42,26 @@ exclude: true
 
 [68.9]: ../GeckoRuntimeSettings.html#setPreferredColorScheme-int-
 
-- Added [`GeckoRuntimeSettings.Builder#configFilePath`][68.10] to set
-  a path to a configuration file from which GeckoView will read
-  configuration options such as Gecko process arguments, environment
-  variables, and preferences.
+- Added [`@NonNull`][66.1] or [`@Nullable`][66.2] to all fields.
 
-[68.10]: ../GeckoRuntimeSettings.Builder.html#configFilePath-java.lang.String-
+- [`RuntimeTelemetry#getSnapshots`][68.10] returns a [`JSONObject`][67.22] now.
+
+[68.10]: ../RuntimeTelemetry.html#getSnapshots-boolean-
+
+- Removed all `org.mozilla.gecko` references in the API.
+
+- Added [`ContentBlocking#AT_FINGERPRINTING`][68.11] to block fingerprinting trackers.
+
+[68.11]: ../ContentBlocking.html#AT_FINGERPRINTING
+
+- Added `HistoryItem` and `HistoryList` interfaces and `onHistoryStateChange` to 
+  [`HistoryDelegate`][68.12] and added `gotoHistoryIndex` to [`GeckoSession`][68.13].
+
+[68.12]: ../GeckoSession.HistoryDelegate.html
+[68.13]: ../GeckoSession.html
+
+- [`GeckoView`][65.5] will not create a [`GeckoSession`][65.9] anymore when
+  attached to a window without a session.
 
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
@@ -255,4 +269,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: affe9cc5dc22f0700867a1ac7f9b55a033a4b88c
+[api-version]: 7cba6fdca8edb1858d73704a06dad936f78c9f64

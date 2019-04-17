@@ -465,7 +465,7 @@ void WarningOnlyErrorReporter(JSContext* aCx, JSErrorReport* aRep) {
   RefPtr<xpc::ErrorReport> xpcReport = new xpc::ErrorReport();
   nsGlobalWindowInner* win = xpc::CurrentWindowOrNull(aCx);
   xpcReport->Init(aRep, nullptr, nsContentUtils::IsSystemCaller(aCx),
-                  win ? win->AsInner()->WindowID() : 0);
+                  win ? win->WindowID() : 0);
   xpcReport->LogToConsole();
 }
 
@@ -494,25 +494,25 @@ void AutoJSAPI::ReportException() {
   MOZ_ASSERT(JS_IsGlobalObject(errorGlobal));
   JSAutoRealm ar(cx(), errorGlobal);
   JS::Rooted<JS::Value> exn(cx());
+  JS::Rooted<JSObject*> exnStack(cx());
   js::ErrorReport jsReport(cx());
-  if (StealException(&exn) &&
+  if (StealExceptionAndStack(&exn, &exnStack) &&
       jsReport.init(cx(), exn, js::ErrorReport::WithSideEffects)) {
     if (mIsMainThread) {
       RefPtr<xpc::ErrorReport> xpcReport = new xpc::ErrorReport();
 
-      RefPtr<nsGlobalWindowInner> win = xpc::WindowOrNull(errorGlobal);
-      nsPIDOMWindowInner* inner = win ? win->AsInner() : nullptr;
+      RefPtr<nsGlobalWindowInner> inner = xpc::WindowOrNull(errorGlobal);
       bool isChrome = nsContentUtils::IsSystemPrincipal(
           nsContentUtils::ObjectPrincipal(errorGlobal));
       xpcReport->Init(jsReport.report(), jsReport.toStringResult().c_str(),
                       isChrome, inner ? inner->WindowID() : 0);
       if (inner && jsReport.report()->errorNumber != JSMSG_OUT_OF_MEMORY) {
         JS::RootingContext* rcx = JS::RootingContext::get(cx());
-        DispatchScriptErrorEvent(inner, rcx, xpcReport, exn);
+        DispatchScriptErrorEvent(inner, rcx, xpcReport, exn, exnStack);
       } else {
         JS::Rooted<JSObject*> stack(cx());
         JS::Rooted<JSObject*> stackGlobal(cx());
-        xpc::FindExceptionStackForConsoleReport(inner, exn, &stack,
+        xpc::FindExceptionStackForConsoleReport(inner, exn, exnStack, &stack,
                                                 &stackGlobal);
         xpcReport->LogToConsoleWithStack(stack, stackGlobal);
       }
@@ -549,9 +549,16 @@ bool AutoJSAPI::PeekException(JS::MutableHandle<JS::Value> aVal) {
 }
 
 bool AutoJSAPI::StealException(JS::MutableHandle<JS::Value> aVal) {
+  JS::Rooted<JSObject*> stack(cx());
+  return StealExceptionAndStack(aVal, &stack);
+}
+
+bool AutoJSAPI::StealExceptionAndStack(JS::MutableHandle<JS::Value> aVal,
+                                       JS::MutableHandle<JSObject*> aStack) {
   if (!PeekException(aVal)) {
     return false;
   }
+  aStack.set(JS::GetPendingExceptionStack(cx()));
   JS_ClearPendingException(cx());
   return true;
 }

@@ -30,7 +30,7 @@ BEGIN_TEST(testBug795104) {
   opts.setNoScriptRval(true);
 
   JS::RootedValue unused(cx);
-  CHECK(JS::EvaluateUtf8(cx, opts, s, strLen, &unused));
+  CHECK(JS::Evaluate(cx, opts, srcBuf, &unused));
 
   JS::RootedFunction fun(cx);
   JS::RootedObjectVector emptyScopeChain(cx);
@@ -39,8 +39,7 @@ BEGIN_TEST(testBug795104) {
   // mode, since it's not supported for functions.
   opts.setNoScriptRval(false);
 
-  CHECK(JS::CompileFunction(cx, emptyScopeChain, opts, "f", 0, nullptr, srcBuf,
-                            &fun));
+  fun = JS::CompileFunction(cx, emptyScopeChain, opts, "f", 0, nullptr, srcBuf);
   CHECK(fun);
 
   JS_free(cx, s);

@@ -25,6 +25,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Likely.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/RestyleManager.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/URLExtraData.h"
 #include <algorithm>
@@ -1440,6 +1441,10 @@ Document::~Document() {
 
   ReportUseCounters();
 
+  if (!nsContentUtils::IsInPrivateBrowsing(this)) {
+    mContentBlockingLog.ReportLog();
+  }
+
   mInDestructor = true;
   mInUnlinkOrDeletion = true;
 
@@ -1922,23 +1927,32 @@ bool Document::IsVisibleConsideringAncestors() const {
 void Document::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) {
   nsCOMPtr<nsIURI> uri;
   nsCOMPtr<nsIPrincipal> principal;
+  nsCOMPtr<nsIPrincipal> storagePrincipal;
   if (aChannel) {
     // Note: this code is duplicated in XULDocument::StartDocumentLoad and
-    // nsScriptSecurityManager::GetChannelResultPrincipal.
+    // nsScriptSecurityManager::GetChannelResultPrincipals.
     // Note: this should match nsDocShell::OnLoadingSite
     NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
 
     nsIScriptSecurityManager* securityManager =
         nsContentUtils::GetSecurityManager();
     if (securityManager) {
-      securityManager->GetChannelResultPrincipal(aChannel,
-                                                 getter_AddRefs(principal));
+      securityManager->GetChannelResultPrincipals(
+          aChannel, getter_AddRefs(principal),
+          getter_AddRefs(storagePrincipal));
     }
   }
 
-  principal = MaybeDowngradePrincipal(principal);
+  bool equal = principal->Equals(storagePrincipal);
 
-  ResetToURI(uri, aLoadGroup, principal);
+  principal = MaybeDowngradePrincipal(principal);
+  if (equal) {
+    storagePrincipal = principal;
+  } else {
+    storagePrincipal = MaybeDowngradePrincipal(storagePrincipal);
+  }
+
+  ResetToURI(uri, aLoadGroup, principal, storagePrincipal);
 
   // Note that, since mTiming does not change during a reset, the
   // navigationStart time remains unchanged and therefore any future new
@@ -2030,8 +2044,10 @@ void Document::DisconnectNodeTree() {
 }
 
 void Document::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
-                          nsIPrincipal* aPrincipal) {
+                          nsIPrincipal* aPrincipal,
+                          nsIPrincipal* aStoragePrincipal) {
   MOZ_ASSERT(aURI, "Null URI passed to ResetToURI");
+  MOZ_ASSERT(!!aPrincipal == !!aStoragePrincipal);
 
   MOZ_LOG(gDocumentLeakPRLog, LogLevel::Debug,
           ("DOCUMENT %p ResetToURI %s", this, aURI->GetSpecOrDefault().get()));
@@ -2061,7 +2077,7 @@ void Document::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
   // This ensures that, during teardown, the document and the dying window
   // (which already nulled out its document pointer and cached the principal)
   // have matching principals.
-  SetPrincipal(nullptr);
+  SetPrincipals(nullptr, nullptr);
 
   // Clear the original URI so SetDocumentURI sets it.
   mOriginalURI = nullptr;
@@ -2109,7 +2125,7 @@ void Document::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
 
   // Now get our new principal
   if (aPrincipal) {
-    SetPrincipal(aPrincipal);
+    SetPrincipals(aPrincipal, aStoragePrincipal);
   } else {
     nsIScriptSecurityManager* securityManager =
         nsContentUtils::GetSecurityManager();
@@ -2129,7 +2145,7 @@ void Document::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
       nsresult rv = securityManager->GetLoadContextCodebasePrincipal(
           mDocumentURI, loadContext, getter_AddRefs(principal));
       if (NS_SUCCEEDED(rv)) {
-        SetPrincipal(principal);
+        SetPrincipals(principal, principal);
       }
     }
   }
@@ -2260,9 +2276,7 @@ void Document::ResetStylesheetsToURI(nsIURI* aURI) {
     FillStyleSetDocumentSheets();
 
     if (mStyleSet->StyleSheetsHaveChanged()) {
-      if (PresShell* presShell = GetPresShell()) {
-        presShell->ApplicableStylesChanged();
-      }
+      ApplicableStylesChanged();
     }
   }
 }
@@ -2328,18 +2342,18 @@ void Document::FillStyleSetUserAndUASheets() {
     mStyleSet->AppendStyleSheet(SheetType::Agent, cache->XULSheet());
   }
 
-  MOZ_ASSERT(!mQuirkSheetAdded);
-  if (mCompatMode == eCompatibility_NavQuirks) {
-    mStyleSet->AppendStyleSheet(SheetType::Agent, cache->QuirkSheet());
-    mQuirkSheetAdded = true;
-  }
-
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->FormsSheet());
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->ScrollbarsSheet());
   mStyleSet->AppendStyleSheet(SheetType::Agent, cache->PluginProblemSheet());
 
   for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
     mStyleSet->AppendStyleSheet(SheetType::Agent, sheet);
+  }
+
+  MOZ_ASSERT(!mQuirkSheetAdded);
+  if (NeedsQuirksSheet()) {
+    mStyleSet->AppendStyleSheet(SheetType::Agent, cache->QuirkSheet());
+    mQuirkSheetAdded = true;
   }
 }
 
@@ -2377,6 +2391,11 @@ void Document::CompatibilityModeChanged() {
   MOZ_ASSERT(IsHTMLOrXHTML());
   CSSLoader()->SetCompatibilityMode(mCompatMode);
   mStyleSet->CompatibilityModeChanged();
+  if (PresShell* presShell = GetPresShell()) {
+    // Selectors may have become case-sensitive / case-insensitive, the stylist
+    // has already performed the relevant invalidation.
+    presShell->EnsureStyleFlush();
+  }
   if (!mStyleSetFilled) {
     MOZ_ASSERT(!mQuirkSheetAdded);
     return;
@@ -2392,9 +2411,7 @@ void Document::CompatibilityModeChanged() {
     mStyleSet->AppendStyleSheet(SheetType::Agent, sheet);
   }
   mQuirkSheetAdded = !mQuirkSheetAdded;
-  if (PresShell* presShell = GetPresShell()) {
-    presShell->ApplicableStylesChanged();
-  }
+  ApplicableStylesChanged();
 }
 
 static void WarnIfSandboxIneffective(nsIDocShell* aDocShell,
@@ -2796,7 +2813,7 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
   if (needNewNullPrincipal) {
     principal = NullPrincipal::CreateWithInheritedAttributes(principal);
     principal->SetCsp(csp);
-    SetPrincipal(principal);
+    SetPrincipals(principal, principal);
   }
 
   // ----- Enforce frame-ancestor policy on any applied policies
@@ -3020,7 +3037,9 @@ void Document::RemoveFromIdTable(Element* aElement, nsAtom* aId) {
   }
 }
 
-void Document::SetPrincipal(nsIPrincipal* aNewPrincipal) {
+void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
+                             nsIPrincipal* aNewStoragePrincipal) {
+  MOZ_ASSERT(!!aNewPrincipal == !!aNewStoragePrincipal);
   if (aNewPrincipal && mAllowDNSPrefetch && sDisablePrefetchHTTPSPref) {
     nsCOMPtr<nsIURI> uri;
     aNewPrincipal->GetURI(getter_AddRefs(uri));
@@ -3030,6 +3049,7 @@ void Document::SetPrincipal(nsIPrincipal* aNewPrincipal) {
     }
   }
   mNodeInfoManager->SetDocumentPrincipal(aNewPrincipal);
+  mIntrinsicStoragePrincipal = aNewStoragePrincipal;
 
 #ifdef DEBUG
   // Validate that the docgroup is set correctly by calling its getter and
@@ -3996,10 +4016,37 @@ void Document::RemoveChildNode(nsIContent* aKid, bool aNotify) {
 void Document::AddStyleSheetToStyleSets(StyleSheet* aSheet) {
   if (mStyleSetFilled) {
     mStyleSet->AddDocStyleSheet(aSheet, this);
-    if (PresShell* presShell = GetPresShell()) {
-      presShell->ApplicableStylesChanged();
-    }
+    ApplicableStylesChanged();
   }
+}
+
+void Document::RecordShadowStyleChange(ShadowRoot& aShadowRoot) {
+  mStyleSet->RecordShadowStyleChange(aShadowRoot);
+  ApplicableStylesChanged();
+}
+
+void Document::ApplicableStylesChanged() {
+  // TODO(emilio): if we decide to resolve style in display: none iframes, then
+  // we need to always track style changes and remove the mStyleSetFilled.
+  if (!mStyleSetFilled) {
+    return;
+  }
+
+  MarkUserFontSetDirty();
+  PresShell* ps = GetPresShell();
+  if (!ps) {
+    return;
+  }
+
+  ps->EnsureStyleFlush();
+  nsPresContext* pc = ps->GetPresContext();
+  if (!pc) {
+    return;
+  }
+
+  pc->MarkCounterStylesDirty();
+  pc->MarkFontFeatureValuesDirty();
+  pc->RestyleManager()->NextRestyleIsForCSSRuleChanges();
 }
 
 #define DO_STYLESHEET_NOTIFICATION(className, type, memberName, argName) \
@@ -4038,9 +4085,7 @@ void Document::NotifyStyleSheetRemoved(StyleSheet* aSheet,
 void Document::RemoveStyleSheetFromStyleSets(StyleSheet* aSheet) {
   if (mStyleSetFilled) {
     mStyleSet->RemoveDocStyleSheet(aSheet);
-    if (PresShell* presShell = GetPresShell()) {
-      presShell->ApplicableStylesChanged();
-    }
+    ApplicableStylesChanged();
   }
 }
 
@@ -4223,9 +4268,7 @@ nsresult Document::AddAdditionalStyleSheet(additionalSheetType aType,
   if (mStyleSetFilled) {
     SheetType type = ConvertAdditionalSheetType(aType);
     mStyleSet->AppendStyleSheet(type, aSheet);
-    if (PresShell* presShell = GetPresShell()) {
-      presShell->ApplicableStylesChanged();
-    }
+    ApplicableStylesChanged();
   }
 
   // Passing false, so documet.styleSheets.length will not be affected by
@@ -4250,9 +4293,7 @@ void Document::RemoveAdditionalStyleSheet(additionalSheetType aType,
       if (mStyleSetFilled) {
         SheetType type = ConvertAdditionalSheetType(aType);
         mStyleSet->RemoveStyleSheet(type, sheetRef);
-        if (PresShell* presShell = GetPresShell()) {
-          presShell->ApplicableStylesChanged();
-        }
+        ApplicableStylesChanged();
       }
     }
 
@@ -4394,19 +4435,11 @@ void Document::SetContainer(nsDocShell* aContainer) {
     return;
   }
 
-  // Get the Docshell
-  if (aContainer->ItemType() == nsIDocShellTreeItem::typeContent) {
-    // check if same type root
-    nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
-    aContainer->GetSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
-    NS_ASSERTION(
-        sameTypeRoot,
-        "No document shell root tree item from document shell tree item!");
-
-    if (sameTypeRoot == aContainer) {
+  BrowsingContext* context = aContainer->GetBrowsingContext();
+  if (context && context->IsContent()) {
+    if (!context->GetParent()) {
       SetIsTopLevelContentDocument(true);
     }
-
     SetIsContentDocument(true);
   }
 
@@ -5032,9 +5065,7 @@ void Document::DocumentStatesChanged(EventStates aStateMask) {
 }
 
 void Document::StyleRuleChanged(StyleSheet* aSheet, css::Rule* aStyleRule) {
-  if (PresShell* presShell = GetPresShell()) {
-    presShell->ApplicableStylesChanged();
-  }
+  ApplicableStylesChanged();
 
   if (!StyleSheetChangeEventsEnabled()) {
     return;
@@ -5045,9 +5076,7 @@ void Document::StyleRuleChanged(StyleSheet* aSheet, css::Rule* aStyleRule) {
 }
 
 void Document::StyleRuleAdded(StyleSheet* aSheet, css::Rule* aStyleRule) {
-  if (PresShell* presShell = GetPresShell()) {
-    presShell->ApplicableStylesChanged();
-  }
+  ApplicableStylesChanged();
 
   if (!StyleSheetChangeEventsEnabled()) {
     return;
@@ -5058,9 +5087,7 @@ void Document::StyleRuleAdded(StyleSheet* aSheet, css::Rule* aStyleRule) {
 }
 
 void Document::StyleRuleRemoved(StyleSheet* aSheet, css::Rule* aStyleRule) {
-  if (PresShell* presShell = GetPresShell()) {
-    presShell->ApplicableStylesChanged();
-  }
+  ApplicableStylesChanged();
 
   if (!StyleSheetChangeEventsEnabled()) {
     return;
@@ -5588,10 +5615,8 @@ void Document::EnableStyleSheetsForSetInternal(const nsAString& aSheetSet,
   if (aUpdateCSSLoader) {
     CSSLoader()->DocumentStyleSheetSetChanged();
   }
-  if (PresShell* presShell = GetPresShell()) {
-    if (presShell->StyleSet()->StyleSheetsHaveChanged()) {
-      presShell->ApplicableStylesChanged();
-    }
+  if (mStyleSet->StyleSheetsHaveChanged()) {
+    ApplicableStylesChanged();
   }
 }
 
@@ -8183,7 +8208,8 @@ nsresult Document::CloneDocHelper(Document* clone) const {
     }
     clone->mChannel = channel;
     if (uri) {
-      clone->ResetToURI(uri, loadGroup, NodePrincipal());
+      clone->ResetToURI(uri, loadGroup, NodePrincipal(),
+                        EffectiveStoragePrincipal());
     }
 
     clone->SetContainer(mDocumentContainer);
@@ -8197,7 +8223,7 @@ nsresult Document::CloneDocHelper(Document* clone) const {
   // them.
   clone->SetDocumentURI(Document::GetDocumentURI());
   clone->SetChromeXHRDocURI(mChromeXHRDocURI);
-  clone->SetPrincipal(NodePrincipal());
+  clone->SetPrincipals(NodePrincipal(), EffectiveStoragePrincipal());
   clone->mDocumentBaseURI = mDocumentBaseURI;
   clone->SetChromeXHRDocBaseURI(mChromeXHRDocBaseURI);
 
@@ -8816,8 +8842,9 @@ class nsAutoFocusEvent : public Runnable {
       return NS_OK;
     }
 
-    mozilla::ErrorResult rv;
-    mElement->Focus(rv);
+    FocusOptions options;
+    ErrorResult rv;
+    mElement->Focus(options, rv);
     return rv.StealNSResult();
   }
 
@@ -11145,6 +11172,8 @@ void Document::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const {
     mPresShell->AddSizeOfIncludingThis(aWindowSizes);
   }
 
+  mStyleSet->AddSizeOfIncludingThis(aWindowSizes);
+
   aWindowSizes.mDOMOtherSize += mLangGroupFontPrefs.SizeOfExcludingThis(
       aWindowSizes.mState.mMallocSizeOf);
 
@@ -12815,6 +12844,24 @@ nsICookieSettings* Document::CookieSettings() {
   }
 
   return mCookieSettings;
+}
+
+nsIPrincipal* Document::EffectiveStoragePrincipal() const {
+  if (!StaticPrefs::privacy_storagePrincipal_enabledForTrackers()) {
+    return NodePrincipal();
+  }
+
+  nsContentUtils::StorageAccess access =
+      nsContentUtils::StorageAllowedForDocument(this);
+
+  // Let's use the storage principal only if we need to partition the cookie
+  // jar. When the permission is granted, access will be different and the
+  // normal principal will be used.
+  if (access != nsContentUtils::StorageAccess::ePartitionedOrDeny) {
+    return NodePrincipal();
+  }
+
+  return mIntrinsicStoragePrincipal;
 }
 
 }  // namespace dom

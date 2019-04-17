@@ -9,6 +9,7 @@
 #include "nsColumnSetFrame.h"
 
 #include "mozilla/Logging.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/ToString.h"
 #include "nsCSSRendering.h"
 
@@ -99,7 +100,7 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
  *
  * XXX should we support CSS columns applied to table elements?
  */
-nsContainerFrame* NS_NewColumnSetFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewColumnSetFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle,
                                        nsFrameState aStateFlags) {
   nsColumnSetFrame* it =
@@ -277,7 +278,7 @@ nscoord nsColumnSetFrame::GetAvailableContentBSize(
 static nscoord GetColumnGap(nsColumnSetFrame* aFrame,
                             nscoord aPercentageBasis) {
   const auto& columnGap = aFrame->StylePosition()->mColumnGap;
-  if (columnGap.GetUnit() == eStyleUnit_Normal) {
+  if (columnGap.IsNormal()) {
     return aFrame->StyleFont()->mFont.size;
   }
   return nsLayoutUtils::ResolveGapToLength(columnGap, aPercentageBasis);
