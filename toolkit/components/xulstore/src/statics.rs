@@ -142,7 +142,9 @@ fn observe_profile_change() {
 fn in_safe_mode() -> XULStoreResult<bool> {
     let app_info_svc = xpcom::services::get_AppInfoService().ok_or(XULStoreError::Unavailable)?;
     let mut in_safe_mode = false;
-    unsafe { app_info_svc.GetInSafeMode(&mut in_safe_mode).to_result()?; }
+    unsafe {
+        app_info_svc.GetInSafeMode(&mut in_safe_mode).to_result()?;
+    }
     Ok(in_safe_mode)
 }
 
