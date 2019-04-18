@@ -7,9 +7,7 @@ use nserror::{
 };
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
-use std::{
-    io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError,
-};
+use std::{io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError};
 
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
 

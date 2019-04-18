@@ -129,7 +129,11 @@ fn observe_profile_change() {
         let observer = ProfileChangeObserver::new();
         unsafe {
             obs_svc
-                .AddObserver(observer.coerce(), c_str!("profile-after-change").as_ptr(), false)
+                .AddObserver(
+                    observer.coerce(),
+                    c_str!("profile-after-change").as_ptr(),
+                    false,
+                )
                 .to_result()?
         };
         Ok(())
