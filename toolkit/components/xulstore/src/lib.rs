@@ -32,6 +32,7 @@ use crate::{
     statics::DATA_CACHE,
 };
 use nsstring::nsAString;
+use std::collections::btree_map::Entry;
 use std::fmt::Display;
 
 const SEPARATOR: char = '\u{0009}';
@@ -166,17 +167,14 @@ pub(crate) fn remove_document(doc: &nsAString) -> XULStoreResult<()> {
         None => return Ok(()),
     };
 
-    let doc = doc.to_string();
-
-    if let Some(ids) = data.get(&doc) {
-        for (id, attrs) in ids {
+    if let Entry::Occupied(entry) = data.entry(doc.to_string()) {
+        for (id, attrs) in entry.get() {
             for attr in attrs.keys() {
-                persist(make_key(&doc, id, attr), None)?;
+                persist(make_key(entry.key(), id, attr), None)?;
             }
         }
-    };
-
-    data.remove(&doc);
+        entry.remove_entry();
+    }
 
     Ok(())
 }
