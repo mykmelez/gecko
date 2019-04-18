@@ -4,6 +4,7 @@
 
 use crate::{
     error::{XULStoreError, XULStoreResult},
+    ffi::XpcomShutdownObserver,
     statics::get_database,
 };
 use crossbeam_utils::atomic::AtomicCell;
@@ -45,17 +46,43 @@ lazy_static! {
     /// one open database handle for the database at any given time.
     static ref PERSIST: Mutex<()> = { Mutex::new(()) };
 
-    static ref THREAD: Option<ThreadBoundRefPtr<nsIThread>> = {
+    static ref THREAD: Mutex<Option<ThreadBoundRefPtr<nsIThread>>> = {
         let thread: RefPtr<nsIThread> = match create_thread("XULStore") {
             Ok(thread) => thread,
             Err(err) => {
                 error!("error creating XULStore thread: {}", err);
-                return None;
+                return Mutex::new(None);
             }
         };
 
-        Some(ThreadBoundRefPtr::new(thread))
+        // Observe XPCOM shutdown so we can clear the thread and thus not
+        // "leak" it (from the perspective of the leak checker).
+        observe_xpcom_shutdown();
+
+        Mutex::new(Some(ThreadBoundRefPtr::new(thread)))
     };
+}
+
+fn observe_xpcom_shutdown() {
+    (|| -> XULStoreResult<()> {
+        let obs_svc = xpcom::services::get_ObserverService().ok_or(XULStoreError::Unavailable)?;
+        let observer = XpcomShutdownObserver::new();
+        unsafe {
+            obs_svc
+                .AddObserver(observer.coerce(), c_str!("xpcom-shutdown").as_ptr(), false)
+                .to_result()?
+        };
+        Ok(())
+    })()
+    .unwrap_or_else(|err| error!("error observing XPCOM shutdown: {}", err));
+}
+
+pub(crate) fn clear_on_shutdown() {
+    (|| -> XULStoreResult<()> {
+        THREAD.lock()?.take();
+        Ok(())
+    })()
+    .unwrap_or_else(|err| error!("error clearing thread: {}", err));
 }
 
 pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> {
@@ -67,7 +94,8 @@ pub(crate) fn persist(key: String, value: Option<String>) -> XULStoreResult<()> 
         // If *changes* was `None`, then this is the first change since
         // the last time we persisted, so dispatch a new PersistTask.
         let task = Box::new(PersistTask::new());
-        let thread = THREAD
+        let thread_guard = THREAD.lock()?;
+        let thread = thread_guard
             .as_ref()
             .ok_or(XULStoreError::Unavailable)?
             .get_ref()
