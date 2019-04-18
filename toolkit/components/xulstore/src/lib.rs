@@ -110,7 +110,7 @@ pub(crate) fn get_value(
     match data.get(&doc.to_string()) {
         Some(ids) => match ids.get(&id.to_string()) {
             Some(attrs) => match attrs.get(&attr.to_string()) {
-                Some(value) => Ok(value.to_owned()),
+                Some(value) => Ok(value.clone()),
                 None => Ok(String::new()),
             },
             None => Ok(String::new()),
