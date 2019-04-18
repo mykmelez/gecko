@@ -173,12 +173,12 @@ fn cache_data() -> XULStoreResult<XULStoreCache> {
 
         let parts = key.split(SEPARATOR).collect::<Vec<&str>>();
         if parts.len() != 3 {
-            return Err(XULStoreError::UnexpectedKey(key.to_owned()));
+            return Err(XULStoreError::UnexpectedKey(key.to_string()));
         }
         let (doc, id, attr) = (
-            parts[0].to_owned(),
-            parts[1].to_owned(),
-            parts[2].to_owned(),
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
         );
 
         all.entry(doc)
