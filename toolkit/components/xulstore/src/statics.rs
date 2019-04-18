@@ -155,7 +155,7 @@ fn cache_data() -> XULStoreResult<XULStoreCache> {
     maybe_migrate_data(&db.env, db.store);
 
     let reader = db.env.read()?;
-    let mut all = BTreeMap::new();
+    let mut all = XULStoreCache::default();
     let iterator = db.store.iter_start(&reader)?;
 
     for result in iterator {
@@ -182,9 +182,9 @@ fn cache_data() -> XULStoreResult<XULStoreCache> {
         );
 
         all.entry(doc)
-            .or_insert_with(BTreeMap::new)
+            .or_default()
             .entry(id)
-            .or_insert_with(BTreeMap::new)
+            .or_default()
             .entry(attr)
             .or_insert(value);
     }
