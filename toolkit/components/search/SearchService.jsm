@@ -65,7 +65,6 @@ const SEARCH_ENGINE_REMOVED      = "engine-removed";
 const SEARCH_ENGINE_ADDED        = "engine-added";
 const SEARCH_ENGINE_CHANGED      = "engine-changed";
 const SEARCH_ENGINE_LOADED       = "engine-loaded";
-const SEARCH_ENGINE_CURRENT      = "engine-current";
 const SEARCH_ENGINE_DEFAULT      = "engine-default";
 
 // The following constants are left undocumented in nsISearchService.idl
@@ -2775,7 +2774,7 @@ SearchService.prototype = {
 
     try {
       if (!cache.engines.length)
-        throw "cannot write without any engine.";
+        throw new Error("cannot write without any engine.");
 
       LOG("_buildCache: Writing to cache file.");
       let path = OS.Path.join(OS.Constants.Path.profileDir, CACHE_FILENAME);
@@ -2963,7 +2962,6 @@ SearchService.prototype = {
     // dispatch the appropriate notifications.
     if (prevCurrentEngine && this.defaultEngine !== prevCurrentEngine) {
       notifyAction(this._currentEngine, SEARCH_ENGINE_DEFAULT);
-      notifyAction(this._currentEngine, SEARCH_ENGINE_CURRENT);
     }
     Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "engines-reloaded");
   },
@@ -3064,7 +3062,7 @@ SearchService.prototype = {
       let bytes = await OS.File.read(cacheFilePath, {compression: "lz4"});
       json = JSON.parse(new TextDecoder().decode(bytes));
       if (!json.engines || !json.engines.length)
-        throw "no engine in the file";
+        throw new Error("no engine in the file");
       // Reset search default expiration on major releases
       if (json.appVersion != Services.appinfo.version &&
           geoSpecificDefaultsEnabled() &&
@@ -4169,7 +4167,6 @@ SearchService.prototype = {
     this.setGlobalAttr("hash", getVerificationHash(newName));
 
     notifyAction(this._currentEngine, SEARCH_ENGINE_DEFAULT);
-    notifyAction(this._currentEngine, SEARCH_ENGINE_CURRENT);
   },
 
   async getDefault() {

@@ -4015,7 +4015,7 @@ const BrowserSearch = {
       // browser's offered engines.
       this._removeMaybeOfferedEngine(engineName);
       break;
-    case "engine-current":
+    case "engine-default":
       if (this._searchInitComplete) {
         this._updateURLBarPlaceholder(engineName);
       }
@@ -4541,6 +4541,9 @@ function toOpenWindowByType(inType, uri, features) {
  *          remote:  A boolean indicating if the window should run
  *                   remote browser tabs or not. If omitted, the window
  *                   will choose the profile default state.
+ *          fission: A boolean indicating if the window should run
+ *                   with fission enabled or not. If omitted, the window
+ *                   will choose the profile default state.
  *        }
  * @return a reference to the new window.
  */
@@ -4568,6 +4571,12 @@ function OpenBrowserWindow(options) {
     extraFeatures += ",remote";
   } else if (options && options.remote === false) {
     extraFeatures += ",non-remote";
+  }
+
+  if (options && options.fission) {
+    extraFeatures += ",fission";
+  } else if (options && options.fission === false) {
+    extraFeatures += ",non-fission";
   }
 
   // If the window is maximized, we want to skip the animation, since we're
