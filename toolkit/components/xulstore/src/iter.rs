@@ -9,7 +9,7 @@ pub struct XULStoreIterator {
     values: IntoIter<String>,
 }
 
-impl<'a> XULStoreIterator {
+impl XULStoreIterator {
     pub(crate) fn new(values: IntoIter<String>) -> Self {
         Self { values }
     }
