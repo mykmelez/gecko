@@ -12,7 +12,6 @@ use nsstring::nsString;
 use rkv::{Rkv, SingleStore, StoreOptions, Value};
 use std::{
     collections::BTreeMap,
-    ffi::CString,
     fs::{create_dir_all, remove_file, File},
     path::PathBuf,
     str,
@@ -128,10 +127,9 @@ fn observe_profile_change() {
         // Observe profile changes so we can update this directory accordingly.
         let obs_svc = xpcom::services::get_ObserverService().ok_or(XULStoreError::Unavailable)?;
         let observer = ProfileChangeObserver::new();
-        let topic = CString::new("profile-after-change")?;
         unsafe {
             obs_svc
-                .AddObserver(observer.coerce(), topic.as_ptr(), false)
+                .AddObserver(observer.coerce(), c_str!("profile-after-change").as_ptr(), false)
                 .to_result()?
         };
         Ok(())

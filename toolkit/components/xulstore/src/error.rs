@@ -8,7 +8,7 @@ use nserror::{
 use rkv::StoreError as RkvStoreError;
 use serde_json::Error as SerdeJsonError;
 use std::{
-    ffi::NulError, io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError,
+    io::Error as IoError, str::Utf8Error, string::FromUtf16Error, sync::PoisonError,
 };
 
 pub(crate) type XULStoreResult<T> = Result<T, XULStoreError>;
@@ -29,12 +29,6 @@ pub(crate) enum XULStoreError {
 
     #[fail(display = "JSON error: {}", _0)]
     JsonError(SerdeJsonError),
-
-    // This should never happen, since we only pass string literals
-    // to ffi::CString::new().  Nevertheless, we have to account for it,
-    // since that constructor returns a Result.
-    #[fail(display = "interior nul byte")]
-    NulError,
 
     #[fail(display = "error result {}", _0)]
     NsResult(nsresult),
@@ -67,7 +61,6 @@ impl From<XULStoreError> for nsresult {
             XULStoreError::IterationFinished => NS_ERROR_FAILURE,
             XULStoreError::JsonError(_) => NS_ERROR_FAILURE,
             XULStoreError::NsResult(result) => result,
-            XULStoreError::NulError => NS_ERROR_UNEXPECTED,
             XULStoreError::PoisonError => NS_ERROR_UNEXPECTED,
             XULStoreError::RkvStoreError(_) => NS_ERROR_FAILURE,
             XULStoreError::IdAttrNameTooLong => NS_ERROR_ILLEGAL_VALUE,
@@ -111,12 +104,6 @@ impl From<Utf8Error> for XULStoreError {
 impl From<IoError> for XULStoreError {
     fn from(err: IoError) -> XULStoreError {
         XULStoreError::IoError(err)
-    }
-}
-
-impl From<NulError> for XULStoreError {
-    fn from(_: NulError) -> XULStoreError {
-        XULStoreError::NulError
     }
 }
 
