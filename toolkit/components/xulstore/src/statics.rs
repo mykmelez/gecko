@@ -237,7 +237,7 @@ fn unwrap_value(value: &Option<Value>) -> XULStoreResult<String> {
 
         // Per the XULStore API, return an empty string if the value
         // isn't found.
-        None => Ok("".to_owned()),
+        None => Ok(String::new()),
 
         // This should never happen, but it could happen in theory
         // if someone writes a different kind of value into the store

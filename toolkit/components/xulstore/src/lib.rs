@@ -104,18 +104,18 @@ pub(crate) fn get_value(
     let cache_guard = DATA_CACHE.lock()?;
     let data = match cache_guard.as_ref() {
         Some(data) => data,
-        None => return Ok("".to_owned()),
+        None => return Ok(String::new()),
     };
 
     match data.get(&doc.to_string()) {
         Some(ids) => match ids.get(&id.to_string()) {
             Some(attrs) => match attrs.get(&attr.to_string()) {
                 Some(value) => Ok(value.to_owned()),
-                None => Ok("".to_owned()),
+                None => Ok(String::new()),
             },
-            None => Ok("".to_owned()),
+            None => Ok(String::new()),
         },
-        None => Ok("".to_owned()),
+        None => Ok(String::new()),
     }
 }
 
