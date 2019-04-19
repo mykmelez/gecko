@@ -151,15 +151,15 @@ fn in_safe_mode() -> XULStoreResult<bool> {
 }
 
 fn cache_data() -> XULStoreResult<XULStoreCache> {
-    if in_safe_mode()? {
-        return Ok(BTreeMap::new());
-    }
-
     let db = get_database()?;
     maybe_migrate_data(&db.env, db.store);
 
-    let reader = db.env.read()?;
     let mut all = XULStoreCache::default();
+    if in_safe_mode()? {
+        return Ok(all);
+    }
+
+    let reader = db.env.read()?;
     let iterator = db.store.iter_start(&reader)?;
 
     for result in iterator {
