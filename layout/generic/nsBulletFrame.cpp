@@ -646,7 +646,7 @@ void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
   }
 
   ImgDrawResult result = static_cast<nsBulletFrame*>(mFrame)->PaintBullet(
-      *aCtx, ToReferenceFrame(), GetPaintRect(), flags, mDisableSubpixelAA);
+      *aCtx, ToReferenceFrame(), GetPaintRect(), flags, IsSubpixelAADisabled());
 
   nsDisplayBulletGeometry::UpdateDrawResult(this, result);
 }
@@ -1261,6 +1261,19 @@ nscoord nsBulletFrame::GetLogicalBaseline(WritingMode aWritingMode) const {
     ascent = GetListStyleAscent();
   }
   return ascent + GetLogicalUsedMargin(aWritingMode).BStart(aWritingMode);
+}
+
+bool nsBulletFrame::GetNaturalBaselineBOffset(WritingMode aWM,
+                                              BaselineSharingGroup,
+                                              nscoord* aBaseline) const {
+  nscoord ascent = 0;
+  if (GetStateBits() & BULLET_FRAME_IMAGE_LOADING) {
+    ascent = BSize(aWM);
+  } else {
+    ascent = GetListStyleAscent();
+  }
+  *aBaseline = ascent;
+  return true;
 }
 
 #ifdef ACCESSIBILITY

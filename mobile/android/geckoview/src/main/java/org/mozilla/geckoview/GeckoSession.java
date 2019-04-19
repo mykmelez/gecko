@@ -10,6 +10,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.ref.WeakReference;
 import java.util.AbstractSequentialList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
@@ -332,6 +333,87 @@ public class GeckoSession implements Parcelable {
                 }
             }
         };
+
+    private final class WebExtensionListener implements BundleEventListener {
+        final private HashMap<String, WebExtension.MessageDelegate> mMessageDelegates;
+
+        public WebExtensionListener() {
+            mMessageDelegates = new HashMap<>();
+        }
+
+        /* package */ void registerListeners() {
+            getEventDispatcher().registerUiThreadListener(this,
+                    "GeckoView:WebExtension:Message",
+                    "GeckoView:WebExtension:PortMessage",
+                    "GeckoView:WebExtension:Connect",
+                    null);
+        }
+
+        public void setDelegate(final WebExtension.MessageDelegate delegate,
+                                final String nativeApp) {
+            mMessageDelegates.put(nativeApp, delegate);
+        }
+
+        public WebExtension.MessageDelegate getDelegate(final String nativeApp) {
+            return mMessageDelegates.get(nativeApp);
+        }
+
+        @Override
+        public void handleMessage(final String event, final GeckoBundle message,
+                                  final EventCallback callback) {
+            if (mWindow == null || mWindow.runtime.getWebExtensionDispatcher() == null) {
+                return;
+            }
+
+            if ("GeckoView:WebExtension:Message".equals(event)
+                    || "GeckoView:WebExtension:PortMessage".equals(event)
+                    || "GeckoView:WebExtension:Connect".equals(event)) {
+                mWindow.runtime.getWebExtensionDispatcher()
+                        .handleMessage(event, message, callback, GeckoSession.this);
+            }
+        }
+    }
+
+    private final WebExtensionListener mWebExtensionListener;
+
+    /**
+     * Get the message delegate for <code>nativeApp</code>.
+     *
+     * @param nativeApp identifier for the native app
+     * @return The {@link WebExtension.MessageDelegate} attached to the
+     *         <code>nativeApp</code>.  <code>null</code> if no delegate is
+     *         present.
+     */
+    @AnyThread
+    public @Nullable WebExtension.MessageDelegate getMessageDelegate(
+            final @NonNull String nativeApp) {
+        return mWebExtensionListener.getDelegate(nativeApp);
+    }
+
+    /**
+     * Defines a message delegate for a Native App.
+     *
+     * If a delegate is already present, this delegate will replace the
+     * existing one.
+     *
+     * This message delegate will be responsible for handling messaging between
+     * a WebExtension content script running on the {@link GeckoSession}.
+     *
+     * Note: To receive messages from content scripts, the WebExtension needs
+     * to explicitely allow it in {@link WebExtension#WebExtension} by setting
+     * {@link WebExtension#allowContentMessaging} to <code>true</code>.
+     *
+     * @param delegate {@link WebExtension.MessageDelegate} that will receive
+     *                 messages from this session.
+     * @param nativeApp which native app id this message delegate will handle
+     *                  messaging for.
+     * @see WebExtension#setMessageDelegate
+     */
+    @AnyThread
+    public void setMessageDelegate(final @Nullable WebExtension.MessageDelegate delegate,
+                                   final @NonNull String nativeApp) {
+        mWebExtensionListener.setDelegate(delegate, nativeApp);
+    }
 
     private final GeckoSessionHandler<ContentDelegate> mContentHandler =
         new GeckoSessionHandler<ContentDelegate>(
@@ -1133,6 +1215,9 @@ public class GeckoSession implements Parcelable {
         mSettings = new GeckoSessionSettings(settings, this);
         mListener.registerListeners();
 
+        mWebExtensionListener = new WebExtensionListener();
+        mWebExtensionListener.registerListeners();
+
         if (BuildConfig.DEBUG && handlersCount != mSessionHandlers.length) {
             throw new AssertionError("Add new handler to handlers list");
         }
@@ -1715,7 +1800,9 @@ public class GeckoSession implements Parcelable {
      * Set this GeckoSession as active or inactive, which represents if the session is currently
      * visible or not. Setting a GeckoSession to inactive will significantly reduce its memory
      * footprint, but should only be done if the GeckoSession is not currently visible. Note that
-     * a session can be active (i.e. visible) but not focused.
+     * a session can be active (i.e. visible) but not focused. When a session is set inactive,
+     * it will flush the session state and trigger a `ProgressDelegate.onSessionStateChange`
+     * callback.
      *
      * @param active A boolean determining whether the GeckoSession is active.
      *
@@ -1726,6 +1813,10 @@ public class GeckoSession implements Parcelable {
         final GeckoBundle msg = new GeckoBundle(1);
         msg.putBoolean("active", active);
         mEventDispatcher.dispatch("GeckoView:SetActive", msg);
+
+        if (!active) {
+            mEventDispatcher.dispatch("GeckoView:FlushSessionState", null);
+        }
     }
 
     /**

@@ -995,7 +995,7 @@ VARCACHE_PREF(
   bool, false
 )
 
-// Pref to control whether ::xul-tree-* pseudo-elements are parsed in content
+// Pref to control whether XUL ::-tree-* pseudo-elements are parsed in content
 // pages.
 VARCACHE_PREF(
   "layout.css.xul-tree-pseudos.content.enabled",
@@ -1353,7 +1353,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.gmp.insecure.allow",
    MediaGmpInsecureAllow,
-  bool, false
+  RelaxedAtomicBool, false
 )
 #endif
 

@@ -1239,6 +1239,12 @@ class Document : public nsINode,
   void EnableEncodingMenu() { mEncodingMenuDisabled = false; }
 
   /**
+   * Called to disable client access to cookies through the document.cookie API
+   * from user JavaScript code.
+   */
+  void DisableCookieAccess() { mDisableCookieAccess = true; }
+
+  /**
    * Access HTTP header data (this may also get set from other
    * sources, like HTML META tags).
    */
@@ -1705,17 +1711,10 @@ class Document : public nsINode,
   }
 
   /**
-   * Assuming that aDocSheets is an array of document-level style
-   * sheets for this document, returns the index that aSheet should
-   * be inserted at to maintain document ordering.
-   *
-   * Type T has to cast to StyleSheet*.
-   *
-   * Defined in DocumentInlines.h.
+   * Returns the index that aSheet should be inserted at to maintain document
+   * ordering.
    */
-  template <typename T>
-  size_t FindDocStyleSheetInsertionPoint(const nsTArray<T>& aDocSheets,
-                                         const StyleSheet& aSheet);
+  size_t FindDocStyleSheetInsertionPoint(const StyleSheet& aSheet);
 
   /**
    * Get this document's CSSLoader.  This is guaranteed to not return null.
@@ -2021,10 +2020,12 @@ class Document : public nsINode,
   // a scriptblocker but NOT within a begin/end update.
   void ContentStateChanged(nsIContent* aContent, EventStates aStateMask);
 
-  // Notify that a document state has changed.
+  // Update a set of document states that may have changed.
   // This should only be called by callers whose state is also reflected in the
   // implementation of Document::GetDocumentState.
-  void DocumentStatesChanged(EventStates aStateMask);
+  //
+  // aNotify controls whether we notify our DocumentStatesChanged observers.
+  void UpdateDocumentStates(EventStates aStateMask, bool aNotify);
 
   void ResetDocumentDirection();
 
@@ -3239,6 +3240,8 @@ class Document : public nsINode,
                                            ErrorResult& rv);
   void GetInputEncoding(nsAString& aInputEncoding) const;
   already_AddRefed<Location> GetLocation() const;
+  void GetCookie(nsAString& aCookie, mozilla::ErrorResult& rv);
+  void SetCookie(const nsAString& aCookie, mozilla::ErrorResult& rv);
   void GetReferrer(nsAString& aReferrer) const;
   void GetLastModified(nsAString& aLastModified) const;
   void GetReadyState(nsAString& aReadyState) const;
@@ -3817,11 +3820,9 @@ class Document : public nsINode,
     return mChildDocumentUseCounters[aUseCounter];
   }
 
-  void UpdateDocumentStates(EventStates);
-
   void RemoveDocStyleSheetsFromStyleSets();
   void RemoveStyleSheetsFromStyleSets(
-      const nsTArray<RefPtr<StyleSheet>>& aSheets, SheetType aType);
+      const nsTArray<RefPtr<StyleSheet>>& aSheets, StyleOrigin);
   void ResetStylesheetsToURI(nsIURI* aURI);
   void FillStyleSet();
   void FillStyleSetUserAndUASheets();
@@ -3919,6 +3920,10 @@ class Document : public nsINode,
   static void* UseExistingNameString(nsINode* aRootNode, const nsString* aName);
 
   void MaybeResolveReadyForIdle();
+
+  // This should *ONLY* be used in GetCookie/SetCookie.
+  already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
+      nsIURI* aCodebaseURI);
 
   nsCString mReferrer;
   nsString mLastModified;
@@ -4296,6 +4301,9 @@ class Document : public nsINode,
   // flag is only relevant for HTML documents, but lives here for reasons that
   // are documented above on SkipLoadEventAfterClose().
   bool mSkipLoadEventAfterClose : 1;
+
+  // When false, the .cookies property is completely disabled
+  bool mDisableCookieAccess : 1;
 
   uint8_t mPendingFullscreenRequests;
 
