@@ -28,6 +28,7 @@ class RequestListContextMenu {
   open(event, selectedRequest, requests) {
     const {
       id,
+      blockedReason,
       isCustom,
       formDataSections,
       method,
@@ -44,11 +45,13 @@ class RequestListContextMenu {
       url,
     } = selectedRequest;
     const {
+      blockSelectedRequestURL,
       connector,
       cloneSelectedRequest,
       sendCustomRequest,
       openStatistics,
       openRequestInTab,
+      unblockSelectedRequestURL,
     } = this.props;
     const menu = [];
     const copySubmenu = [];
@@ -199,6 +202,20 @@ class RequestListContextMenu {
       accesskey: L10N.getStr("netmonitor.context.editAndResend.accesskey"),
       visible: !!(selectedRequest && !isCustom),
       click: cloneSelectedRequest,
+    });
+
+    menu.push({
+      id: "request-list-context-block-url",
+      label: L10N.getStr("netmonitor.context.blockURL"),
+      visible: !!(selectedRequest && !blockedReason),
+      click: blockSelectedRequestURL,
+    });
+
+    menu.push({
+      id: "request-list-context-unblock-url",
+      label: L10N.getStr("netmonitor.context.unblockURL"),
+      visible: !!(selectedRequest && blockedReason),
+      click: unblockSelectedRequestURL,
     });
 
     menu.push({

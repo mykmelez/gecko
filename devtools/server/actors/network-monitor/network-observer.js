@@ -6,7 +6,7 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
+const {Cc, Ci, Cr} = require("chrome");
 const Services = require("Services");
 const flags = require("devtools/shared/flags");
 
@@ -125,6 +125,8 @@ function NetworkObserver(filters, owner) {
 
   this.openRequests = new Map();
   this.openResponses = new Map();
+
+  this.blockedURLs = new Set();
 
   this._httpResponseExaminer =
     DevToolsUtils.makeInfallible(this._httpResponseExaminer).bind(this);
@@ -556,9 +558,18 @@ NetworkObserver.prototype = {
       cookies = NetworkHelper.parseCookieHeader(cookieHeader);
     }
 
+    // Check the request URL with ones manually blocked by the user in DevTools.
+    // If it's meant to be blocked, we cancel the request and annotate the event.
+    if (this.blockedURLs.has(httpActivity.url)) {
+      channel.cancel(Cr.NS_BINDING_ABORTED);
+      event.blockedReason = "DevTools";
+    }
+
     httpActivity.owner = this.owner.onNetworkEvent(event);
 
-    this._setupResponseListener(httpActivity, fromCache);
+    if (!event.blockedReason) {
+      this._setupResponseListener(httpActivity, fromCache);
+    }
 
     httpActivity.owner.addRequestHeaders(headers, extraStringData);
     httpActivity.owner.addRequestCookies(cookies);
@@ -642,6 +653,36 @@ NetworkObserver.prototype = {
     }
 
     return httpActivity;
+  },
+
+  /**
+   * Block a request based on certain filtering options.
+   *
+   * Currently, an exact URL match is the only supported filter type.
+   */
+  blockRequest(filter) {
+    if (!filter || !filter.url) {
+      // In the future, there may be other types of filters, such as domain.
+      // For now, ignore anything other than URL.
+      return;
+    }
+
+    this.blockedURLs.add(filter.url);
+  },
+
+  /**
+   * Unblock a request based on certain filtering options.
+   *
+   * Currently, an exact URL match is the only supported filter type.
+   */
+  unblockRequest(filter) {
+    if (!filter || !filter.url) {
+      // In the future, there may be other types of filters, such as domain.
+      // For now, ignore anything other than URL.
+      return;
+    }
+
+    this.blockedURLs.delete(filter.url);
   },
 
   /**

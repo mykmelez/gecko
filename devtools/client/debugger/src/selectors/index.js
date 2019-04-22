@@ -19,6 +19,13 @@ export * from "../reducers/project-text-search";
 export * from "../reducers/source-tree";
 
 export {
+  getSourceActor,
+  hasSourceActor,
+  getSourceActors,
+  getSourceActorsForThread
+} from "../reducers/source-actors";
+
+export {
   getQuickOpenEnabled,
   getQuickOpenQuery,
   getQuickOpenType

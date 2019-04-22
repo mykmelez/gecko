@@ -67,6 +67,7 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
       private: this._private,
       isThirdPartyTrackingResource: this._isThirdPartyTrackingResource,
       referrerPolicy: this._referrerPolicy,
+      blockedReason: this._blockedReason,
     };
   },
 
@@ -126,6 +127,8 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
     // Consider as not discarded if networkEvent.discard*Body is undefined
     this._discardRequestBody = !!networkEvent.discardRequestBody;
     this._discardResponseBody = !!networkEvent.discardResponseBody;
+
+    this._blockedReason = networkEvent.blockedReason;
 
     this._truncated = false;
     this._private = networkEvent.private;
@@ -400,16 +403,16 @@ const NetworkEventActor = protocol.ActorClassWithSpec(networkEventSpec, {
    * @param object info
    *        The object containing security information.
    */
-  addSecurityInfo(info) {
+  addSecurityInfo(info, isRacing) {
     // Ignore calls when this actor is already destroyed
     if (!this.actorID) {
       return;
     }
 
     this._securityInfo = info;
-
     this.emit("network-event-update:security-info", "securityInfo", {
       state: info.state,
+      isRacing: isRacing,
     });
   },
 
