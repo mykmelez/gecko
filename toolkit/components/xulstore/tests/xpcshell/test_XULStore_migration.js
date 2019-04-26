@@ -34,10 +34,10 @@ add_task(async function test_create_old_datastore() {
 });
 
 add_task(async function test_get_values() {
-  // We wait until now to import XULStore.jsm to ensure we've created
+  // We wait until now to import XULStore to ensure we've created
   // the old datastore, as importing that module will initiate the attempt
   // to migrate the old datastore to the new one.
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
 
   Assert.equal(await XULStore.getValue("doc1", "id1", "attr1"), "value1");
   Assert.equal(await XULStore.getValue("doc1", "id1", "attr2"), "");

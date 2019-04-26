@@ -10,19 +10,19 @@ with Files('**'):
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell/xpcshell.ini']
 
-XPIDL_SOURCES += [
-    'nsIXULStore.idl',
-]
-
 XPIDL_MODULE = 'toolkit_xulstore'
 
-XPCOM_MANIFESTS += [
-    'components.conf',
-]
-
 if CONFIG['NIGHTLY_BUILD']:
+    XPCOM_MANIFESTS += [
+        'components-new.conf',
+    ]
+
+    XPIDL_SOURCES += [
+        'nsIXULStoreNew.idl',
+    ]
+
     EXTRA_JS_MODULES += [
-        'XULStore.jsm',
+        'XULStoreNew.jsm',
     ]
 
     TEST_DIRS += [
@@ -39,6 +39,14 @@ if CONFIG['NIGHTLY_BUILD']:
 
     FINAL_LIBRARY = 'xul'
 else:
+    XPCOM_MANIFESTS += [
+        'components.conf',
+    ]
+
+    XPIDL_SOURCES += [
+        'nsIXULStore.idl',
+    ]
+
     EXTRA_JS_MODULES += [
         'XULStore.jsm',
     ]

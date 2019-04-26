@@ -28,10 +28,10 @@ add_task(async function test_create_old_datastore() {
 });
 
 add_task(async function test_get_values() {
-  // We wait until now to import XULStore.jsm to ensure we've created
+  // We wait until now to import XULStore to ensure we've created
   // the old store, as importing that module will initiate the attempt
   // to migrate the old store to the new one.
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
 
   // XULStore should *not* have migrated the values from the old store,
   // so it should return empty strings when we try to retrieve them.

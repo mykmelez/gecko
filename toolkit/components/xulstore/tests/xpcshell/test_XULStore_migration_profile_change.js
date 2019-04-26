@@ -5,10 +5,10 @@ const {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 add_task(async function test_get_values() {
-  // Import XULStore.jsm before getting the profile to ensure that the new store
+  // Import XULStore before getting the profile to ensure that the new store
   // is initialized, as the purpose of this test is to confirm that the old
   // store data gets migrated if the profile change happens post-initialization.
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
 
   // We haven't migrated any data yet (nor even changed to a profile), so there
   // shouldn't be a value in the store.
