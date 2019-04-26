@@ -112,7 +112,7 @@ if ("@mozilla.org/browser/enterprisepolicies;1" in Cc) {
   initTable.policies = ["@mozilla.org/browser/enterprisepolicies;1", "nsIEnterprisePolicies"];
 }
 
-if (AppConstants.NIGHTLY_BUILD) {
+if (AppConstants.MOZ_NEW_XULSTORE) {
   XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
     const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
     return XULStore;
