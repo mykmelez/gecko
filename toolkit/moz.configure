@@ -1716,5 +1716,5 @@ def new_xulstore(milestone):
     if milestone.is_nightly:
         return True
 
-set_config('MOZ_NEW_XULSTORE', new_xulstore)
-set_define('MOZ_NEW_XULSTORE', new_xulstore)
+set_config('MOZ_NEW_XULSTORE', True, when=new_xulstore)
+set_define('MOZ_NEW_XULSTORE', True, when=new_xulstore)
