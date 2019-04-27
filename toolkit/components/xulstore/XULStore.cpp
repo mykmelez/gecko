@@ -6,7 +6,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/XULStore.h"
 #include "nsCOMPtr.h"
-#include "nsIXULStoreNew.h"
+#include "nsIXULStore.h"
 
 namespace mozilla {
 
