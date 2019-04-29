@@ -51,6 +51,17 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   });
 }
 
+XPCOMUtils.defineLazyGetter(Services, "notificationDB", () => {
+  if (AppConstants.MOZ_NEW_NOTIFICATION_STORE) {
+    ChromeUtils.import("resource://gre/modules/NotificationDBNew.jsm");
+  } else {
+    ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
+  }
+  // The NotificationDB module doesn't export any symbols, so we don't return
+  // a value.  Consumers import it only for its side effects (initialization of
+  // the notification database).
+});
+
 XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
   const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
   return XULStore;

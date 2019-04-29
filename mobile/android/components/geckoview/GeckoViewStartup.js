@@ -127,7 +127,7 @@ GeckoViewStartup.prototype = {
         const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
         L10nRegistry.registerSource(greSource);
 
-        ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
+        Services.notificationDB;
 
         // Initialize safe browsing module. This is required for content
         // blocking features and manages blocklist downloads and updates.

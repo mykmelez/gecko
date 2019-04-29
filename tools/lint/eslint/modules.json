@@ -140,6 +140,7 @@
   "MulticastDNSAndroid.jsm": ["MulticastDNS"],
   "NativeMessaging.jsm": ["NativeApp"],
   "NotificationDB.jsm": [],
+  "NotificationDBNew.jsm": [],
   "nsFormAutoCompleteResult.jsm": ["FormAutoCompleteResult"],
   "observers.js": ["Observers"],
   "offlineAppCache.jsm": ["OfflineAppCacheHelper"],
