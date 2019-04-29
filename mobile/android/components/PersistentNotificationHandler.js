@@ -25,7 +25,7 @@ PersistentNotificationHandler.prototype = {
 
   observe(subject, topic, data) {
     if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT) {
-      Services.notificationDB;
+      ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
     }
     const persistentInfo = JSON.parse(data);
 

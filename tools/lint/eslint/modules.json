@@ -141,6 +141,7 @@
   "NativeMessaging.jsm": ["NativeApp"],
   "NotificationDB.jsm": [],
   "NotificationDBNew.jsm": [],
+  "NotificationDBOld.jsm": [],
   "nsFormAutoCompleteResult.jsm": ["FormAutoCompleteResult"],
   "observers.js": ["Observers"],
   "offlineAppCache.jsm": ["OfflineAppCacheHelper"],
