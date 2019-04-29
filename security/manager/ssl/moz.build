@@ -13,7 +13,6 @@ XPIDL_SOURCES += [
     'nsIBadCertListener2.idl',
     'nsICertificateDialogs.idl',
     'nsICertOverrideService.idl',
-    'nsICertStorage.idl',
     'nsIClientAuthDialogs.idl',
     'nsIContentSignatureVerifier.idl',
     'nsICryptoHash.idl',
@@ -234,4 +233,13 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     # Gecko headers aren't warning-free enough for us to enable these warnings.
     CXXFLAGS += [
         '-Wno-unused-parameter',
+    ]
+
+if CONFIG['MOZ_NEW_CERT_STORAGE']:
+    XPIDL_SOURCES += [
+        'nsICertStorage.idl',
+    ]
+else:
+    XPIDL_SOURCES += [
+        'nsICertBlocklist.idl',
     ]
