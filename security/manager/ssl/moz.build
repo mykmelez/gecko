@@ -98,7 +98,6 @@ EXPORTS.ipc += [
 ]
 
 UNIFIED_SOURCES += [
-    'cert_storage/src/cert_storage.cpp',
     'ContentSignatureVerifier.cpp',
     'CryptoTask.cpp',
     'CSTrustDomain.cpp',
@@ -187,6 +186,21 @@ UNIFIED_SOURCES += [
     'md4.c',
 ]
 
+if CONFIG['MOZ_NEW_CERT_STORAGE']:
+    XPIDL_SOURCES += [
+        'nsICertStorage.idl',
+    ]
+    UNIFIED_SOURCES += [
+        'cert_storage/src/cert_storage.cpp',
+    ]
+else:
+    XPIDL_SOURCES += [
+        'nsICertBlocklist.idl',
+    ]
+    UNIFIED_SOURCES += [
+        'CertBlocklist.cpp',
+    ]
+
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
@@ -233,13 +247,4 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     # Gecko headers aren't warning-free enough for us to enable these warnings.
     CXXFLAGS += [
         '-Wno-unused-parameter',
-    ]
-
-if CONFIG['MOZ_NEW_CERT_STORAGE']:
-    XPIDL_SOURCES += [
-        'nsICertStorage.idl',
-    ]
-else:
-    XPIDL_SOURCES += [
-        'nsICertBlocklist.idl',
     ]

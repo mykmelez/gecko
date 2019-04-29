@@ -11,7 +11,11 @@
 #include "ScopedNSSTypes.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/TimeStamp.h"
+#ifdef MOZ_NEW_CERT_STORAGE
 #include "nsICertStorage.h"
+#else
+#include "nsICertBlocklist.h"
+#endif
 #include "nsString.h"
 #include "mozpkix/pkixtypes.h"
 #include "secmodt.h"
@@ -232,7 +236,11 @@ class NSSCertDBTrustDomain : public mozilla::pkix::TrustDomain {
   UniqueCERTCertList& mBuiltChain;    // non-owning
   PinningTelemetryInfo* mPinningTelemetryInfo;
   const char* mHostname;  // non-owning - only used for pinning checks
+#ifdef MOZ_NEW_CERT_STORAGE
   nsCOMPtr<nsICertStorage> mCertBlocklist;
+#else
+  nsCOMPtr<nsICertBlocklist> mCertBlocklist;
+#endif
   CertVerifier::OCSPStaplingStatus mOCSPStaplingStatus;
   // Certificate Transparency data extracted during certificate verification
   UniqueSECItem mSCTListFromCertificate;

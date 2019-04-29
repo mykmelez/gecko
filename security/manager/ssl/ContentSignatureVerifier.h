@@ -9,10 +9,14 @@
 
 #include "cert.h"
 #include "CSTrustDomain.h"
+#ifdef MOZ_NEW_CERT_STORAGE
 #include "nsDirectoryServiceUtils.h"
+#endif
 #include "nsIContentSignatureVerifier.h"
 #include "nsIStreamListener.h"
+#ifdef MOZ_NEW_CERT_STORAGE
 #include "nsNetUtil.h"
+#endif
 #include "nsString.h"
 #include "ScopedNSSTypes.h"
 
