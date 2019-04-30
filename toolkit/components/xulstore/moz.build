@@ -16,11 +16,11 @@ XPIDL_SOURCES += [
     'nsIXULStore.idl',
 ]
 
-if CONFIG['MOZ_NEW_XULSTORE']:
-    XPCOM_MANIFESTS += [
-        'components-new.conf',
-    ]
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
 
+if CONFIG['MOZ_NEW_XULSTORE']:
     EXTRA_JS_MODULES += [
         'XULStoreNew.jsm',
     ]
@@ -39,10 +39,6 @@ if CONFIG['MOZ_NEW_XULSTORE']:
 
     FINAL_LIBRARY = 'xul'
 else:
-    XPCOM_MANIFESTS += [
-        'components.conf',
-    ]
-
     EXTRA_JS_MODULES += [
         'XULStore.jsm',
     ]
