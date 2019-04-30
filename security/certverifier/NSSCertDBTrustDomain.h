@@ -263,7 +263,7 @@ class NSSCertDBTrustDomain : public mozilla::pkix::TrustDomain {
   PinningTelemetryInfo* mPinningTelemetryInfo;
   const char* mHostname;  // non-owning - only used for pinning checks
 #ifdef MOZ_NEW_CERT_STORAGE
-  nsCOMPtr<nsICertStorage> mCertBlocklist;
+  nsCOMPtr<nsICertStorage> mCertStorage;
 #else
   nsCOMPtr<nsICertBlocklist> mCertBlocklist;
 #endif

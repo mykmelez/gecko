@@ -91,7 +91,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
       mPinningTelemetryInfo(pinningTelemetryInfo),
       mHostname(hostname),
 #ifdef MOZ_NEW_CERT_STORAGE
-      mCertBlocklist(do_GetService(NS_CERT_STORAGE_CID)),
+      mCertStorage(do_GetService(NS_CERT_STORAGE_CID)),
 #else
       mCertBlocklist(do_GetService(NS_CERTBLOCKLIST_CONTRACTID)),
 #endif
@@ -103,6 +103,31 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
                                         IssuerChecker& checker, Time) {
   Vector<Input> rootCandidates;
   Vector<Input> intermediateCandidates;
+
+  if (!mCertStorage) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  nsTArray<uint8_t> subject;
+  if (!subject.AppendElements(encodedIssuerName.UnsafeGetData(),
+                              encodedIssuerName.GetLength())) {
+    return Result::FATAL_ERROR_NO_MEMORY;
+  }
+  nsTArray<nsTArray<uint8_t>> certs;
+  nsresult rv = mCertStorage->FindCertsBySubject(subject, certs);
+  if (NS_FAILED(rv)) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  for (auto& cert : certs) {
+    Input certDER;
+    Result rv = certDER.Init(cert.Elements(), cert.Length());
+    if (rv != Success) {
+      continue;  // probably too big
+    }
+    // Currently we're only expecting intermediate certificates in cert storage.
+    if (!intermediateCandidates.append(certDER)) {
+      return Result::FATAL_ERROR_NO_MEMORY;
+    }
+  }
 
   SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
 
@@ -197,7 +222,7 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   }
 
   // Check the certificate against the OneCRL cert blocklist
-  if (!mCertBlocklist) {
+  if (!mCertStorage) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
 
@@ -231,7 +256,7 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
     }
 
 #ifdef MOZ_NEW_CERT_STORAGE
-    nsrv = mCertBlocklist->GetRevocationState(
+    nsrv = mCertStorage->GetRevocationState(
         issuerBytes, serialBytes, subjectBytes, pubKeyBytes, &revocationState);
 #else
     nsrv = mCertBlocklist->IsCertRevoked(encIssuer, encSerial, encSubject,
@@ -499,7 +524,7 @@ Result NSSCertDBTrustDomain::CheckRevocation(
 
   // If we have a fresh OneCRL Blocklist we can skip OCSP for CA certs
   bool blocklistIsFresh;
-  nsresult nsrv = mCertBlocklist->IsBlocklistFresh(&blocklistIsFresh);
+  nsresult nsrv = mCertStorage->IsBlocklistFresh(&blocklistIsFresh);
   if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
