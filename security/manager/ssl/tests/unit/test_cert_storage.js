@@ -275,9 +275,9 @@ function run_test() {
                      { " Rym6o+VN9xgZXT/QLrvN/nv1ZN4=": true},
                    "MBIxEDAOBgNVBAMMB1Rlc3QgQ0E=":
                      { " a0X7/7DlTaedpgrIJg25iBPOkIM=": true},
-                   "YW5vdGhlciBpbWFnaW5hcnkgaXNzdWVy":
-                     { " YW5vdGhlciBzZXJpYWwu": true,
-                       " c2VyaWFsMi4=": true },
+                   "MBwxGjAYBgNVBAMMEVRlc3QgSW50ZXJtZWRpYXRl":
+                     { " Tg==": true,
+                       " Hw==": true },
                  };
 
   add_task(async function() {
@@ -381,8 +381,8 @@ function run_test() {
       // check that save with no further update is a no-op
       let lastModified = gRevocations.lastModifiedTime;
       // add an already existing entry
-      certList.revokeCertByIssuerAndSerial("YW5vdGhlciBpbWFnaW5hcnkgaXNzdWVy",
-                                           "c2VyaWFsMi4=");
+      certList.revokeCertByIssuerAndSerial("MBwxGjAYBgNVBAMMEVRlc3QgSW50ZXJtZWRpYXRl",
+                                           "Hw==");
       certList.saveEntries();
       let newModified = gRevocations.lastModifiedTime;
       equal(lastModified, newModified,

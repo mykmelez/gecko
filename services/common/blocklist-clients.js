@@ -10,7 +10,6 @@ var EXPORTED_SYMBOLS = [
 
 const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const { RemoteSecuritySettings } = ChromeUtils.import("resource://gre/modules/psm/RemoteSecuritySettings.jsm");
 const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 ChromeUtils.defineModuleGetter(this, "RemoteSettings", "resource://services-settings/remote-settings.js");
@@ -278,16 +277,28 @@ function initialize() {
   });
   PinningBlocklistClient.on("sync", updatePinningList);
 
-  // In Bug 1526018 this will move into its own service, as it's not quite like
-  // the others.
-  RemoteSecuritySettingsClient = new RemoteSecuritySettings();
+  if (AppConstants.MOZ_NEW_CERT_STORAGE) {
+    const { RemoteSecuritySettings } = ChromeUtils.import("resource://gre/modules/psm/RemoteSecuritySettings.jsm");
 
-  return {
-    OneCRLBlocklistClient,
-    AddonBlocklistClient,
-    PluginBlocklistClient,
-    GfxBlocklistClient,
-    PinningBlocklistClient,
-    RemoteSecuritySettingsClient,
-  };
+    // In Bug 1526018 this will move into its own service, as it's not quite like
+    // the others.
+    RemoteSecuritySettingsClient = new RemoteSecuritySettings();
+
+    return {
+      OneCRLBlocklistClient,
+      AddonBlocklistClient,
+      PluginBlocklistClient,
+      GfxBlocklistClient,
+      PinningBlocklistClient,
+      RemoteSecuritySettingsClient,
+    };
+  } else {
+    return {
+      OneCRLBlocklistClient,
+      AddonBlocklistClient,
+      PluginBlocklistClient,
+      GfxBlocklistClient,
+      PinningBlocklistClient,
+    };
+  }
 }
