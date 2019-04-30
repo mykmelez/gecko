@@ -35,7 +35,7 @@
 #include "nsIRemoteTab.h"
 
 #ifndef MOZ_NEW_XULSTORE
-#include "nsIXULStore.h"
+#  include "nsIXULStore.h"
 #endif
 
 namespace mozilla {

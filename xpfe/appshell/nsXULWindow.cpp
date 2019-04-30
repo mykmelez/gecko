@@ -62,7 +62,7 @@
 #include "mozilla/dom/BrowserParent.h"
 
 #ifdef MOZ_NEW_XULSTORE
-#include "mozilla/XULStore.h"
+#  include "mozilla/XULStore.h"
 #endif
 
 using namespace mozilla;

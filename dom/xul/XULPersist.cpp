@@ -7,9 +7,9 @@
 #include "XULPersist.h"
 
 #ifdef MOZ_NEW_XULSTORE
-#include "mozilla/XULStore.h"
+#  include "mozilla/XULStore.h"
 #else
-#include "nsIXULStore.h"
+#  include "nsIXULStore.h"
 #endif
 
 namespace mozilla {
