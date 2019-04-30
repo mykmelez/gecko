@@ -352,10 +352,6 @@ MozElements.MozElementMixin = Base => {
         } else {
           el.removeAttribute(newAttr);
         }
-
-        if (newAttr == "accesskey" && el.formatAccessKey) {
-          el.formatAccessKey(false);
-        }
       }
     }
   }
@@ -650,6 +646,7 @@ const isDummyDocument = document.documentURI == "chrome://extensions/content/dum
 if (!isDummyDocument) {
   for (let script of [
     "chrome://global/content/elements/general.js",
+    "chrome://global/content/elements/button.js",
     "chrome://global/content/elements/checkbox.js",
     "chrome://global/content/elements/menu.js",
     "chrome://global/content/elements/menupopup.js",
@@ -661,6 +658,7 @@ if (!isDummyDocument) {
     "chrome://global/content/elements/autocomplete-richlistitem.js",
     "chrome://global/content/elements/textbox.js",
     "chrome://global/content/elements/tabbox.js",
+    "chrome://global/content/elements/text.js",
     "chrome://global/content/elements/tree.js",
     "chrome://global/content/elements/wizard.js",
   ]) {
@@ -673,7 +671,6 @@ if (!isDummyDocument) {
     ["stringbundle", "chrome://global/content/elements/stringbundle.js"],
     ["printpreview-toolbar", "chrome://global/content/printPreviewToolbar.js"],
     ["editor", "chrome://global/content/elements/editor.js"],
-    ["text-link", "chrome://global/content/elements/text.js"],
   ]) {
     customElements.setElementCreationCallback(tag, () => {
       Services.scriptloader.loadSubScript(script, window);
