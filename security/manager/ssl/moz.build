@@ -193,6 +193,8 @@ if CONFIG['MOZ_NEW_CERT_STORAGE']:
     UNIFIED_SOURCES += [
         'cert_storage/src/cert_storage.cpp',
     ]
+    gkrust_features += ['cert_storage']
+
 else:
     XPIDL_SOURCES += [
         'nsICertBlocklist.idl',

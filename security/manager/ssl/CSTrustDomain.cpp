@@ -52,6 +52,7 @@ Result CSTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
     return MapPRErrorCodeToResult(PR_GetError());
   }
 
+#ifdef MOZ_NEW_CERT_STORAGE
   nsTArray<uint8_t> issuerBytes;
   nsTArray<uint8_t> serialBytes;
   nsTArray<uint8_t> subjectBytes;
@@ -59,6 +60,15 @@ Result CSTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
 
   nsresult nsrv = BuildRevocationCheckArrays(
       candidateCert, issuerBytes, serialBytes, subjectBytes, pubKeyBytes);
+#else
+  nsAutoCString encIssuer;
+  nsAutoCString encSerial;
+  nsAutoCString encSubject;
+  nsAutoCString encPubKey;
+
+  nsresult nsrv = BuildRevocationCheckStrings(candidateCert.get(), encIssuer,
+                                              encSerial, encSubject, encPubKey);
+#endif
   if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }

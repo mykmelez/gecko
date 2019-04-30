@@ -206,9 +206,6 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   if (mCertDBTrustType == trustSSL) {
 #ifdef MOZ_NEW_CERT_STORAGE
     int16_t revocationState;
-#else
-    bool isCertRevoked;
-#endif
 
     nsTArray<uint8_t> issuerBytes;
     nsTArray<uint8_t> serialBytes;
@@ -217,6 +214,17 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
 
     nsresult nsrv = BuildRevocationCheckArrays(
         candidateCert, issuerBytes, serialBytes, subjectBytes, pubKeyBytes);
+#else
+    bool isCertRevoked;
+
+    nsAutoCString encIssuer;
+    nsAutoCString encSerial;
+    nsAutoCString encSubject;
+    nsAutoCString encPubKey;
+
+    nsresult nsrv = BuildRevocationCheckStrings(
+        candidateCert.get(), encIssuer, encSerial, encSubject, encPubKey);
+#endif
 
     if (NS_FAILED(nsrv)) {
       return Result::FATAL_ERROR_LIBRARY_FAILURE;
@@ -1267,6 +1275,7 @@ nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
   return NS_ERROR_FAILURE;
 }
 
+#ifdef MOZ_NEW_CERT_STORAGE
 nsresult BuildRevocationCheckArrays(const UniqueCERTCertificate& cert,
                                     /*out*/ nsTArray<uint8_t>& issuerBytes,
                                     /*out*/ nsTArray<uint8_t>& serialBytes,
@@ -1298,6 +1307,45 @@ nsresult BuildRevocationCheckArrays(const UniqueCERTCertificate& cert,
   }
   return NS_OK;
 }
+#else
+nsresult BuildRevocationCheckStrings(const CERTCertificate* cert,
+                                     /*out*/ nsCString& encIssuer,
+                                     /*out*/ nsCString& encSerial,
+                                     /*out*/ nsCString& encSubject,
+                                     /*out*/ nsCString& encPubKey) {
+  // Convert issuer, serial, subject and pubKey data to Base64 encoded DER
+  nsDependentCSubstring issuerString(
+      BitwiseCast<char*, uint8_t*>(cert->derIssuer.data), cert->derIssuer.len);
+  nsDependentCSubstring serialString(
+      BitwiseCast<char*, uint8_t*>(cert->serialNumber.data),
+      cert->serialNumber.len);
+  nsDependentCSubstring subjectString(
+      BitwiseCast<char*, uint8_t*>(cert->derSubject.data),
+      cert->derSubject.len);
+  nsDependentCSubstring pubKeyString(
+      BitwiseCast<char*, uint8_t*>(cert->derPublicKey.data),
+      cert->derPublicKey.len);
+
+  nsresult rv = Base64Encode(issuerString, encIssuer);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(serialString, encSerial);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(subjectString, encSubject);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = Base64Encode(pubKeyString, encPubKey);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+#endif
 
 /**
  * Given a list of certificates representing a verified certificate path from an
