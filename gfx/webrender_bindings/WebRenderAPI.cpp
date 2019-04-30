@@ -78,7 +78,7 @@ class NewRenderer : public RendererEvent {
             aWindowId, mSize.width, mSize.height,
             supportLowPriorityTransactions,
             gfxPrefs::WebRenderPictureCaching() && supportPictureCaching,
-            compositor->gl(),
+            gfxPrefs::WebRenderStartDebugServer(), compositor->gl(),
             aRenderThread.GetProgramCache()
                 ? aRenderThread.GetProgramCache()->Raw()
                 : nullptr,
@@ -1270,6 +1270,12 @@ void wr_transaction_notification_notified(uintptr_t aHandler,
   // TODO: it would be better to get a callback when the object is destroyed on
   // the rust side and delete then.
   delete handler;
+}
+
+void wr_register_thread_local_arena() {
+#ifdef MOZ_MEMORY
+  jemalloc_thread_local_arena(true);
+#endif
 }
 
 }  // extern C

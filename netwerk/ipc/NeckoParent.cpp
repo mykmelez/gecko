@@ -331,11 +331,9 @@ bool NeckoParent::DeallocPStunAddrsRequestParent(
 }
 
 PWebrtcProxyChannelParent* NeckoParent::AllocPWebrtcProxyChannelParent(
-    const PBrowserOrId& aBrowser) {
+    const TabId& aTabId) {
 #ifdef MOZ_WEBRTC
-  RefPtr<BrowserParent> tab =
-      BrowserParent::GetFrom(aBrowser.get_PBrowserParent());
-  WebrtcProxyChannelParent* parent = new WebrtcProxyChannelParent(tab);
+  WebrtcProxyChannelParent* parent = new WebrtcProxyChannelParent(aTabId);
   parent->AddRef();
   return parent;
 #else
@@ -568,14 +566,14 @@ bool NeckoParent::DeallocPTCPServerSocketParent(PTCPServerSocketParent* actor) {
 }
 
 PUDPSocketParent* NeckoParent::AllocPUDPSocketParent(
-    const Principal& /* unused */, const nsCString& /* unused */) {
+    nsIPrincipal* /* unused */, const nsCString& /* unused */) {
   RefPtr<UDPSocketParent> p = new UDPSocketParent(this);
 
   return p.forget().take();
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvPUDPSocketConstructor(
-    PUDPSocketParent* aActor, const Principal& aPrincipal,
+    PUDPSocketParent* aActor, nsIPrincipal* aPrincipal,
     const nsCString& aFilter) {
   if (!static_cast<UDPSocketParent*>(aActor)->Init(aPrincipal, aFilter)) {
     return IPC_FAIL_NO_REASON(this);
@@ -612,8 +610,7 @@ bool NeckoParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent) {
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvSpeculativeConnect(
-    const URIParams& aURI, const Principal& aPrincipal,
-    const bool& aAnonymous) {
+    const URIParams& aURI, nsIPrincipal* aPrincipal, const bool& aAnonymous) {
   nsCOMPtr<nsISpeculativeConnect> speculator(gIOService);
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   nsCOMPtr<nsIPrincipal> principal(aPrincipal);

@@ -987,6 +987,7 @@ impl AsyncPropertySampler for SamplerCallback {
 extern "C" {
     fn gecko_profiler_register_thread(name: *const ::std::os::raw::c_char);
     fn gecko_profiler_unregister_thread();
+    fn wr_register_thread_local_arena();
 }
 
 struct GeckoProfilerThreadListener {}
@@ -1026,6 +1027,7 @@ pub unsafe extern "C" fn wr_thread_pool_new() -> *mut WrThreadPool {
         .thread_name(|idx|{ format!("WRWorker#{}", idx) })
         .num_threads(num_threads)
         .start_handler(|idx| {
+            wr_register_thread_local_arena();
             let name = format!("WRWorker#{}", idx);
             register_thread_with_profiler(name.clone());
             gecko_profiler_register_thread(CString::new(name).unwrap().as_ptr());
@@ -1136,6 +1138,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_height: i32,
                                 support_low_priority_transactions: bool,
                                 enable_picture_caching: bool,
+                                start_debug_server: bool,
                                 gl_context: *mut c_void,
                                 program_cache: Option<&mut WrProgramCache>,
                                 shaders: Option<&mut WrShaders>,
@@ -1227,6 +1230,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         namespace_alloc_by_client: true,
         enable_picture_caching,
         allow_pixel_local_storage_support: false,
+        start_debug_server,
         ..Default::default()
     };
 

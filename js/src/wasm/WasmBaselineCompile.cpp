@@ -4162,8 +4162,8 @@ class BaseCompiler final : public BaseCompilerInterface {
       if (l.type == MIRType::RefOrNull) {
         uint32_t offs = fr.localOffset(l);
         MOZ_ASSERT(0 == (offs % sizeof(void*)));
-        stackMapGenerator_.machineStackTracker
-                          .setGCPointer(offs / sizeof(void*));
+        stackMapGenerator_.machineStackTracker.setGCPointer(offs /
+                                                            sizeof(void*));
       }
     }
 
@@ -4185,8 +4185,8 @@ class BaseCompiler final : public BaseCompilerInterface {
           MOZ_ASSERT(0 == (offs % sizeof(void*)));
           fr.storeLocalPtr(RegPtr(i->gpr()), l);
           // We should have just visited this local in the preceding loop.
-          MOZ_ASSERT(stackMapGenerator_.machineStackTracker
-                                       .isGCPointer(offs / sizeof(void*)));
+          MOZ_ASSERT(stackMapGenerator_.machineStackTracker.isGCPointer(
+              offs / sizeof(void*)));
           break;
         }
         case MIRType::Double:
@@ -6850,6 +6850,7 @@ class BaseCompiler final : public BaseCompilerInterface {
   MOZ_MUST_USE bool emitMemFill();
   MOZ_MUST_USE bool emitMemOrTableInit(bool isMem);
 #endif
+  MOZ_MUST_USE bool emitTableFill();
   MOZ_MUST_USE bool emitTableGet();
   MOZ_MUST_USE bool emitTableGrow();
   MOZ_MUST_USE bool emitTableSet();
@@ -10333,6 +10334,37 @@ bool BaseCompiler::emitMemOrTableInit(bool isMem) {
 #endif
 
 MOZ_MUST_USE
+bool BaseCompiler::emitTableFill() {
+  uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+
+  Nothing nothing;
+  uint32_t tableIndex;
+  if (!iter_.readTableFill(&tableIndex, &nothing, &nothing, &nothing)) {
+    return false;
+  }
+
+  if (deadCode_) {
+    return true;
+  }
+
+  // fill(start:u32, val:ref, len:u32, table:u32) -> u32
+  //
+  // Returns -1 on trap, otherwise 0.
+  pushI32(tableIndex);
+  if (!emitInstanceCall(lineOrBytecode, SASigTableFill,
+                        /*pushReturnedValue=*/false)) {
+    return false;
+  }
+
+  Label ok;
+  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
+  trap(Trap::ThrowReported);
+  masm.bind(&ok);
+
+  return true;
+}
+
+MOZ_MUST_USE
 bool BaseCompiler::emitTableGet() {
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
   Nothing index;
@@ -11565,6 +11597,8 @@ bool BaseCompiler::emitBody() {
             CHECK_NEXT(emitMemOrTableInit(/*isMem=*/false));
 #endif  // ENABLE_WASM_BULKMEM_OPS
 #ifdef ENABLE_WASM_REFTYPES
+          case uint32_t(MiscOp::TableFill):
+            CHECK_NEXT(emitTableFill());
           case uint32_t(MiscOp::TableGrow):
             CHECK_NEXT(emitTableGrow());
           case uint32_t(MiscOp::TableSize):

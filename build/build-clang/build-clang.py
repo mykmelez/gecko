@@ -32,7 +32,27 @@ def symlink(source, link_name):
 
 def check_run(args):
     print >> sys.stderr, ' '.join(args)
-    r = subprocess.call(args)
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # CMake `message(STATUS)` messages, as appearing in failed source code
+    # compiles, appear on stdout, so we only capture that.
+    (out, _) = p.communicate()
+    r = p.returncode
+    if r != 0:
+        cmake_output_re = re.compile("See also \"(.*/CMakeOutput.log)\"")
+        cmake_error_re = re.compile("See also \"(.*/CMakeError.log)\"")
+        output_match = cmake_output_re.search(out)
+        error_match = cmake_error_re.search(out)
+
+        print >> sys.stderr, out
+
+        def dump_file(log):
+            with open(log, 'rb') as f:
+                print >> sys.stderr, "\nContents of", log, "follow\n"
+                print >> sys.stderr, f.read()
+        if output_match:
+            dump_file(output_match.group(1))
+        if error_match:
+            dump_file(error_match.group(1))
     assert r == 0
 
 
@@ -203,8 +223,9 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
                     python_path, gcc_dir, libcxx_include_dir,
                     compiler_rt_source_dir=None, runtimes_source_link=None,
                     compiler_rt_source_link=None,
-                    is_final_stage=False, android_targets=None):
-    if is_final_stage and android_targets:
+                    is_final_stage=False, android_targets=None,
+                    extra_targets=None):
+    if is_final_stage and (android_targets or extra_targets):
         # Linking compiler-rt under "runtimes" activates LLVM_RUNTIME_TARGETS
         # and related arguments.
         symlink(compiler_rt_source_dir, runtimes_source_link)
@@ -283,6 +304,8 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
     if is_final_stage:
         if android_targets:
             runtime_targets = list(sorted(android_targets.keys()))
+        if extra_targets:
+            runtime_targets.extend(sorted(extra_targets))
 
     if runtime_targets:
         cmake_args += [
@@ -639,6 +662,13 @@ if __name__ == "__main__":
                 if attr not in cfg:
                     raise ValueError("must specify '%s' as a key for android target: %s" %
                                      (attr, target))
+    extra_targets = None
+    if "extra_targets" in config:
+        extra_targets = config["extra_targets"]
+        if not isinstance(extra_targets, list):
+            raise ValueError("extra_targets must be a list")
+        if not all(isinstance(t, (str, unicode)) for t in extra_targets):
+            raise ValueError("members of extra_targets should be strings")
     if is_linux() and gcc_dir is None:
         raise ValueError("Config file needs to set gcc_dir")
     cc = get_tool(config, "cc")
@@ -798,7 +828,8 @@ if __name__ == "__main__":
             llvm_source_dir, stage2_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
             compiler_rt_source_dir, runtimes_source_link, compiler_rt_source_link,
-            is_final_stage=(stages == 2), android_targets=android_targets)
+            is_final_stage=(stages == 2), android_targets=android_targets,
+            extra_targets=extra_targets)
 
     if stages > 2:
         stage3_dir = build_dir + '/stage3'
@@ -815,7 +846,7 @@ if __name__ == "__main__":
             llvm_source_dir, stage3_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
             compiler_rt_source_dir, runtimes_source_link, compiler_rt_source_link,
-            (stages == 3))
+            (stages == 3), extra_targets=extra_targets)
 
     if build_clang_tidy:
         prune_final_dir_for_clang_tidy(os.path.join(final_stage_dir, package_name),

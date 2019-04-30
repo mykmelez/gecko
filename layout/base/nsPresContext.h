@@ -25,7 +25,7 @@
 #include "gfxFontConstants.h"
 #include "nsAtom.h"
 #include "nsCRT.h"
-#include "nsIWidgetListener.h" // for nsSizeMode
+#include "nsIWidgetListener.h"  // for nsSizeMode
 #include "nsGkAtoms.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsChangeHint.h"
@@ -698,10 +698,10 @@ class nsPresContext : public nsISupports,
   bool IsVisualMode() const { return mIsVisual; }
 
   enum class InteractionType : uint32_t {
-    eClickInteraction,
-    eKeyInteraction,
-    eMouseMoveInteraction,
-    eScrollInteraction
+    ClickInteraction,
+    KeyInteraction,
+    MouseMoveInteraction,
+    ScrollInteraction
   };
 
   void RecordInteractionTime(InteractionType aType,
