@@ -104,6 +104,7 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   Vector<Input> rootCandidates;
   Vector<Input> intermediateCandidates;
 
+#ifdef MOZ_NEW_CERT_STORAGE
   if (!mCertStorage) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
@@ -128,6 +129,7 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
       return Result::FATAL_ERROR_NO_MEMORY;
     }
   }
+#endif
 
   SECItem encodedIssuerNameItem = UnsafeMapInputToSECItem(encodedIssuerName);
 
@@ -222,7 +224,11 @@ Result NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
   }
 
   // Check the certificate against the OneCRL cert blocklist
+#ifdef MOZ_NEW_CERT_STORAGE
   if (!mCertStorage) {
+#else
+  if (!mCertBlocklist) {
+#endif
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
 
@@ -524,7 +530,11 @@ Result NSSCertDBTrustDomain::CheckRevocation(
 
   // If we have a fresh OneCRL Blocklist we can skip OCSP for CA certs
   bool blocklistIsFresh;
+#ifdef MOZ_NEW_CERT_STORAGE
   nsresult nsrv = mCertStorage->IsBlocklistFresh(&blocklistIsFresh);
+#else
+  nsresult nsrv = mCertBlocklist->IsBlocklistFresh(&blocklistIsFresh);
+#endif
   if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
