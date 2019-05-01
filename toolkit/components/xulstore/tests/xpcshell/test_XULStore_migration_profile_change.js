@@ -11,7 +11,7 @@ add_task({
   // Import XULStore before getting the profile to ensure that the new store
   // is initialized, as the purpose of this test is to confirm that the old
   // store data gets migrated if the profile change happens post-initialization.
-  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
+  const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
 
   // We haven't migrated any data yet (nor even changed to a profile), so there
   // shouldn't be a value in the store.

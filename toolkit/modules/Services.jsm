@@ -114,7 +114,7 @@ if ("@mozilla.org/enterprisepolicies;1" in Cc) {
 
 if (AppConstants.MOZ_NEW_XULSTORE) {
   XPCOMUtils.defineLazyGetter(Services, "xulStore", () => {
-    const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStoreNew.jsm");
+    const {XULStore} = ChromeUtils.import("resource://gre/modules/XULStore.jsm");
     return XULStore;
   });
 } else {

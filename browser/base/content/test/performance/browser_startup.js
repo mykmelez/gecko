@@ -119,11 +119,7 @@ const startupPhases = {
 if (Services.prefs.getBoolPref("browser.startup.blankWindow") &&
     Services.prefs.getCharPref("extensions.activeThemeID", "default-theme@mozilla.org") ==
       "default-theme@mozilla.org") {
-  if (AppConstants.MOZ_NEW_XULSTORE) {
-    startupPhases["before profile selection"].whitelist.modules.add("resource://gre/modules/XULStoreNew.jsm");
-  } else {
-    startupPhases["before profile selection"].whitelist.modules.add("resource://gre/modules/XULStore.jsm");
-  }
+  startupPhases["before profile selection"].whitelist.modules.add("resource://gre/modules/XULStore.jsm");
 }
 
 if (!gBrowser.selectedBrowser.isRemoteBrowser) {

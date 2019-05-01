@@ -22,7 +22,7 @@ XPCOM_MANIFESTS += [
 
 if CONFIG['MOZ_NEW_XULSTORE']:
     EXTRA_JS_MODULES += [
-        'XULStoreNew.jsm',
+        'new/XULStore.jsm',
     ]
 
     TEST_DIRS += [
@@ -40,5 +40,5 @@ if CONFIG['MOZ_NEW_XULSTORE']:
     FINAL_LIBRARY = 'xul'
 else:
     EXTRA_JS_MODULES += [
-        'XULStore.jsm',
+        'old/XULStore.jsm',
     ]
