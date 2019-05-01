@@ -16,11 +16,11 @@
 #include "nsContentUtils.h"
 
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "SVGObserverUtils.h"
 #include "nsPresContext.h"
-#include "nsIPresShellInlines.h"
 
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIFrame.h"
@@ -1486,8 +1486,22 @@ void CanvasRenderingContext2D::ClearTarget(int32_t aWidth, int32_t aHeight) {
 
   // Update dimensions only if new (strictly positive) values were passed.
   if (aWidth > 0 && aHeight > 0) {
+    // Update the memory size associated with the wrapper object when we change
+    // the dimensions. Note that we need to keep updating dying wrappers before
+    // they are finalized so that the memory accounting balances out.
+    JSObject* wrapper = GetWrapperMaybeDead();
+    if (wrapper) {
+      JS::RemoveAssociatedMemory(wrapper, BindingJSObjectMallocBytes(this),
+                                 JS::MemoryUse::DOMBinding);
+    }
+
     mWidth = aWidth;
     mHeight = aHeight;
+
+    if (wrapper) {
+      JS::AddAssociatedMemory(wrapper, BindingJSObjectMallocBytes(this),
+                              JS::MemoryUse::DOMBinding);
+    }
   }
 
   if (!mCanvasElement || !mCanvasElement->IsInComposedDoc()) {

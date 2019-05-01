@@ -47,6 +47,10 @@
 #if defined(XP_WIN)
 // Prevent collisions with nsAppStartup::GetStartupInfo()
 #  undef GetStartupInfo
+
+#  include <windows.h>
+#elif defined(XP_DARWIN)
+#  include <mach/mach_time.h>
 #endif
 
 #include "mozilla/IOInterposer.h"
@@ -59,6 +63,8 @@ static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 #define kPrefMaxResumedCrashes "toolkit.startup.max_resumed_crashes"
 #define kPrefRecentCrashes "toolkit.startup.recent_crashes"
 #define kPrefAlwaysUseSafeMode "toolkit.startup.always_use_safe_mode"
+
+#define kNanosecondsPerSecond 1000000000.0
 
 #if defined(XP_WIN)
 #  include "mozilla/perfprobe.h"
@@ -114,7 +120,7 @@ class nsAppExitEvent : public mozilla::Runnable {
   RefPtr<nsAppStartup> mService;
 
  public:
-  explicit nsAppExitEvent(nsAppStartup *service)
+  explicit nsAppExitEvent(nsAppStartup* service)
       : mozilla::Runnable("nsAppExitEvent"), mService(service) {}
 
   NS_IMETHOD Run() override {
@@ -503,13 +509,13 @@ nsAppStartup::ExitLastWindowClosingSurvivalArea(void) {
 //
 
 NS_IMETHODIMP
-nsAppStartup::GetShuttingDown(bool *aResult) {
+nsAppStartup::GetShuttingDown(bool* aResult) {
   *aResult = mShuttingDown;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetStartingUp(bool *aResult) {
+nsAppStartup::GetStartingUp(bool* aResult) {
   *aResult = mStartingUp;
   return NS_OK;
 }
@@ -524,14 +530,14 @@ nsAppStartup::DoneStartingUp() {
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetRestarting(bool *aResult) {
+nsAppStartup::GetRestarting(bool* aResult) {
   *aResult = mRestart;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetWasRestarted(bool *aResult) {
-  char *mozAppRestart = PR_GetEnv("MOZ_APP_RESTART");
+nsAppStartup::GetWasRestarted(bool* aResult) {
+  char* mozAppRestart = PR_GetEnv("MOZ_APP_RESTART");
 
   /* When calling PR_SetEnv() with an empty value the existing variable may
    * be unset or set to the empty string depending on the underlying platform
@@ -542,13 +548,32 @@ nsAppStartup::GetWasRestarted(bool *aResult) {
 }
 
 NS_IMETHODIMP
+nsAppStartup::GetSecondsSinceLastOSRestart(int64_t *aResult) {
+#if defined(XP_WIN)
+  *aResult = int64_t(GetTickCount64() / 1000ull);
+  return NS_OK;
+#elif defined(XP_DARWIN)
+  uint64_t absTime = mach_absolute_time();
+  mach_timebase_info_data_t timebaseInfo;
+  mach_timebase_info(&timebaseInfo);
+  double toNanoseconds =
+      double(timebaseInfo.numer) / double(timebaseInfo.denom);
+  *aResult =
+      std::llround(double(absTime) * toNanoseconds / kNanosecondsPerSecond);
+  return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+NS_IMETHODIMP
 nsAppStartup::SetInterrupted(bool aInterrupted) {
   mInterrupted = aInterrupted;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetInterrupted(bool *aInterrupted) {
+nsAppStartup::GetInterrupted(bool* aInterrupted) {
   *aInterrupted = mInterrupted;
   return NS_OK;
 }
@@ -558,9 +583,9 @@ nsAppStartup::GetInterrupted(bool *aInterrupted) {
 //
 
 NS_IMETHODIMP
-nsAppStartup::CreateChromeWindow(nsIWebBrowserChrome *aParent,
+nsAppStartup::CreateChromeWindow(nsIWebBrowserChrome* aParent,
                                  uint32_t aChromeFlags,
-                                 nsIWebBrowserChrome **_retval) {
+                                 nsIWebBrowserChrome** _retval) {
   bool cancel;
   return CreateChromeWindow2(aParent, aChromeFlags, nullptr, nullptr, 0,
                              &cancel, _retval);
@@ -582,12 +607,12 @@ nsAppStartup::SetScreenId(uint32_t aScreenId) {
 }
 
 NS_IMETHODIMP
-nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
+nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome* aParent,
                                   uint32_t aChromeFlags,
-                                  nsIRemoteTab *aOpeningTab,
-                                  mozIDOMWindowProxy *aOpener,
-                                  uint64_t aNextRemoteTabId, bool *aCancel,
-                                  nsIWebBrowserChrome **_retval) {
+                                  nsIRemoteTab* aOpeningTab,
+                                  mozIDOMWindowProxy* aOpener,
+                                  uint64_t aNextRemoteTabId, bool* aCancel,
+                                  nsIWebBrowserChrome** _retval) {
   NS_ENSURE_ARG_POINTER(aCancel);
   NS_ENSURE_ARG_POINTER(_retval);
   *aCancel = false;
@@ -653,8 +678,8 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
 //
 
 NS_IMETHODIMP
-nsAppStartup::Observe(nsISupports *aSubject, const char *aTopic,
-                      const char16_t *aData) {
+nsAppStartup::Observe(nsISupports* aSubject, const char* aTopic,
+                      const char16_t* aData) {
   NS_ASSERTION(mAppShell, "appshell service notified before appshell built");
   if (!strcmp(aTopic, "quit-application-forced")) {
     mShuttingDown = true;
@@ -701,9 +726,9 @@ nsAppStartup::Observe(nsISupports *aSubject, const char *aTopic,
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetStartupInfo(JSContext *aCx,
+nsAppStartup::GetStartupInfo(JSContext* aCx,
                              JS::MutableHandle<JS::Value> aRetval) {
-  JS::Rooted<JSObject *> obj(aCx, JS_NewPlainObject(aCx));
+  JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
 
   aRetval.setObject(*obj);
 
@@ -738,7 +763,7 @@ nsAppStartup::GetStartupInfo(JSContext *aCx,
     if (!stamp.IsNull()) {
       if (stamp >= procTime) {
         PRTime prStamp = ComputeAbsoluteTimestamp(stamp) / PR_USEC_PER_MSEC;
-        JS::Rooted<JSObject *> date(
+        JS::Rooted<JSObject*> date(
             aCx, JS::NewDateObject(aCx, JS::TimeClip(prStamp)));
         JS_DefineProperty(aCx, obj, StartupTimeline::Describe(ev), date,
                           JSPROP_ENUMERATE);
@@ -752,7 +777,7 @@ nsAppStartup::GetStartupInfo(JSContext *aCx,
 }
 
 NS_IMETHODIMP
-nsAppStartup::GetAutomaticSafeModeNecessary(bool *_retval) {
+nsAppStartup::GetAutomaticSafeModeNecessary(bool* _retval) {
   NS_ENSURE_ARG_POINTER(_retval);
 
   bool alwaysSafe = false;
@@ -771,7 +796,7 @@ nsAppStartup::GetAutomaticSafeModeNecessary(bool *_retval) {
 }
 
 NS_IMETHODIMP
-nsAppStartup::TrackStartupCrashBegin(bool *aIsSafeModeNecessary) {
+nsAppStartup::TrackStartupCrashBegin(bool* aIsSafeModeNecessary) {
   const int32_t MAX_TIME_SINCE_STARTUP = 6 * 60 * 60 * 1000;
   const int32_t MAX_STARTUP_BUFFER = 10;
   nsresult rv;
@@ -817,7 +842,7 @@ nsAppStartup::TrackStartupCrashBegin(bool *aIsSafeModeNecessary) {
   // XRE_PROFILE_PATH is set.  After profile manager, the profile lock's mod.
   // time has been changed so can't be used on this startup. After a restart,
   // it's safe to assume the last startup was successful.
-  char *xreProfilePath = PR_GetEnv("XRE_PROFILE_PATH");
+  char* xreProfilePath = PR_GetEnv("XRE_PROFILE_PATH");
   if (xreProfilePath) {
     GetAutomaticSafeModeNecessary(aIsSafeModeNecessary);
     return NS_ERROR_NOT_AVAILABLE;
@@ -870,7 +895,7 @@ nsAppStartup::TrackStartupCrashBegin(bool *aIsSafeModeNecessary) {
       (recentCrashes > maxResumedCrashes && maxResumedCrashes != -1);
 
   nsCOMPtr<nsIPrefService> prefs = Preferences::GetService();
-  rv = static_cast<Preferences *>(prefs.get())
+  rv = static_cast<Preferences*>(prefs.get())
            ->SavePrefFileBlocking();  // flush prefs to disk since we are
                                       // tracking crashes
   NS_ENSURE_SUCCESS(rv, rv);
@@ -960,7 +985,7 @@ nsAppStartup::RestartInSafeMode(uint32_t aQuitMode) {
 }
 
 NS_IMETHODIMP
-nsAppStartup::CreateInstanceWithProfile(nsIToolkitProfile *aProfile) {
+nsAppStartup::CreateInstanceWithProfile(nsIToolkitProfile* aProfile) {
   if (NS_WARN_IF(!aProfile)) {
     return NS_ERROR_FAILURE;
   }
@@ -992,7 +1017,7 @@ nsAppStartup::CreateInstanceWithProfile(nsIToolkitProfile *aProfile) {
     return rv;
   }
 
-  const char *args[] = {"-no-remote", "-P", profileName.get()};
+  const char* args[] = {"-no-remote", "-P", profileName.get()};
   rv = process->Run(false, args, 3);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;

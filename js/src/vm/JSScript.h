@@ -1146,6 +1146,20 @@ class ScriptSource {
   }
 
  private:
+  template <typename Unit, XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeUncompressedData(XDRState<mode>* const xdr,
+                                                     ScriptSource* const ss,
+                                                     bool retrievable);
+
+  template <typename Unit, XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeCompressedData(XDRState<mode>* const xdr,
+                                                   ScriptSource* const ss,
+                                                   bool retrievable);
+
+  template <XDRMode mode>
+  static MOZ_MUST_USE XDRResult codeBinASTData(XDRState<mode>* const xdr,
+                                               ScriptSource* const ss);
+
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult xdrData(XDRState<mode>* const xdr,
                                         ScriptSource* const ss);
@@ -3007,7 +3021,7 @@ class LazyScript : public gc::TenuredCell {
   // If non-nullptr, the script has been compiled and this is a forwarding
   // pointer to the result. This is a weak pointer: after relazification, we
   // can collect the script if there are no other pointers to it.
-  WeakRef<JSScript*> script_;
+  WeakHeapPtrScript script_;
 
   // Original function with which the lazy script is associated.
   GCPtrFunction function_;

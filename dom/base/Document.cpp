@@ -25,6 +25,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Likely.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/URLExtraData.h"
@@ -283,7 +284,6 @@
 #  include "nsXULPopupManager.h"
 #  include "nsIDocShellTreeOwner.h"
 #endif
-#include "nsIPresShellInlines.h"
 #include "mozilla/dom/BoxObject.h"
 
 #include "mozilla/DocLoadingTimelineMarker.h"
@@ -2854,9 +2854,6 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
 
   // ----- if the doc is an addon, apply its CSP.
   if (addonPolicy) {
-    nsCOMPtr<nsIAddonPolicyService> aps =
-        do_GetService("@mozilla.org/addons/policy-service;1");
-
     nsAutoString addonCSP;
     Unused << ExtensionPolicyService::GetSingleton().GetBaseCSP(addonCSP);
     csp->AppendPolicy(addonCSP, false, false);
@@ -3149,8 +3146,8 @@ void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
 #endif
 }
 
-mozilla::dom::DocGroup* Document::GetDocGroup() const {
 #ifdef DEBUG
+void Document::AssertDocGroupMatchesKey() const {
   // Sanity check that we have an up-to-date and accurate docgroup
   if (mDocGroup) {
     nsAutoCString docGroupKey;
@@ -3162,10 +3159,8 @@ mozilla::dom::DocGroup* Document::GetDocGroup() const {
     }
     // XXX: Check that the TabGroup is correct as well!
   }
-#endif
-
-  return mDocGroup;
 }
+#endif
 
 nsresult Document::Dispatch(TaskCategory aCategory,
                             already_AddRefed<nsIRunnable>&& aRunnable) {
@@ -3678,7 +3673,7 @@ Element* Document::GetCurrentScript() {
 void Document::ReleaseCapture() const {
   // only release the capture if the caller can access it. This prevents a
   // page from stopping a scrollbar grab for example.
-  nsCOMPtr<nsINode> node = nsIPresShell::GetCapturingContent();
+  nsCOMPtr<nsINode> node = PresShell::GetCapturingContent();
   if (node && nsContentUtils::CanCallerAccess(node)) {
     PresShell::ReleaseCapturingContent();
   }
@@ -6746,7 +6741,9 @@ nsINode* Document::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv) {
       // It's kind of irrelevant, given that we're passing aAllowWrapping =
       // false, and documents should always insist on being wrapped in an
       // canonical scope. But we try to pass something sane anyway.
-      JSAutoRealm ar(cx, GetScopeObject()->GetGlobalJSObject());
+      JSObject* globalObject = GetScopeObject()->GetGlobalJSObject();
+      JS::ExposeObjectToActiveJS(globalObject);
+      JSAutoRealm ar(cx, globalObject);
       JS::Rooted<JS::Value> v(cx);
       rv = nsContentUtils::WrapNative(cx, ToSupports(this), this, &v,
                                       /* aAllowWrapping = */ false);
@@ -7334,7 +7331,8 @@ void Document::FlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
   // affect style, we need to promote a style flush on ourself to a
   // layout flush on our parent, since we need our container to be the
   // correct size to determine the correct style.
-  if (mParentDocument && IsSafeToFlush()) {
+  if (StyleOrLayoutObservablyDependsOnParentDocumentLayout() &&
+      IsSafeToFlush()) {
     mozilla::ChangesToFlush parentFlush = aFlush;
     if (flushType >= FlushType::Style) {
       parentFlush.mFlushType = std::max(FlushType::Layout, flushType);
