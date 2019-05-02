@@ -4255,6 +4255,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     if (messageStr.IsEmpty()) {
       messageStr.AssignLiteral(u" ");
     }
+  } else if (NS_ERROR_FRAME_CRASHED == aError) {
+    errorPage.AssignLiteral("framecrashed");
+    error = "framecrashed";
+    messageStr.AssignLiteral(u" ");
   } else if (NS_ERROR_BUILDID_MISMATCH == aError) {
     errorPage.AssignLiteral("restartrequired");
     error = "restartrequired";
@@ -6402,7 +6406,7 @@ nsDocShell::OnStateChange(nsIWebProgress* aProgress, nsIRequest* aRequest,
 
     if ((aStateFlags & STATE_RESTORING) == 0) {
       // Show the progress cursor if the pref is set
-      if (nsContentUtils::UseActivityCursor()) {
+      if (StaticPrefs::ui_use_activity_cursor()) {
         nsCOMPtr<nsIWidget> mainWidget;
         GetMainWidget(getter_AddRefs(mainWidget));
         if (mainWidget) {
@@ -6418,7 +6422,7 @@ nsDocShell::OnStateChange(nsIWebProgress* aProgress, nsIRequest* aRequest,
     mBusyFlags = BUSY_FLAGS_NONE;
 
     // Hide the progress cursor if the pref is set
-    if (nsContentUtils::UseActivityCursor()) {
+    if (StaticPrefs::ui_use_activity_cursor()) {
       nsCOMPtr<nsIWidget> mainWidget;
       GetMainWidget(getter_AddRefs(mainWidget));
       if (mainWidget) {
