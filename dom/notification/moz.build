@@ -8,7 +8,6 @@ with Files("**"):
     BUG_COMPONENT = ("Toolkit", "Notifications and Alerts")
 
 EXTRA_JS_MODULES += [
-    'NotificationDB.jsm',
     'NotificationStorage.jsm',
 ]
 
@@ -45,9 +44,9 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
 
 if CONFIG['MOZ_NEW_NOTIFICATION_STORE']:
     EXTRA_JS_MODULES += [
-        'NotificationDBNew.jsm',
+        'new/NotificationDB.jsm',
     ]
 else:
     EXTRA_JS_MODULES += [
-        'NotificationDBOld.jsm',
+        'old/NotificationDB.jsm',
     ]
