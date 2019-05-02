@@ -2854,9 +2854,6 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
 
   // ----- if the doc is an addon, apply its CSP.
   if (addonPolicy) {
-    nsCOMPtr<nsIAddonPolicyService> aps =
-        do_GetService("@mozilla.org/addons/policy-service;1");
-
     nsAutoString addonCSP;
     Unused << ExtensionPolicyService::GetSingleton().GetBaseCSP(addonCSP);
     csp->AppendPolicy(addonCSP, false, false);
@@ -6744,7 +6741,9 @@ nsINode* Document::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv) {
       // It's kind of irrelevant, given that we're passing aAllowWrapping =
       // false, and documents should always insist on being wrapped in an
       // canonical scope. But we try to pass something sane anyway.
-      JSAutoRealm ar(cx, GetScopeObject()->GetGlobalJSObject());
+      JSObject* globalObject = GetScopeObject()->GetGlobalJSObject();
+      JS::ExposeObjectToActiveJS(globalObject);
+      JSAutoRealm ar(cx, globalObject);
       JS::Rooted<JS::Value> v(cx);
       rv = nsContentUtils::WrapNative(cx, ToSupports(this), this, &v,
                                       /* aAllowWrapping = */ false);

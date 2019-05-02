@@ -668,6 +668,16 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink) {
 }
 
 NS_IMETHODIMP
+nsDocShell::SetCancelContentJSEpoch(int32_t aEpoch) {
+  // Note: this gets called fairly early (before a pageload actually starts).
+  // We could probably defer this even longer.
+  nsCOMPtr<nsIBrowserChild> browserChild = GetBrowserChild();
+  static_cast<BrowserChild*>(browserChild.get())
+      ->SetCancelContentJSEpoch(aEpoch);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDocShell::LoadURI(nsDocShellLoadState* aLoadState) {
   MOZ_ASSERT(aLoadState, "Must have a valid load state!");
   MOZ_ASSERT(
@@ -7868,7 +7878,9 @@ nsresult nsDocShell::RestoreFromHistory() {
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  GetBrowsingContext()->RestoreChildren(std::move(contexts));
+  if (!contexts.IsEmpty()) {
+    GetBrowsingContext()->RestoreChildren(std::move(contexts));
+  }
 
   // Make sure to restore the window state after adding the child shells back
   // to the tree.  This is necessary for Thaw() and Resume() to propagate

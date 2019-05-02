@@ -40,6 +40,7 @@
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/dom/CancelContentJSOptionsBinding.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
@@ -2390,12 +2391,8 @@ void ContentParent::InitInternal(ProcessPriority aInitialPriority) {
 
   // Content processes have no permission to access profile directory, so we
   // send the file URL instead.
-  StyleSheet* ucs = nsLayoutStylesheetCache::Singleton()->GetUserContentSheet();
-  if (ucs) {
-    SerializeURI(ucs->GetSheetURI(), xpcomInit.userContentSheetURL());
-  } else {
-    SerializeURI(nullptr, xpcomInit.userContentSheetURL());
-  }
+  nsIURI* ucsURI = nsLayoutStylesheetCache::Singleton()->GetUserContentCSSURL();
+  SerializeURI(ucsURI, xpcomInit.userContentSheetURL());
 
   // 1. Build ContentDeviceData first, as it may affect some gfxVars.
   gfxPlatform::GetPlatform()->BuildContentDeviceData(
@@ -5029,8 +5026,7 @@ mozilla::ipc::IPCResult ContentParent::RecvInitOtherFamilyNames(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvSetupFamilyCharMap(
-    const uint32_t& aGeneration,
-    const mozilla::fontlist::Pointer& aFamilyPtr) {
+    const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFamilyPtr) {
   gfxPlatformFontList::PlatformFontList()->SetupFamilyCharMap(aGeneration,
                                                               aFamilyPtr);
   return IPC_OK();
@@ -5298,6 +5294,17 @@ void ContentParent::PaintTabWhileInterruptingJS(
   }
   ProcessHangMonitor::PaintWhileInterruptingJS(
       mHangMonitorActor, aBrowserParent, aForceRepaint, aEpoch);
+}
+
+void ContentParent::CancelContentJSExecutionIfRunning(
+    BrowserParent* aBrowserParent, nsIRemoteTab::NavigationType aNavigationType,
+    const CancelContentJSOptions& aCancelContentJSOptions) {
+  if (!mHangMonitorActor) {
+    return;
+  }
+  ProcessHangMonitor::CancelContentJSExecutionIfRunning(
+      mHangMonitorActor, aBrowserParent, aNavigationType,
+      aCancelContentJSOptions);
 }
 
 void ContentParent::UpdateCookieStatus(nsIChannel* aChannel) {
@@ -5711,16 +5718,9 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
 
   child->Attach(/* aFromIPC */ true);
 
-  for (auto iter = child->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendAttachBrowsingContext(
-        child->GetIPCInitializer());
-  }
+  child->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendAttachBrowsingContext(child->GetIPCInitializer());
+  });
 
   return IPC_OK();
 }
@@ -5748,15 +5748,9 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
 
   aContext->Detach(/* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendDetachBrowsingContext(aContext);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendDetachBrowsingContext(aContext);
+  });
 
   return IPC_OK();
 }
@@ -5784,15 +5778,9 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
 
   aContext->CacheChildren(/* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendCacheBrowsingContextChildren(aContext);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendCacheBrowsingContextChildren(aContext);
+  });
 
   return IPC_OK();
 }
@@ -5827,16 +5815,9 @@ mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
 
   aContext->RestoreChildren(std::move(children), /* aFromIPC */ true);
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    nsRefPtrHashKey<ContentParent>* entry = iter.Get();
-    if (entry->GetKey() == this) {
-      continue;
-    }
-
-    Unused << entry->GetKey()->SendRestoreBrowsingContextChildren(aContext,
-                                                                  aChildren);
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendRestoreBrowsingContextChildren(aContext, aChildren);
+  });
 
   return IPC_OK();
 }
@@ -5965,16 +5946,11 @@ mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  for (auto iter = aContext->Group()->ContentParentsIter(); !iter.Done();
-       iter.Next()) {
-    auto* entry = iter.Get();
-    ContentParent* parent = entry->GetKey();
-    if (parent != this) {
-      Unused << parent->SendCommitBrowsingContextTransaction(
-          aContext, aTransaction,
-          aContext->Canonical()->GetFieldEpochsForChild(parent));
-    }
-  }
+  aContext->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
+    Unused << aParent->SendCommitBrowsingContextTransaction(
+        aContext, aTransaction,
+        aContext->Canonical()->GetFieldEpochsForChild(aParent));
+  });
 
   aTransaction.Apply(aContext, this);
   aContext->Canonical()->SetFieldEpochsForChild(this, aEpochs);
