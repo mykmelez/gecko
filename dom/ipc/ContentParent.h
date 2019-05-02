@@ -32,6 +32,7 @@
 #include "nsHashKeys.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
+#include "nsIRemoteTab.h"
 #include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
@@ -109,6 +110,7 @@ class MemoryReport;
 class TabContext;
 class GetFilesHelper;
 class MemoryReportRequestHost;
+struct CancelContentJSOptions;
 
 #define NS_CONTENTPARENT_IID                         \
   {                                                  \
@@ -219,6 +221,8 @@ class ContentParent final : public PContentParent,
 
   static void BroadcastStringBundle(const StringBundleDescriptor&);
 
+  static void BroadcastFontListChanged();
+
   const nsAString& GetRemoteType() const;
 
   virtual void DoGetRemoteType(nsAString& aRemoteType,
@@ -277,6 +281,7 @@ class ContentParent final : public PContentParent,
   static void NotifyUpdatedDictionaries();
 
   static void NotifyUpdatedFonts();
+  static void NotifyRebuildFontList();
 
 #if defined(XP_WIN)
   /**
@@ -588,6 +593,11 @@ class ContentParent final : public PContentParent,
                                    bool aForceRepaint,
                                    const layers::LayersObserverEpoch& aEpoch);
 
+  void CancelContentJSExecutionIfRunning(
+      BrowserParent* aBrowserParent,
+      nsIRemoteTab::NavigationType aNavigationType,
+      const CancelContentJSOptions& aCancelContentJSOptions);
+
   // This function is called when we are about to load a document from an
   // HTTP(S) or FTP channel for a content process.  It is a useful place
   // to start to kick off work as early as possible in response to such
@@ -614,8 +624,13 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvAttachBrowsingContext(
       BrowsingContext::IPCInitializer&& aInit);
 
-  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext,
-                                                    bool aMoveToBFCache);
+  mozilla::ipc::IPCResult RecvDetachBrowsingContext(BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
+      BrowsingContext* aContext);
+
+  mozilla::ipc::IPCResult RecvRestoreBrowsingContextChildren(
+      BrowsingContext* aContext, nsTArray<BrowsingContextId>&& aChildren);
 
   mozilla::ipc::IPCResult RecvWindowClose(BrowsingContext* aContext,
                                           bool aTrustedCaller);
@@ -1099,6 +1114,25 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvGetGraphicsDeviceInitData(
       ContentDeviceData* aOut);
+
+  mozilla::ipc::IPCResult RecvGetFontListShmBlock(
+      const uint32_t& aGeneration, const uint32_t& aIndex,
+      mozilla::ipc::SharedMemoryBasic::Handle* aOut);
+
+  mozilla::ipc::IPCResult RecvInitializeFamily(const uint32_t& aGeneration,
+                                               const uint32_t& aFamilyIndex);
+
+  mozilla::ipc::IPCResult RecvSetCharacterMap(
+      const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFacePtr,
+      const gfxSparseBitSet& aMap);
+
+  mozilla::ipc::IPCResult RecvInitOtherFamilyNames(const uint32_t& aGeneration,
+                                                   const bool& aDefer,
+                                                   bool* aLoaded);
+
+  mozilla::ipc::IPCResult RecvSetupFamilyCharMap(
+      const uint32_t& aGeneration,
+      const mozilla::fontlist::Pointer& aFamilyPtr);
 
   mozilla::ipc::IPCResult RecvNotifyBenchmarkResult(const nsString& aCodecName,
                                                     const uint32_t& aDecodeFPS);

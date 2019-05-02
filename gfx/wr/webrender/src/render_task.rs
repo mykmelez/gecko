@@ -34,6 +34,7 @@ use std::{ops, mem, usize, f32, i32, u32};
 use texture_cache::{TextureCache, TextureCacheHandle, Eviction};
 use tiling::{RenderPass, RenderTargetIndex};
 use tiling::{RenderTargetKind};
+use std::io;
 
 
 const RENDER_TASK_SIZE_SANITY_CHECK: i32 = 16000;
@@ -138,41 +139,132 @@ impl RenderTaskTree {
         }
     }
 
-    /// Assign the render tasks from the tree rooted at `id` to the `passes`
-    /// vector, so that the passes that we depend on end up _later_ in the pass
-    /// list.
-    ///
-    /// It is the caller's responsibility to reverse the list after calling into
-    /// us so that the passes end up in the right order.
-    pub fn assign_to_passes(
+    /// Assign this frame's render tasks to render passes ordered so that passes appear
+    /// earlier than the ones that depend on them.
+    pub fn generate_passes(
         &self,
-        id: RenderTaskId,
-        pass_index: usize,
+        main_render_task: Option<RenderTaskId>,
         screen_size: DeviceIntSize,
-        passes: &mut Vec<RenderPass>,
         gpu_supports_fast_clears: bool,
-    ) {
-        debug_assert!(pass_index < passes.len());
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(self.frame_id, id.frame_id);
-        let task = &self.tasks[id.index as usize];
+    ) -> Vec<RenderPass> {
+        let mut passes = Vec::new();
 
-        if !task.children.is_empty() {
-            let child_index = pass_index + 1;
-            if passes.len() == child_index {
-                passes.push(RenderPass::new_off_screen(screen_size, gpu_supports_fast_clears));
+        if !self.cacheable_render_tasks.is_empty() {
+            self.generate_passes_impl(
+                &self.cacheable_render_tasks[..],
+                screen_size,
+                gpu_supports_fast_clears,
+                false,
+                &mut passes,
+            );
+        }
+
+        if let Some(main_task) = main_render_task {
+            self.generate_passes_impl(
+                &[main_task],
+                screen_size,
+                gpu_supports_fast_clears,
+                true,
+                &mut passes,
+            );
+        }
+
+        passes
+    }
+
+    /// Assign the render tasks from the tree rooted at root_task to render passes and
+    /// append them to the `passes` vector so that the passes that we depend on end up
+    /// _earlier_ in the pass list.
+    fn generate_passes_impl(
+        &self,
+        root_tasks: &[RenderTaskId],
+        screen_size: DeviceIntSize,
+        gpu_supports_fast_clears: bool,
+        for_main_framebuffer: bool,
+        passes: &mut Vec<RenderPass>,
+    ) {
+        // We recursively visit tasks from the roots (main and cached render tasks), to figure out
+        // which ones affect the frame and which passes they should be assigned to.
+        //
+        // We track the maximum depth of each task (how far it is from the roots) as well as the total
+        // maximum depth of the graph to determine each tasks' pass index. In a nutshell, depth 0 is
+        // for the last render pass (for example the main framebuffer), while the highest depth
+        // corresponds to the first pass.
+
+        fn assign_task_depth(
+            tasks: &[RenderTask],
+            task_id: RenderTaskId,
+            task_depth: i32,
+            task_max_depths: &mut [i32],
+            max_depth: &mut i32,
+        ) {
+            *max_depth = std::cmp::max(*max_depth, task_depth);
+
+            {
+                let task_max_depth = &mut task_max_depths[task_id.index as usize];
+                *task_max_depth = std::cmp::max(*task_max_depth, task_depth);
             }
+
+            let task = &tasks[task_id.index as usize];
             for child in &task.children {
-                self.assign_to_passes(*child, child_index, screen_size, passes, gpu_supports_fast_clears);
+                assign_task_depth(
+                    tasks,
+                    *child,
+                    task_depth + 1,
+                    task_max_depths,
+                    max_depth,
+                );
             }
         }
 
-        passes[pass_index].add_render_task(
-            id,
-            task.get_dynamic_size(),
-            task.target_kind(),
-            &task.location,
-        );
+        // The maximum depth of each task. Values that are still equal to -1 after recursively visiting
+        // the nodes correspond to tasks that don't contribute to the frame.
+        let mut task_max_depths = vec![-1; self.tasks.len()];
+        let mut max_depth = 0;
+
+        for root_task in root_tasks {
+            assign_task_depth(
+                &self.tasks,
+                *root_task,
+                0,
+                &mut task_max_depths,
+                &mut max_depth,
+            );
+        }
+
+        let offset = passes.len();
+
+        passes.reserve(max_depth as usize + 1);
+        for _ in 0..max_depth {
+            passes.push(RenderPass::new_off_screen(screen_size, gpu_supports_fast_clears));
+        }
+
+        if for_main_framebuffer {
+            passes.push(RenderPass::new_main_framebuffer(screen_size, gpu_supports_fast_clears));
+        } else {
+            passes.push(RenderPass::new_off_screen(screen_size, gpu_supports_fast_clears));
+        }
+
+        // Assign tasks to their render passes.
+        for task_index in 0..self.tasks.len() {
+            if task_max_depths[task_index] < 0 {
+                // The task wasn't visited, it means it doesn't contribute to this frame.
+                continue;
+            }
+            let pass_index = offset + (max_depth - task_max_depths[task_index]) as usize;
+            let task_id = RenderTaskId {
+                index: task_index as u32,
+                #[cfg(debug_assertions)]
+                frame_id: self.frame_id,
+            };
+            let task = &self.tasks[task_index];
+            passes[pass_index as usize].add_render_task(
+                task_id,
+                task.get_dynamic_size(),
+                task.target_kind(),
+                &task.location,
+            );
+        }
     }
 
     pub fn prepare_for_render(&mut self) {
@@ -258,6 +350,14 @@ impl RenderTaskLocation {
         match *self {
             RenderTaskLocation::Dynamic(..) => true,
             _ => false,
+        }
+    }
+
+    pub fn size(&self) -> DeviceIntSize {
+        match self {
+            RenderTaskLocation::Fixed(rect) => rect.size,
+            RenderTaskLocation::Dynamic(_, size) => *size,
+            RenderTaskLocation::TextureCache { rect, .. } => rect.size,
         }
     }
 }
@@ -423,6 +523,25 @@ pub enum RenderTaskKind {
     Border(BorderTask),
     LineDecoration(LineDecorationTask),
     Gradient(GradientTask),
+}
+
+impl RenderTaskKind {
+    pub fn as_str(&self) -> &'static str {
+        match *self {
+            RenderTaskKind::Picture(..) => "Picture",
+            RenderTaskKind::CacheMask(..) => "CacheMask",
+            RenderTaskKind::ClipRegion(..) => "ClipRegion",
+            RenderTaskKind::VerticalBlur(..) => "VerticalBlur",
+            RenderTaskKind::HorizontalBlur(..) => "HorizontalBlur",
+            RenderTaskKind::Glyph(..) => "Glyph",
+            RenderTaskKind::Readback(..) => "Readback",
+            RenderTaskKind::Scaling(..) => "Scaling",
+            RenderTaskKind::Blit(..) => "Blit",
+            RenderTaskKind::Border(..) => "Border",
+            RenderTaskKind::LineDecoration(..) => "LineDecoration",
+            RenderTaskKind::Gradient(..) => "Gradient",
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -1469,4 +1588,186 @@ pub fn to_cache_size(size: DeviceSize) -> DeviceIntSize {
         1.max(size.width.round() as i32),
         1.max(size.height.round() as i32),
     )
+}
+
+// Dump an SVG visualization of the render graph for debugging purposes
+#[allow(dead_code)]
+pub fn dump_render_tasks_as_svg(
+    render_tasks: &RenderTaskTree,
+    passes: &[RenderPass],
+    output: &mut dyn io::Write,
+) -> io::Result<()> {
+    use svg_fmt::*;
+
+    let node_width = 80.0;
+    let node_height = 30.0;
+    let vertical_spacing = 8.0;
+    let horizontal_spacing = 20.0;
+    let margin = 10.0;
+    let text_size = 10.0;
+
+    let mut pass_rects = Vec::new();
+    let mut nodes = vec![None; render_tasks.tasks.len()];
+
+    let mut x = margin;
+    let mut max_y: f32 = 0.0;
+
+    #[derive(Clone)]
+    struct Node {
+        rect: Rectangle,
+        label: Text,
+        size: Text,
+    }
+
+    for pass in passes {
+        let mut layout = VerticalLayout::new(x, margin, node_width);
+
+        for task_id in &pass.tasks {
+            let task_index = task_id.index as usize;
+            let task = &render_tasks.tasks[task_index];
+
+            let rect = layout.push_rectangle(node_height);
+
+            let tx = rect.x + rect.w / 2.0;
+            let ty = rect.y + 10.0;
+
+            let label = text(tx, ty, task.kind.as_str());
+            let size = text(tx, ty + 12.0, format!("{}", task.location.size()));
+
+            nodes[task_index] = Some(Node { rect, label, size });
+
+            layout.advance(vertical_spacing);
+        }
+
+        pass_rects.push(layout.total_rectangle());
+
+        x += node_width + horizontal_spacing;
+        max_y = max_y.max(layout.y + margin);
+    }
+
+    let mut links = Vec::new();
+    for node_index in 0..nodes.len() {
+        if nodes[node_index].is_none() {
+            continue;
+        }
+
+        let task = &render_tasks.tasks[node_index];
+        for dep in &task.children {
+            let dep_index = dep.index as usize;
+
+            if let (&Some(ref node), &Some(ref dep_node)) = (&nodes[node_index], &nodes[dep_index]) {
+                links.push((
+                    dep_node.rect.x + dep_node.rect.w,
+                    dep_node.rect.y + dep_node.rect.h / 2.0,
+                    node.rect.x,
+                    node.rect.y + node.rect.h / 2.0,
+                ));
+            }
+        }
+    }
+
+    let svg_w = x + margin;
+    let svg_h = max_y + margin;
+    writeln!(output, "{}", BeginSvg { w: svg_w, h: svg_h })?;
+
+    // Background.
+    writeln!(output,
+        "    {}",
+        rectangle(0.0, 0.0, svg_w, svg_h)
+            .inflate(1.0, 1.0)
+            .fill(rgb(50, 50, 50))
+    )?;
+
+    // Passes.
+    for rect in pass_rects {
+        writeln!(output,
+            "    {}",
+            rect.inflate(3.0, 3.0)
+                .border_radius(4.0)
+                .opacity(0.4)
+                .fill(black())
+        )?;
+    }
+
+    // Links.
+    for (x1, y1, x2, y2) in links {
+        dump_task_dependency_link(output, x1, y1, x2, y2);
+    }
+
+    // Tasks.
+    for node in &nodes {
+        if let Some(node) = node {
+            writeln!(output,
+                "    {}",
+                node.rect
+                    .clone()
+                    .fill(black())
+                    .border_radius(3.0)
+                    .opacity(0.5)
+                    .offset(0.0, 2.0)
+            )?;
+            writeln!(output,
+                "    {}",
+                node.rect
+                    .clone()
+                    .fill(rgb(200, 200, 200))
+                    .border_radius(3.0)
+                    .opacity(0.8)
+            )?;
+
+            writeln!(output,
+                "    {}",
+                node.label
+                    .clone()
+                    .size(text_size)
+                    .align(Align::Center)
+                    .color(rgb(50, 50, 50))
+            )?;
+            writeln!(output,
+                "    {}",
+                node.size
+                    .clone()
+                    .size(text_size * 0.7)
+                    .align(Align::Center)
+                    .color(rgb(50, 50, 50))
+            )?;
+        }
+    }
+
+    writeln!(output, "{}", EndSvg)
+}
+
+#[allow(dead_code)]
+fn dump_task_dependency_link(
+    output: &mut io::Write,
+    x1: f32, y1: f32,
+    x2: f32, y2: f32,
+) {
+    use svg_fmt::*;
+
+    // If the link is a straight horizontal line and spans over multiple passes, it
+    // is likely to go straight though unrelated nodes in a way that makes it look like
+    // they are connected, so we bend the line upward a bit to avoid that.
+    let simple_path = (y1 - y2).abs() > 1.0 || (x2 - x1) < 45.0;
+
+    let mid_x = (x1 + x2) / 2.0;
+    if simple_path {
+        write!(output, "    {}",
+            path().move_to(x1, y1)
+                .cubic_bezier_to(mid_x, y1, mid_x, y2, x2, y2)
+                .fill(Fill::None)
+                .stroke(Stroke::Color(rgb(100, 100, 100), 3.0))
+        ).unwrap();
+    } else {
+        let ctrl1_x = (mid_x + x1) / 2.0;
+        let ctrl2_x = (mid_x + x2) / 2.0;
+        let ctrl_y = y1 - 25.0;
+        write!(output, "    {}",
+            path().move_to(x1, y1)
+                .cubic_bezier_to(ctrl1_x, y1, ctrl1_x, ctrl_y, mid_x, ctrl_y)
+                .cubic_bezier_to(ctrl2_x, ctrl_y, ctrl2_x, y2, x2, y2)
+                .fill(Fill::None)
+                .stroke(Stroke::Color(rgb(100, 100, 100), 3.0))
+        ).unwrap();
+    }
 }
